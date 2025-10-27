@@ -152,7 +152,7 @@ class _LoginPageState extends State<LoginPage> {
                   controller: _passwordController,
                   obscureText: _obscureText,
                   decoration: InputDecoration(
-                    labelText: 'パスワードw',
+                    labelText: 'パスワード',
                     border: const OutlineInputBorder(),
                     suffixIcon: IconButton(
                       icon: Icon(
