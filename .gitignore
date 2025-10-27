@@ -14,3 +14,4 @@ dist/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+service-account-file.json
