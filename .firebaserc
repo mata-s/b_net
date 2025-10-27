@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "b-net-9bdc2"
+  },
+  "targets": {},
+  "etags": {
+    "b-net-9bdc2": {
+      "extensionInstances": {}
+    }
+  },
+  "dataconnectEmulatorConfig": {}
+}

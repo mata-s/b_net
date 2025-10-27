@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "157664515543",
+    "project_id": "b-net-9bdc2",
+    "storage_bucket": "b-net-9bdc2.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:157664515543:android:ea7bcf80858901bca96792",
+        "android_client_info": {
+          "package_name": "com.baseballnet.bnet"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCx60r-F0c3hvIj3pSQARpicoZIqjBp8PY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:157664515543:android:bb9c679f7dfc77c9a96792",
+        "android_client_info": {
+          "package_name": "com.example.b_net"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCx60r-F0c3hvIj3pSQARpicoZIqjBp8PY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
