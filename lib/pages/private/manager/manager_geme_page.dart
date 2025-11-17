@@ -262,14 +262,62 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
                                       _isLoading = true;
                                     });
 
-                                    // チームメンバー取得
-                                    final teamDoc = await FirebaseFirestore
-                                        .instance
+                                    // チームID が空の場合は即ダイアログを出して終了（doc('') でのクラッシュ防止）
+                                    if (widget.teamId.isEmpty) {
+                                      await showDialog(
+                                        context: context,
+                                        builder: (_) => AlertDialog(
+                                          title: const Text('チームが設定されていません'),
+                                          content: const Text('チームに加入してから試合を登録できます。'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(context),
+                                              child: const Text('OK'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      setState(() {
+                                        _isLoading = false;
+                                      });
+                                      return;
+                                    }
+
+                                    // チームメンバー取得（安全な null チェック付き）
+                                    final teamDoc = await FirebaseFirestore.instance
                                         .collection('teams')
                                         .doc(widget.teamId)
                                         .get();
-                                    final List<String> memberUids =
-                                        List<String>.from(teamDoc['members']);
+
+                                    List<String> memberUids = [];
+
+                                    if (teamDoc.exists && teamDoc.data() != null) {
+                                      final data = teamDoc.data()!;
+                                      if (data['members'] is List) {
+                                        memberUids = List<String>.from(data['members']);
+                                      }
+                                    }
+
+                                    // チーム未所属時の防御処理（クラッシュ防止）
+                                    if (memberUids.isEmpty) {
+                                      await showDialog(
+                                        context: context,
+                                        builder: (_) => AlertDialog(
+                                          title: const Text('チームに未所属です'),
+                                          content: const Text('チームに加入してから試合を登録できます。'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(context),
+                                              child: const Text('OK'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      setState(() {
+                                        _isLoading = false;
+                                      });
+                                      return;
+                                    }
 
                                     final List<Map<String, dynamic>> members =
                                         [];

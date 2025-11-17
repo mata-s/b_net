@@ -18,13 +18,32 @@ class SubscriptionService {
   /// 🔹 RevenueCatで購入した情報を Firestore に保存（個人用）
   Future<void> savePersonalSubscriptionToFirestore(
       String userId, CustomerInfo info, String purchasedProductId) async {
-    final entitlement = info.entitlements.all['B-Net'];
-    if (entitlement == null) {
-      print('❌ B-Net entitlement が見つかりません');
-      return;
-    }
+    // 購入した productId に応じて見るエンタイトルメントを切り替える
+    final bool isAnnualPlan =
+        purchasedProductId.contains('12month') ||
+        purchasedProductId.contains('annual');
+    final String entitlementKey =
+        isAnnualPlan ? 'B-Net Annual' : 'B-Net Monthly';
 
-    final actualProductId = entitlement.productIdentifier;
+    // デバッグ用ログ：現在のentitlementsの一覧を出す
+    print('🧾 all entitlements: ${info.entitlements.all.keys.toList()}');
+    print('🧾 active entitlements: ${info.entitlements.active.keys.toList()}');
+    print('🧾 期待している entitlementKey: $entitlementKey');
+
+    EntitlementInfo? entitlement = info.entitlements.all[entitlementKey];
+
+    // 指定したキーで見つからない場合は、アクティブなエンタイトルメントにフォールバック
+    if (entitlement == null) {
+      if (info.entitlements.active.isNotEmpty) {
+        entitlement = info.entitlements.active.values.first;
+        print(
+            '⚠️ Personal entitlement($entitlementKey) が見つからないため、アクティブなentitlement(${entitlement.identifier})を使用します');
+      } else {
+        print(
+            '❌ Personal entitlement($entitlementKey) が見つからず、アクティブなentitlementも存在しません');
+        return;
+      }
+    }
 
     final String? rawPurchaseDate = entitlement.latestPurchaseDate;
     final purchaseDate = rawPurchaseDate != null
@@ -32,12 +51,10 @@ class SubscriptionService {
         : DateTime.now();
 
     int fallbackDays;
-    if (actualProductId.contains('12month')) {
+    if (isAnnualPlan) {
       fallbackDays = 365;
-    } else if (actualProductId.contains('1month')) {
-      fallbackDays = 30;
     } else {
-      fallbackDays = 30; // デフォルト
+      fallbackDays = 30; // 月額またはデフォルト
     }
 
     final String? rawExpiryDate = entitlement.expirationDate;
@@ -47,19 +64,24 @@ class SubscriptionService {
 
     final platform = Platform.isIOS ? 'iOS' : 'Android';
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('subscription')
-        .doc(platform)
-        .set({
-      'productId': purchasedProductId,
-      'purchaseDate': purchaseDate,
-      'expiryDate': expiryDate,
-      'status': entitlement.isActive ? 'active' : 'inactive',
-    });
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('subscription')
+          .doc(platform)
+          .set({
+        'productId': purchasedProductId,
+        'purchaseDate': purchaseDate,
+        'expiryDate': expiryDate,
+        'status': entitlement.isActive ? 'active' : 'inactive',
+      });
 
-    print("✅ Firestore に個人サブスク保存: $purchasedProductId");
+      print(
+          "✅ Firestore に個人サブスク保存: $purchasedProductId (entitlement: ${entitlement.identifier})");
+    } catch (e) {
+      print('❌ Firestore への個人サブスク保存に失敗: $e');
+    }
   }
 
   /// 🔹 Firestore からサブスクが有効か確認（個人用）

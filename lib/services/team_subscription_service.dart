@@ -18,9 +18,23 @@ class TeamSubscriptionService {
   /// 🔹 RevenueCatで購入した情報を Firestore に保存（チーム用）
   Future<void> saveTeamSubscriptionToFirestore(
       String teamId, CustomerInfo info, String actualProductId) async {
-    final entitlement = info.entitlements.all['B-Net Team'];
+    // 購入した productId に応じてチーム用エンタイトルメントを切り替える
+    final bool isAnnualPlan =
+        actualProductId.contains('12month') ||
+        actualProductId.contains('Annual');
+    final bool isPlatinaPlan = actualProductId.contains('teamPlatina');
+
+    final String entitlementKey = isPlatinaPlan
+        ? (isAnnualPlan
+            ? 'B-Net Team Platina Annual'
+            : 'B-Net Team Platina Monthly')
+        : (isAnnualPlan
+            ? 'B-Net Team Gold Annual'
+            : 'B-Net Team Gold Monthly');
+
+    final entitlement = info.entitlements.all[entitlementKey];
     if (entitlement == null) {
-      print('❌ B-Net Team entitlement が見つかりません');
+      print('❌ Team entitlement($entitlementKey) が見つかりません');
       return;
     }
 
@@ -30,9 +44,9 @@ class TeamSubscriptionService {
         ? DateTime.parse(rawPurchaseDate)
         : DateTime.now();
 
-    // ✅ プランに応じた期間（12month or それ以外で判断）
+    // ✅ プランに応じた期間（年額 or 月額で判断）
     int fallbackDays;
-    if (actualProductId.contains('12month')) {
+    if (isAnnualPlan) {
       fallbackDays = 365;
     } else {
       fallbackDays = 30;
@@ -58,7 +72,7 @@ class TeamSubscriptionService {
       'status': entitlement.isActive ? 'active' : 'inactive',
     });
 
-    print("✅ Firestore にチームサブスク保存: $actualProductId");
+    print("✅ Firestore にチームサブスク保存: $actualProductId (entitlement: $entitlementKey)");
   }
 
   /// 🔹 Firestore からチームのサブスクが有効か確認

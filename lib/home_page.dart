@@ -149,7 +149,7 @@ class _HomePageState extends State<HomePage> {
           : widget.userPosition.contains('監督')
               ? DirectoCalendar(
                   userUid: widget.userUid, teamId: widget.userTeamId ?? '')
-              : PrivateCalendarTab(userUid: widget.userUid),
+              : PrivateCalendarTab(userUid: widget.userUid, positions: widget.userPosition,),
       PostListPage(userUid: widget.userUid, userName: widget.accountName),
       RankingPage(
         uid: widget.userUid,

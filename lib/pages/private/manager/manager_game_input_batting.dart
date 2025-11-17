@@ -719,7 +719,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                                   children: [
                                     if (assigned != null)
                                       Expanded(
-                                        child: Draggable<Map<String, dynamic>>(
+                                         child: LongPressDraggable<Map<String, dynamic>>(
                                           data: assigned,
                                           feedback: Material(
                                             color: Colors.transparent,
@@ -1093,7 +1093,11 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
           .doc(uid)
           .collection('tentative');
 
-      final querySnapshot = await collectionRef.limit(1).get();
+      final querySnapshot = await collectionRef
+          .orderBy('savedAt', descending: true)
+          .orderBy('updatedAt', descending: true)
+          .limit(1)
+          .get();
       if (querySnapshot.docs.isEmpty) continue;
 
       final docRef = collectionRef.doc(querySnapshot.docs.first.id);

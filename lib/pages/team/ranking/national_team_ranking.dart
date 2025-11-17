@@ -394,6 +394,7 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
       columns.add(DataColumn(label: Center(child: _buildVerticalText('捕殺'))));
       columns.add(DataColumn(label: Center(child: _buildVerticalText('失策'))));
     }
+    columns.add(DataColumn(label: Center(child: _buildVerticalText('年齢'))));
 
     return columns;
   }
@@ -564,6 +565,16 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
       )));
     }
 
+    // 共通の年齢セル（全ランキング共通で最後の列）
+    cells.add(DataCell(Center(
+      child: Text(
+        team['averageAge']?.toString() ?? '0',
+        style: TextStyle(
+          fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+          color: isTeam ? Colors.blue : Colors.black,
+        ),
+      ),
+    )));
     return cells;
   }
 

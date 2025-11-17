@@ -40,6 +40,27 @@ class _ScheduleInputPageState extends State<ScheduleInputPage> {
   @override
   void initState() {
     super.initState();
+    // --- Guard: チームID が空ならページを閉じる（クラッシュ防止） ---
+    if (widget.teamId.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('チームが設定されていません'),
+            content: const Text('チームに加入してからオーダー表を入力できます。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        Navigator.pop(context);
+      });
+      return;
+    }
+    // --- End Guard ---
     _isLoading = true;
     startingPositionControllers =
         List.generate(9, (_) => TextEditingController());

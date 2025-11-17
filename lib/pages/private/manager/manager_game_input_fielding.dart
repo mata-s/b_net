@@ -1183,6 +1183,14 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                       gameId: gameId,
                       matchIndex: widget.matchIndex,
                     );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('成績を仮保存しました'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    }
                   },
                   child: Text('メンバーの成績を仮保存する'),
                 ),

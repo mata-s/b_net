@@ -4,8 +4,13 @@ import 'private_calendar.dart';
 
 class PrivateCalendarTab extends StatelessWidget {
   final String userUid;
+  final List<String> positions;
 
-  const PrivateCalendarTab({super.key, required this.userUid});
+  const PrivateCalendarTab({
+    super.key,
+    required this.userUid,
+    required this.positions,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +28,7 @@ class PrivateCalendarTab extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            PrivateCalendar(userUid: userUid),
+            PrivateCalendar(userUid: userUid, positions: positions),
             PrivateGameDetail(userUid: userUid),
           ],
         ),

@@ -59,20 +59,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       // 🔄 最新のCustomerInfoを取得
       final updatedInfo = await Purchases.getCustomerInfo();
 
-      // 🔍 現在アクティブなエンタイトルメントから productId を取得
-      final actualProductId =
-          updatedInfo.entitlements.active['B-Net']?.productIdentifier;
+      // 今回購入した Store Product のID（1ヶ月 / 12ヶ月 など）
+      final purchasedProductId = package.storeProduct.identifier;
 
-      if (actualProductId != null) {
-        // 🔥 Firestore に保存（正確な productId で）
-        await SubscriptionService().savePersonalSubscriptionToFirestore(
-          user.uid,
-          updatedInfo,
-          actualProductId,
-        );
-      } else {
-        print('⚠️ アクティブな個人サブスクが見つかりません');
-      }
+      print('🧾 購入した productId: $purchasedProductId');
+
+      // 🔥 Firestore に保存（ユーザーが選んだ productId で）
+      await SubscriptionService().savePersonalSubscriptionToFirestore(
+        user.uid,
+        updatedInfo,
+        purchasedProductId,
+      );
 
       // 📲 UI 更新のため再取得
       await _loadCustomerInfo();
@@ -181,20 +178,37 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                         ? 'assets/Subscription_personal1month.png'
                         : 'assets/Subscription_personal12month.png';
 
+                    // プランごとに見るエンタイトルメントを切り替える
+                    final bool isAnnualPlan =
+                        id.contains('12month') || id.contains('annual');
+                    final String entitlementKey =
+                        isAnnualPlan ? 'B-Net Annual' : 'B-Net Monthly';
+
                     final entitlement =
-                        _customerInfo?.entitlements.active['B-Net'];
+                        _customerInfo?.entitlements.active[entitlementKey];
+
+                    // このプランに対応するエンタイトルメントが有効なら「登録中」
+                    final isSubscribed = entitlement != null;
+
+                    // トライアルかどうか
                     final isTrial =
                         (entitlement?.periodType ?? PeriodType.normal) ==
                             PeriodType.trial;
-                    final activeProductId = entitlement?.productIdentifier;
 
+                    final isNeverPurchased = entitlement == null;
+
+                    // 🔍 デバッグ出力
+                    print('🔍 intro price: ${package.storeProduct.introductoryPrice}');
+                    print('📦 プラン: $id');
+                    print('🎫 使用する entitlementKey: $entitlementKey');
+                    print('✅ 現在登録中: $isSubscribed');
                     print('🧪 現在トライアル中？ → $isTrial');
-                    print('🎫 アクティブな productId: $activeProductId');
-                    print('📦 表示中の productId: $id');
+                    print('🆕 未購入？ → $isNeverPurchased');
 
-                    final isSubscribed = activeProductId == id;
-                    final badge =
-                        isMonthly && isTrial && isSubscribed ? '初月無料' : null;
+                    // 月額プランで、トライアル中またはまだ未購入なら「初月無料」バッジ
+                    final badge = (isMonthly && (isTrial || isNeverPurchased))
+                        ? '初月無料'
+                        : null;
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 24),

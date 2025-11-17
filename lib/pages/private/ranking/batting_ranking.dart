@@ -700,17 +700,89 @@ class _BattingRankingState extends State<BattingRanking> {
   }
 
   Future<void> _fetchPlayersCount() async {
-    final statsSnapshot = await FirebaseFirestore.instance
-        .doc('battingAverageRanking/${_year}_total/${widget.prefecture}/stats')
-        .get();
+  try {
+    final now = DateTime.now();
+    int year;
+    int lastMonth = 0;
+
+    String docPath;
+
+    if (_isSeasonMode) {
+      // シーズンモード：1〜3月は前年扱い
+      year = now.year;
+      if (now.month <= 3) {
+        year -= 1;
+      }
+      docPath =
+          'battingAverageRanking/${year}_total/${widget.prefecture}/stats';
+    } else {
+      // 先月モード
+      year = now.year;
+      lastMonth = now.month - 1;
+      if (lastMonth == 0) {
+        lastMonth = 12;
+        year -= 1;
+      }
+      final monthKeyNoPad = lastMonth.toString();
+      docPath =
+          'battingAverageRanking/${year}_${monthKeyNoPad}/${widget.prefecture}/stats';
+    }
+
+    // stats ドキュメント取得（先月モードはゼロ埋めフォールバックも試す）
+    var statsSnapshot =
+        await FirebaseFirestore.instance.doc(docPath).get();
+
+    if (!statsSnapshot.exists && !_isSeasonMode) {
+      final altDocPath =
+          docPath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
+        final mm = m.group(1) ?? '';
+        return '_${mm.padLeft(2, '0')}/';
+      });
+      statsSnapshot =
+          await FirebaseFirestore.instance.doc(altDocPath).get();
+    }
+
+    int count = 0;
 
     if (statsSnapshot.exists) {
       final data = statsSnapshot.data();
-      setState(() {
-        _playersCount = data?['playersCount'] ?? 0;
-      });
+
+      // 「全年齢」のときは playersCount
+      if (_selectedAgeGroup == null || _selectedAgeGroup == '全年齢') {
+        count = (data?['playersCount'] ?? 0) as int;
+      } else {
+        // 年齢別のときは stats.totalPlayers_age_XX_YY を使用
+        final statsMap =
+            (data?['stats'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+        final key = 'totalPlayers_age_${_selectedAgeGroup}';
+        count = (statsMap[key] ?? 0) as int;
+      }
     }
+
+    setState(() {
+      _year = year; // 見出しの年も合わせておく
+      _playersCount = count;
+    });
+  } catch (e) {
+    print('stats取得エラー: $e');
+    setState(() {
+      _playersCount = 0;
+    });
   }
+}
+
+  // Future<void> _fetchPlayersCount() async {
+  //   final statsSnapshot = await FirebaseFirestore.instance
+  //       .doc('battingAverageRanking/${_year}_total/${widget.prefecture}/stats')
+  //       .get();
+
+  //   if (statsSnapshot.exists) {
+  //     final data = statsSnapshot.data();
+  //     setState(() {
+  //       _playersCount = data?['playersCount'] ?? 0;
+  //     });
+  //   }
+  // }
 
   List<DataRow> _buildTop10Rows() {
     List<DataRow> result = [];
@@ -2280,6 +2352,7 @@ bool _isUserInSelectedAgeGroup() {
                         setState(() {
                           _selectedAgeGroup = _availableAgeGroups[tempIndex];
                           _fetchPlayersData();
+                          _fetchPlayersCount(); 
                         });
                         Navigator.pop(context);
                       },

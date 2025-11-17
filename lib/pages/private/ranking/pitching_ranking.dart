@@ -54,7 +54,7 @@ class _PitchingRankingState extends State<PitchingRanking> {
     super.initState();
     _isSeasonMode = true; // 初期状態をシーズンモードに設定
     _fetchUserPositions();
-    _fetchPlayersData(); // データを取得
+    _fetchPlayersData();
     _fetchPitcherCount();
     _loadAvailableAgeGroups();
   }
@@ -531,14 +531,90 @@ else if (_selectedRankingType == '勝率ランキング') {
   }
 
   Future<void> _fetchPitcherCount() async {
-    final statsSnapshot = await FirebaseFirestore.instance
-        .doc('pitcherRanking/${_year}_total/${widget.prefecture}/stats')
-        .get();
+    try {
+      final now = DateTime.now();
+      int year;
+      int lastMonth = 0;
+      String docPath;
 
-    if (statsSnapshot.exists) {
-      final data = statsSnapshot.data();
+      if (_isSeasonMode) {
+        // シーズンモード：1〜3月は前年扱い
+        year = now.year;
+        if (now.month <= 3) {
+          year -= 1;
+        }
+        docPath = 'pitcherRanking/${year}_total/${widget.prefecture}/stats';
+      } else {
+        // 先月モード
+        year = now.year;
+        lastMonth = now.month - 1;
+        if (lastMonth == 0) {
+          lastMonth = 12;
+          year -= 1;
+        }
+        final monthKeyNoPad = lastMonth.toString();
+        docPath = 'pitcherRanking/${year}_${monthKeyNoPad}/${widget.prefecture}/stats';
+      }
+
+      // stats ドキュメント取得（先月モードはゼロ埋めフォールバックも試す）
+      var statsSnapshot =
+          await FirebaseFirestore.instance.doc(docPath).get();
+
+      if (!statsSnapshot.exists && !_isSeasonMode) {
+        final altDocPath =
+            docPath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
+          final mm = m.group(1) ?? '';
+          return '_${mm.padLeft(2, '0')}/';
+        });
+        statsSnapshot =
+            await FirebaseFirestore.instance.doc(altDocPath).get();
+      }
+
+      int count = 0;
+
+      if (statsSnapshot.exists) {
+        final data = statsSnapshot.data();
+
+        // 「全年齢」のときは pitchersCount
+        if (_selectedAgeGroup == null || _selectedAgeGroup == '全年齢') {
+          count = (data?['pitchersCount'] ?? 0) as int;
+        } else {
+          // 年齢別のときは stats.totalPitchers_age_XX_YY または totalPlayers_age_XX_YY を使用
+          final String keyPitcher = 'totalPitchers_age_${_selectedAgeGroup}';
+          final String keyPlayer = 'totalPlayers_age_${_selectedAgeGroup}';
+
+          int? ageCount;
+
+          // 1. ネストされた stats マップ内を確認
+          final rawStats = data?['stats'];
+          if (rawStats is Map<String, dynamic>) {
+            if (rawStats.containsKey(keyPitcher)) {
+              ageCount = rawStats[keyPitcher] as int?;
+            } else if (rawStats.containsKey(keyPlayer)) {
+              ageCount = rawStats[keyPlayer] as int?;
+            }
+          }
+
+          // 2. まだ取れていなければトップレベルのフィールドも確認
+          if (ageCount == null) {
+            if ((data?.containsKey(keyPitcher) ?? false)) {
+              ageCount = data?[keyPitcher] as int?;
+            } else if ((data?.containsKey(keyPlayer) ?? false)) {
+              ageCount = data?[keyPlayer] as int?;
+            }
+          }
+
+          count = ageCount ?? 0;
+        }
+      }
+
       setState(() {
-        _pitchersCount = data?['pitchersCount'] ?? 0;
+        _pitchersCount = count;
+      });
+    } catch (e) {
+      print('pitcher stats取得エラー: $e');
+      setState(() {
+        _pitchersCount = 0;
       });
     }
   }
@@ -922,6 +998,7 @@ else if (_selectedRankingType == '勝率ランキング') {
                           _isSeasonMode = tempIndex == 0;
                           _selectedRankingType = '防御率ランキング';
                           _fetchPlayersData();
+                          _fetchPitcherCount();
                         });
                         Navigator.pop(context);
                       },
@@ -1950,6 +2027,7 @@ bool _isUserInSelectedAgeGroup() {
                         setState(() {
                           _selectedAgeGroup = _availableAgeGroups[tempIndex];
                           _fetchPlayersData();
+                          _fetchPitcherCount();
                         });
                         Navigator.pop(context);
                       },

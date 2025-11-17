@@ -1748,23 +1748,18 @@ async function updateStatsFor(uid, docId, gameData) {
 // チームデータ
 /**
  * チームのゲームデータをFirestoreに保存するCloud Function
- * @param {Object} data - クライアントから送信されるデータ
- * @param {Object} context - 関数のコンテキスト
+ * @param {Object} request - onCallリクエストオブジェクト
  * @return {Object} 保存成功・失敗のメッセージ
  */
-export const saveTeamGameData = onCall(async (data, context) => {
+export const saveTeamGameData = onCall(async (request) => {
   console.log("saveTeamGameData function is triggered");
 
-  console.log("Received data:", safeStringify(data));
+  // Use request.data throughout
+  console.log("Received data:", safeStringify(request.data));
 
-  let teamId;
-  let games;
-
-  if (data && data.rawRequest && data.rawRequest.body &&
-    data.rawRequest.body.data) {
-    teamId = data.rawRequest.body.data.teamId;
-    games = data.rawRequest.body.data.games;
-  }
+  const data = request.data;
+  const teamId = data.teamId;
+  const games = data.games;
   // teamId と games が正しく取り出せるか確認
   console.log("Received teamId:", teamId);
   console.log("Received games:", games);
@@ -1878,8 +1873,12 @@ export const saveTeamGameData = onCall(async (data, context) => {
           location: game.location || "",
           opponent: game.opponent || "",
           game_type: game.game_type || "",
-          score: game.score || 0,
-          runs_allowed: game.runs_allowed || 0,
+          score: typeof game.score === "object" ?
+            parseInt(game.score.value || 0) :
+            Number(game.score) || 0,
+          runs_allowed: typeof game.runs_allowed === "object" ?
+            parseInt(game.runs_allowed.value || 0) :
+            Number(game.runs_allowed) || 0,
           result: game.result || "",
         });
       });
@@ -1905,6 +1904,14 @@ export const saveTeamGameData = onCall(async (data, context) => {
             const statsDoc = await transaction.get(statsDocRef);
             const currentStats = statsDoc.exists ? statsDoc.data() : {};
 
+            const normalizedScore = typeof game.score === "object" ?
+              parseInt(game.score.value || 0) :
+              Number(game.score) || 0;
+            const normalizedRunsAllowed =
+            typeof game.runs_allowed === "object" ?
+              parseInt(game.runs_allowed.value || 0) :
+              Number(game.runs_allowed) || 0;
+
             const updatedStats = {
               totalGames: (currentStats.totalGames || 0) + 1,
               totalWins: (currentStats.totalWins || 0) +
@@ -1913,9 +1920,12 @@ export const saveTeamGameData = onCall(async (data, context) => {
                 (game.result === "敗北" ? 1 : 0),
               totalDraws: (currentStats.totalDraws || 0) +
                 (game.result === "引き分け" ? 1 : 0),
-              totalScore: (currentStats.totalScore || 0) + (game.score || 0),
-              totalRunsAllowed: (currentStats.totalRunsAllowed || 0) +
-                (game.runs_allowed || 0),
+              totalScore:
+                Number(currentStats.totalScore || 0) +
+                normalizedScore,
+              totalRunsAllowed:
+                Number(currentStats.totalRunsAllowed || 0) +
+                normalizedRunsAllowed,
             };
 
             if (currentStats.gameDate) {
@@ -5582,6 +5592,9 @@ async function saveTop10RanksByPrefecture(totalPlayersByPrefecture, year) {
   * @param {number} year - 保存対象の年。
 */
 async function saveNationwideTopRanks(totalPlayersByPrefecture, year) {
+  console.log("🏁 [全国ランキング処理開始]");
+  console.log("対象都道府県:", Object.keys(totalPlayersByPrefecture));
+
   const nationwideRanks = {
     battingAverageRank: [],
     homeRunsRank: [],
@@ -6859,6 +6872,7 @@ async function saveTeamRankingByPrefecture(
   }
 }
 
+
 /**
  * 月次チームTop10（勝率）と年齢別Top10を保存
  * @param {Object} teamsByPrefecture -
@@ -6888,12 +6902,22 @@ async function saveMonthlyTeamTop10RanksByPrefecture(
           value: (t.winRate !== undefined && t.winRate !== null) ?
           t.winRate : null,
           averageAge: (typeof t.averageAge === "number") ? t.averageAge : null,
+          battingAverage: t.battingAverage || 0,
           totalGames: t.totalGames || 0,
-          totalWins: t.totalWins || 0,
+          atBats: t.atBats || 0,
+          sluggingPercentage: t.sluggingPercentage || 0,
+          onBasePercentage: t.onBasePercentage || 0,
+          winRate: t.winRate || 0,
           totalLosses: t.totalLosses || 0,
+          totalWins: t.totalWins || 0,
           totalDraws: t.totalDraws || 0,
           totalScore: t.totalScore || 0,
           totalRunsAllowed: t.totalRunsAllowed || 0,
+          fieldingPercentage: t.fieldingPercentage || 0,
+          totalPutouts: t.totalPutouts || 0,
+          totalAssists: t.totalAssists || 0,
+          totalErrors: t.totalErrors || 0,
+          era: t.era || 0,
         }));
 
     if (top10.length > 0) {
@@ -6914,12 +6938,22 @@ async function saveMonthlyTeamTop10RanksByPrefecture(
              t.winRate : null,
             averageAge: (typeof t.averageAge === "number") ?
              t.averageAge : null,
+            battingAverage: t.battingAverage || 0,
             totalGames: t.totalGames || 0,
-            totalWins: t.totalWins || 0,
+            atBats: t.atBats || 0,
+            sluggingPercentage: t.sluggingPercentage || 0,
+            onBasePercentage: t.onBasePercentage || 0,
+            winRate: t.winRate || 0,
             totalLosses: t.totalLosses || 0,
+            totalWins: t.totalWins || 0,
             totalDraws: t.totalDraws || 0,
             totalScore: t.totalScore || 0,
             totalRunsAllowed: t.totalRunsAllowed || 0,
+            fieldingPercentage: t.fieldingPercentage || 0,
+            totalPutouts: t.totalPutouts || 0,
+            totalAssists: t.totalAssists || 0,
+            totalErrors: t.totalErrors || 0,
+            era: t.era || 0,
           }));
 
       if (top10Age.length > 0) {
@@ -6957,7 +6991,6 @@ async function saveTeamTotalRankingByPrefecture(yearlyTeamsByPrefecture, year) {
   }
 }
 
-
 /**
     * ランク付けを計算して保存
     * @param {Array} teams - ランク付けを行うチームのリスト。
@@ -6979,6 +7012,226 @@ async function processAndSaveTeamRanks(teams, collectionPath, isMonthly) {
   await batchWriteWithTeamRank(collectionPath, teams);
 }
 
+
+/**
+ * 指定したランキングカテゴリの上位10位のチームを保存
+ * @param {Object} totalTeamsByPrefecture - 都道府県ごとにグループ化されたチームデータ
+ * @param {number} year - 対象の年
+ */
+async function saveTeamTop10RanksByPrefecture(totalTeamsByPrefecture, year) {
+  const categoryToFieldMapping = {
+    winRateRank: "winRate",
+    battingAverageRank: "battingAverage",
+    sluggingRank: "sluggingPercentage",
+    onBaseRank: "onBasePercentage",
+    eraRank: "era",
+    fieldingPercentageRank: "fieldingPercentage",
+    averageAgeRank: "averageAge",
+  };
+
+  const ageGroups = [
+    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "60_69", "70_79", "80_89", "90_100",
+  ];
+
+  for (const [prefecture, teams] of Object.entries(totalTeamsByPrefecture)) {
+    console.log(`🗾 都道府県: ${prefecture}`);
+    console.log("🏷 Top10候補:", JSON.stringify(teams, null, 2));
+
+    const totalCollectionPath = `teamRanking/${year}_all/${prefecture}`;
+    const batch = db.batch();
+
+    const rankCategories = Object.keys(categoryToFieldMapping);
+
+    for (const category of rankCategories) {
+      const field = categoryToFieldMapping[category];
+
+      const top10 = teams
+          .filter((team) => team[category] && team[category] <= 10)
+          .map((team) => {
+            const value = team[field] !== undefined ? team[field] : null;
+            const entry = {
+              id: team.id || "",
+              teamName: team.teamName || "",
+              rank: team[category] || null,
+              value: value,
+              averageAge:
+              typeof team.averageAge === "number" ? team.averageAge : null,
+            };
+
+            if (category === "winRateRank") {
+              entry.totalGames = team.totalGames || 0;
+              entry.atBats = team.atBats || 0;
+              entry.battingAverage = team.battingAverage || 0,
+              entry.sluggingPercentage = team.sluggingPercentage || 0;
+              entry.onBasePercentage = team.onBasePercentage || 0,
+              entry.winRate = team.winRate || 0;
+              entry.totalWins = team.totalWins || 0;
+              entry.totalLosses = team.totalLosses || 0;
+              entry.totalDraws = team.totalDraws || 0;
+              entry.totalScore = team.totalScore || 0;
+              entry.totalRunsAllowed = team.totalRunsAllowed || 0;
+              entry.fieldingPercentage = team.fieldingPercentage || 0;
+              entry.totalPutouts = team.totalPutouts || 0;
+              entry.totalAssists = team.totalAssists || 0;
+              entry.totalErrors = team.totalErrors || 0;
+              entry.era = team.era || 0;
+            }
+
+            if (category === "eraRank") {
+              entry.totalInningsPitched = team.totalInningsPitched || 0;
+            }
+
+            if (category === "fieldingPercentageRank") {
+              entry.totalPutouts = team.totalPutouts || 0;
+              entry.totalAssists = team.totalAssists || 0;
+              entry.totalErrors = team.totalErrors || 0;
+            }
+
+            if (category === "battingAverageRank") {
+              entry.atBats = team.atBats || 0;
+              entry.hits = team.hits || 0;
+            }
+
+            if (category === "onBaseRank" || category === "sluggingRank") {
+              entry.atBats = team.atBats || 0;
+            }
+
+            return entry;
+          });
+
+      if (top10.length > 0) {
+        const docRef = db.doc(`${totalCollectionPath}/${category}`);
+        batch.set(docRef, {PrefectureTop10: top10});
+      }
+
+      // 🔵 全体ランキングの rankingContext（±2件）も保存する
+      const sortedByRank = teams
+          .filter((t) => t[category] !== undefined && t[category] !== null)
+          .sort((a, b) => (a[category] || 9999) - (b[category] || 9999));
+
+      for (const team of sortedByRank) {
+        const teamId = team.id;
+        const rankValue = team[category];
+        if (!teamId || !rankValue || rankValue <= 10) continue; // Top10は除外
+
+        const idx = sortedByRank.findIndex((t) => t.id === teamId);
+        if (idx === -1) continue;
+
+        const context = [];
+        for (let i = Math.max(0, idx - 2); i <=
+        Math.min(sortedByRank.length - 1, idx + 2); i++) {
+          context.push(sortedByRank[i]);
+        }
+
+        const teamDocRef = db.doc(`teams/${teamId}/rankingContext/${category}`);
+        batch.set(teamDocRef, {context}, {merge: true});
+      }
+
+      // 年齢別
+      for (const group of ageGroups) {
+        const ageCategory = `${category}_age_${group}`;
+        const top10ForAge = teams
+            .filter((team) => team[ageCategory] && team[ageCategory] <= 10)
+            .map((team) => {
+              const value = team[field] !== undefined ? team[field] : null;
+              const entry = {
+                id: team.id || "",
+                teamName: team.teamName || "",
+                rank: team[ageCategory] || null,
+                value: value,
+                averageAge:
+                typeof team.averageAge === "number" ? team.averageAge : null,
+              };
+
+              if (category === "winRateRank") {
+                entry.totalGames = team.totalGames || 0;
+                entry.atBats = team.atBats || 0;
+                entry.battingAverage = team.battingAverage || 0,
+                entry.sluggingPercentage = team.sluggingPercentage || 0;
+                entry.onBasePercentage = team.onBasePercentage || 0,
+                entry.winRate = team.winRate || 0;
+                entry.totalWins = team.totalWins || 0;
+                entry.totalLosses = team.totalLosses || 0;
+                entry.totalDraws = team.totalDraws || 0;
+                entry.totalScore = team.totalScore || 0;
+                entry.totalRunsAllowed = team.totalRunsAllowed || 0;
+                entry.fieldingPercentage = team.fieldingPercentage || 0;
+                entry.totalPutouts = team.totalPutouts || 0;
+                entry.totalAssists = team.totalAssists || 0;
+                entry.totalErrors = team.totalErrors || 0;
+                entry.era = team.era || 0;
+              }
+
+              if (category === "eraRank") {
+                entry.totalInningsPitched = team.totalInningsPitched || 0;
+              }
+
+              if (category === "fieldingPercentageRank") {
+                entry.totalPutouts = team.totalPutouts || 0;
+                entry.totalAssists = team.totalAssists || 0;
+                entry.totalErrors = team.totalErrors || 0;
+              }
+
+              if (category === "battingAverageRank") {
+                entry.atBats = team.atBats || 0;
+                entry.hits = team.hits || 0;
+              }
+
+              if (category === "onBaseRank" || category === "sluggingRank") {
+                entry.atBats = team.atBats || 0;
+              }
+
+              return entry;
+            });
+
+        if (top10ForAge.length > 0) {
+          const docRef =
+          db.doc(`${totalCollectionPath}/${category}_age_${group}`);
+          batch.set(docRef, {[`PrefectureTop10_age_${group}`]: top10ForAge});
+        }
+
+        // rankingContext (±2) も保存
+        const sortedByAgeRank = teams
+            .filter((t) =>
+              t[ageCategory] !== undefined && t[ageCategory] !== null)
+            .sort((a, b) =>
+              (a[ageCategory] || 9999) - (b[ageCategory] || 9999));
+
+        for (const team of sortedByAgeRank) {
+          const teamId = team.id;
+          const rankValue = team[ageCategory];
+          if (!teamId || !rankValue || rankValue <= 10) continue;
+
+          const idx = sortedByAgeRank.findIndex((t) => t.id === teamId);
+          if (idx === -1) continue;
+
+          const context = [];
+          for (let i = Math.max(0, idx - 2); i <=
+          Math.min(sortedByAgeRank.length - 1, idx + 2); i++) {
+            context.push(sortedByAgeRank[i]);
+          }
+
+          const teamDocRef =
+          db.doc(`teams/${teamId}/rankingContext/${ageCategory}`);
+          batch.set(teamDocRef, {context}, {merge: true});
+        }
+      }
+    }
+    await batch.commit();
+
+    // 年齢別人数のカウントと stats への保存（チーム版）
+    const ageGroupCounts = {};
+    for (const group of ageGroups) {
+      const key = `winRateRank_age_${group}`;
+      const count = teams.filter((t) => key in t).length;
+      ageGroupCounts[`totalTeams_age_${group}`] = count;
+    }
+
+    const statsRef = db.doc(`${totalCollectionPath}/stats`);
+    await statsRef.set({stats: ageGroupCounts}, {merge: true});
+  }
+}
 
 /**
 * 勝率のランクを計算
@@ -7014,7 +7267,7 @@ function processWinRateRank(teams, isMonthly) {
   // 年齢別ランキング（winRate を使用）
   const groups = {};
   for (const team of teams) {
-    const group = getAgeGroup(team.age);
+    const group = getAgeGroup(team.averageAge);
     if (!groups[group]) groups[group] = [];
     groups[group].push(team);
   }
@@ -7085,7 +7338,7 @@ function processBattingAverageRank(teams) {
   // 年齢別ランキング
   const groups = {};
   for (const team of teams) {
-    const group = getAgeGroup(team.age);
+    const group = getAgeGroup(team.averageAge);
     if (!groups[group]) groups[group] = [];
     groups[group].push(team);
   }
@@ -7155,7 +7408,7 @@ function processSluggingRank(teams) {
   // 年齢別ランキング
   const groups = {};
   for (const team of teams) {
-    const group = getAgeGroup(team.age);
+    const group = getAgeGroup(team.averageAge);
     if (!groups[group]) groups[group] = [];
     groups[group].push(team);
   }
@@ -7222,7 +7475,7 @@ function processOnBaseRank(teams) {
   // 年齢別ランキング
   const groups = {};
   for (const team of teams) {
-    const group = getAgeGroup(team.age);
+    const group = getAgeGroup(team.averageAge);
     if (!groups[group]) groups[group] = [];
     groups[group].push(team);
   }
@@ -7290,7 +7543,7 @@ function processFieldingPercentageRank(teams) {
   // 年齢別ランキング
   const groups = {};
   for (const team of teams) {
-    const group = getAgeGroup(team.age);
+    const group = getAgeGroup(team.averageAge);
     if (!groups[group]) groups[group] = [];
     groups[group].push(team);
   }
@@ -7355,7 +7608,7 @@ function processEraRank(teams) {
   // 年齢別ランキング
   const groups = {};
   for (const team of teams) {
-    const group = getAgeGroup(team.age);
+    const group = getAgeGroup(team.averageAge);
     if (!groups[group]) groups[group] = [];
     groups[group].push(team);
   }
@@ -7388,167 +7641,6 @@ function processEraRank(teams) {
         t[`eraRank_age_${group}`] = null;
       }
     }
-  }
-}
-
-/**
- * 都道府県ごとの上位10チームのランキングを保存
- *
- * @param {Object} yearlyTeamsByPrefecture - 都道府県ごとにグループ化された年間データのチーム
- * @param {number} year - 対象の年
- * @return {Promise<void>} Firestoreへの保存処理を非同期で実行
- */
-async function saveTeamTop10RanksByPrefecture(yearlyTeamsByPrefecture, year) {
-  console.log(`📂 Saving Top 10 Rankings for ${year}`);
-
-  // 各ランキングカテゴリのデータフィールドマッピング
-  const categoryToFieldMapping = {
-    onBaseRank: "onBasePercentage",
-    sluggingRank: "sluggingPercentage",
-    eraRank: "era",
-    fieldingPercentageRank: "fieldingPercentage",
-    battingAverageRank: "battingAverage",
-    averageAgeRank: "averageAge",
-  };
-  const ageGroups =
-  ["0_17", "18_29", "30_39", "40_49",
-    "50_59", "60_69", "70_79", "80_89", "90_100"];
-
-  for (const [prefecture, teams] of Object.entries(yearlyTeamsByPrefecture)) {
-    const topRanks = {};
-    const rankCategories = Object.keys(categoryToFieldMapping);
-
-    for (const category of rankCategories) {
-      const field = categoryToFieldMapping[category];
-
-      topRanks[category] = teams
-          .filter((team) => team[category] !== null && team[category] <= 10)
-          .map((team) => {
-            const entry = {
-              id: team.id,
-              teamName: team.teamName,
-              rank: team[category],
-              value: team[field] !== undefined ? team[field] : null,
-              averageAge: (typeof team.averageAge === "number") ?
-              team.averageAge : null,
-            };
-
-            // onBasePercentage の場合は atBats を追加
-            if (category === "onBaseRank" || category === "sluggingRank") {
-              entry.atBats =
-               team.atBats !== undefined && team.atBats !== null ?
-               team.atBats : null;
-            }
-
-            if (category === "battingAverageRank") {
-              entry.atBats =
-              team.atBats !== undefined && team.atBats !== null ?
-              team.atBats : null;
-              entry.hits =
-              team.hits !== undefined && team.hits !== null ?
-              team.hits : null;
-            }
-
-            if (category === "eraRank") {
-              entry.totalInningsPitched =
-              team.totalInningsPitched !== undefined &&
-              team.totalInningsPitched !== null ?
-               team.totalInningsPitched : null;
-            }
-
-            if (category === "fieldingPercentageRank") {
-              entry.totalPutouts =
-              team.totalPutouts !== undefined && team.totalPutouts !== null ?
-               team.totalPutouts : null;
-              entry.totalAssists =
-              team.totalAssists !== undefined && team.totalAssists !== null ?
-              team.totalAssists : null;
-              entry.totalErrors =
-              team.totalErrors !== undefined && team.totalErrors !== null ?
-              team.totalErrors : null;
-            }
-
-            return entry;
-          });
-    }
-
-    // === 年齢別 Top10 の保存 ===
-    const totalCollectionPath = `teamRanking/${year}_all/${prefecture}`;
-    const batch = db.batch();
-
-    // 既存の overall Top10 は従来どおり保存
-    for (const [category, data] of Object.entries(topRanks)) {
-      if (data.length > 0) {
-        const docRef = db.collection(totalCollectionPath).doc(category);
-        batch.set(docRef, {top10: data});
-      }
-    }
-
-    // 追加: 年齢帯ごとの Top10
-    for (const category of rankCategories) {
-      const field = categoryToFieldMapping[category];
-      for (const group of ageGroups) {
-        const ageRankKey = `${category}_age_${group}`;
-        const top10Age = teams
-            .filter((team) =>
-              team[ageRankKey] !== null && team[ageRankKey] <= 10)
-            .map((team) => {
-              const entry = {
-                id: team.id,
-                teamName: team.teamName,
-                rank: team[ageRankKey],
-                value: (team[field] !== undefined) ? team[field] : null,
-                averageAge: (typeof team.averageAge === "number") ?
-                team.averageAge : null,
-              };
-
-              if (category === "onBaseRank" || category === "sluggingRank") {
-                entry.atBats =
-                (team.atBats !== undefined && team.atBats !== null) ?
-                team.atBats : null;
-              }
-              if (category === "battingAverageRank") {
-                entry.atBats =
-                (team.atBats !== undefined && team.atBats !== null) ?
-                team.atBats : null;
-                entry.hits =
-                (team.hits !== undefined && team.hits !== null) ?
-                team.hits : null;
-              }
-              if (category === "eraRank") {
-                entry.totalInningsPitched =
-                (team.totalInningsPitched !==
-                  undefined && team.totalInningsPitched !== null) ?
-                team.totalInningsPitched : null;
-              }
-              if (category === "fieldingPercentageRank") {
-                entry.totalPutouts =
-                (team.totalPutouts !==
-                  undefined && team.totalPutouts !== null) ?
-                team.totalPutouts : null;
-                entry.totalAssists =
-                (team.totalAssists !==
-                  undefined && team.totalAssists !== null) ?
-                team.totalAssists : null;
-                entry.totalErrors =
-                (team.totalErrors !== undefined && team.totalErrors !== null) ?
-                team.totalErrors : null;
-              }
-
-              return entry;
-            });
-
-        if (top10Age.length > 0) {
-          const docRef =
-          db.collection(totalCollectionPath).doc(`${ageRankKey}`);
-          batch.set(docRef, {[`PrefectureTop10_age_${group}`]: top10Age});
-        }
-      }
-    }
-
-    // コミット（既存の batch.commit は削除し、このブロックの末尾で1回だけコミット）
-    await batch.commit();
-    console.log(`✅ Top 10 (overall & age-groups) saved for ${prefecture}`);
   }
 }
 
@@ -7595,6 +7687,8 @@ async function saveTeamNationwideTopRanks(yearlyTeamsByPrefecture, year) {
           teamName: team.teamName,
           prefecture: prefecture,
           value: value,
+          averageAge: typeof team.averageAge === "number" ?
+          team.averageAge : null,
         };
 
         if (category === "winRateRank") {

@@ -65,30 +65,24 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
       // 🔄 最新のCustomerInfoを取得
       final updatedInfo = await Purchases.getCustomerInfo();
 
-      // 🔍 現在アクティブなエンタイトルメントから productId を取得
-      final actualProductId =
-          updatedInfo.entitlements.active['B-Net Team']?.productIdentifier;
+      // 今回購入した Store Product のID（ゴールド / プラチナ、月額 / 年額 など）
+      final purchasedProductId = package.storeProduct.identifier;
 
-      if (actualProductId != null) {
-        // 🔥 Firestore に保存
-        await TeamSubscriptionService().saveTeamSubscriptionToFirestore(
-          widget.teamId,
-          updatedInfo,
-          actualProductId,
-        );
+      print('🧾 チームプランで購入した productId: $purchasedProductId');
 
-        await _loadCustomerInfo();
+      // 🔥 Firestore に保存（ユーザーが選んだ productId で）
+      await TeamSubscriptionService().saveTeamSubscriptionToFirestore(
+        widget.teamId,
+        updatedInfo,
+        purchasedProductId,
+      );
 
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("🎉 チームプランの購入が完了しました")),
-        );
-      } else {
-        print("⚠️ アクティブなチームプランが見つかりません");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("⚠️ 購入は完了しましたが、プランの確認に失敗しました")),
-        );
-      }
+      await _loadCustomerInfo();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("🎉 チームプランの購入が完了しました")),
+      );
     } on PlatformException catch (e) {
       final errorCode = PurchasesErrorHelper.getErrorCode(e);
 
@@ -113,7 +107,16 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
   Future<void> _restore() async {
     try {
       final restored = await Purchases.restorePurchases();
-      if (restored.entitlements.active['B-Net Team'] != null) {
+
+      // いずれかのチーム用エンタイトルメントが有効なら復元成功とみなす
+      final hasTeamEntitlement = [
+        'B-Net Team Gold Monthly',
+        'B-Net Team Gold Annual',
+        'B-Net Team Platina Monthly',
+        'B-Net Team Platina Annual',
+      ].any((key) => restored.entitlements.active[key] != null);
+
+      if (hasTeamEntitlement) {
         await _loadCustomerInfo();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("✅ チームの購入を復元しました")),
@@ -194,23 +197,46 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
                             ? '初月無料！2ヶ月目から月額課金。\nいつでもキャンセル可能。'
                             : '1年間まとめて支払い。\n月額よりもお得な価格設定です。');
 
-                    final entitlement =
-                        _customerInfo?.entitlements.active['B-Net Team'];
-                    final activeProductId = entitlement?.productIdentifier;
-                    final isSubscribed = activeProductId == id;
+                    // チーム用エンタイトルメントをプラン（ゴールド / プラチナ）と月額 / 年額で切り替える
+                    final bool isAnnualPlan =
+                        id.contains('12month') || id.contains('Annual');
 
-// 🐛 トライアルかどうか判定
+                    late final String entitlementKey;
+                    if (isPlatina) {
+                      // プラチナプラン
+                      entitlementKey = isAnnualPlan
+                          ? 'B-Net Team Platina Annual'
+                          : 'B-Net Team Platina Monthly';
+                    } else {
+                      // ゴールドプラン
+                      entitlementKey = isAnnualPlan
+                          ? 'B-Net Team Gold Annual'
+                          : 'B-Net Team Gold Monthly';
+                    }
+
+                    final entitlement =
+                        _customerInfo?.entitlements.active[entitlementKey];
+
+                    // このプランに対応するエンタイトルメントが有効なら「登録中」
+                    final isSubscribed = entitlement != null;
+
+                    // 🐛 トライアルかどうか判定
                     final isTrial =
                         (entitlement?.periodType ?? PeriodType.normal) ==
                             PeriodType.trial;
 
-// ✅ バッジ表示条件
-                    final badge = isMonthly && isTrial ? '初月無料' : null;
+                    // ✅ バッジ表示条件
+                    final hasFreeTrial = package.storeProduct.introductoryPrice != null;
+                    final badge = isMonthly && (isTrial || hasFreeTrial) ? '初月無料' : null;
 
-// 🔍 デバッグ出力
+                    final isNeverPurchased = entitlement == null;
+
+                    // 🔍 デバッグ出力
+                    print('🔍 intro price: ${package.storeProduct.introductoryPrice}');
                     print('📦 プラン: $id');
                     print('✅ 現在登録中: $isSubscribed');
                     print('🧪 トライアル中？: $isTrial');
+                    print('🆕 未購入？ → $isNeverPurchased');
                     print('🏷 バッジ表示: ${badge ?? "なし"}');
 
                     return Padding(

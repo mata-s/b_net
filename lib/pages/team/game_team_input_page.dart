@@ -111,8 +111,8 @@ class _GameTeamInputPageState extends State<GameTeamInputPage> {
       onTap: () {
         _showCupertinoPicker(
           context,
-          ['公式戦', '練習試合'],
-          _selectedGameType[index] ?? '公式戦',
+          ['練習試合', '公式戦'],
+          _selectedGameType[index] ?? '練習試合',
           (selected) {
             setState(() {
               _selectedGameType[index] = selected;
@@ -197,7 +197,7 @@ class _GameTeamInputPageState extends State<GameTeamInputPage> {
                   return Center(
                     child: Text(
                       option,
-                      style: const TextStyle(fontSize: 18),
+                      style: const TextStyle(fontSize: 22),
                     ),
                   );
                 }).toList(),

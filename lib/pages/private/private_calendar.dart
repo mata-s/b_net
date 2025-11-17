@@ -53,17 +53,23 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const String userUid = "";
     return const MaterialApp(
-      home: PrivateCalendar(userUid: userUid),
+      home: PrivateCalendar(
+        userUid: userUid,
+        positions: <String>[],
+      ),
     );
   }
 }
 
 class PrivateCalendar extends StatefulWidget {
   final String userUid;
+  final List<String> positions;
   final VoidCallback? onSaved;
+
   const PrivateCalendar({
     super.key,
     required this.userUid,
+    required this.positions,
     this.onSaved,
   });
 
@@ -164,7 +170,11 @@ class _PrivateCalendarState extends State<PrivateCalendar> {
           Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (_) => GameInputPage(selectedDate: _selectedDay!)),
+              builder: (_) => GameInputPage(
+                selectedDate: _selectedDay!,
+                positions: widget.positions,
+              ),
+            ),
           ).then((result) {
             if (result == true) {
               print('▶ GameInputPage から戻り → データ再読み込み');

@@ -7,7 +7,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 
 class GameInputPage extends StatefulWidget {
   final DateTime selectedDate;
-  const GameInputPage({super.key, required this.selectedDate});
+  final List<String> positions;
+  const GameInputPage({super.key, required this.selectedDate, required this.positions,});
 
   @override
   State<GameInputPage> createState() => _GameInputPageState();
@@ -26,9 +27,15 @@ class _GameInputPageState extends State<GameInputPage> {
   void initState() {
     super.initState();
     _selectedDay = widget.selectedDate;
-    _loadUserPositions();
-    _initializeFields(); // 追加: 仮保存データの読み込み処理
-    _loadTentativeData();
+    _positions = widget.positions;
+    _initFromTentative();
+  }
+
+  Future<void> _initFromTentative() async {
+    // まず仮保存データから試合数や各種フィールドを復元
+    await _initializeFields();
+    // その後、各コントローラ類を詳細に復元
+    await _loadTentativeData();
   }
 
   // Firestoreからtentativeデータを取得し、状態を復元する
@@ -54,8 +61,7 @@ class _GameInputPageState extends State<GameInputPage> {
       // 3. After setting all fields, call setState to update the UI
       // 4. If numberOfMatches is needed, extract from games length
       final List<dynamic> games = data['games'] ?? [];
-      final int loadedNumberOfMatches =
-          games.length > 0 ? games.length : (data['numberOfMatches'] ?? 1);
+      final int loadedNumberOfMatches = games.length;
 
       // Prepare local lists for each field to avoid partial update before setState
       List<String?> loadedGameType = [];
@@ -117,7 +123,9 @@ class _GameInputPageState extends State<GameInputPage> {
         loadedMemoControllers
             .add(TextEditingController(text: game['memo'] ?? ''));
         loadedInningsThrowControllers.add(TextEditingController(
-            text: (game['inningsThrow']?.toString() ?? '')));
+            text: (game['inningsThrow'] is num
+                ? game['inningsThrow'].toInt().toString()
+                : (game['inningsThrow']?.toString() ?? ''))));
         loadedStrikeoutsControllers.add(TextEditingController(
             text: (game['strikeouts']?.toString() ?? '')));
         loadedWalksControllers.add(
@@ -346,9 +354,9 @@ class _GameInputPageState extends State<GameInputPage> {
       if (mounted) {
         setState(() {
           // 試合数
-          numberOfMatches = data['numberOfMatches'] ?? 1;
-          // ポジション
-          _positions = List<String>.from(data['positions'] ?? []);
+          numberOfMatches = data['games'] != null ? data['games'].length : 1;
+          // ポジションは前画面から渡されたもの(widget.positions)を優先し、
+          // tentative からは上書きしない
           // ゲームタイプ
           _selectedGameType.clear();
           if (data['games'] != null) {
@@ -399,22 +407,6 @@ class _GameInputPageState extends State<GameInputPage> {
     super.dispose();
   }
 
-  Future<void> _loadUserPositions() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      final String uid = user.uid;
-
-      DocumentSnapshot userDoc =
-          await FirebaseFirestore.instance.collection('users').doc(uid).get();
-
-      if (userDoc.exists) {
-        List<dynamic> positionsFromDb = userDoc['positions'] ?? [];
-        setState(() {
-          _positions = List<String>.from(positionsFromDb);
-        });
-      }
-    }
-  }
 
   final Map<String, List<String>> _rightOptions = {
     '打': ['四球', '死球', '見逃し三振', '空振り三振', '振り逃げ', 'スリーバント失敗', '打撃妨害', '守備妨害'],
@@ -557,7 +549,7 @@ class _GameInputPageState extends State<GameInputPage> {
   Widget _buildGameTypePicker(int index, StateSetter setState) {
     return buildCupertinoPickerField(
       context: context,
-      options: ['公式戦', '練習試合'],
+      options: ['練習試合','公式戦'],
       selectedValue: _selectedGameType[index],
       hintText: '試合タイプを選択',
       onSelected: (selected) {
@@ -751,6 +743,7 @@ class _GameInputPageState extends State<GameInputPage> {
           );
           continue;
         }
+        print('🚩 _saveDataToFirestore: start building gameData for matchIndex=$matchIndex, gameType=${_selectedGameType[matchIndex]}');
 
         // 各試合の共通情報を取得
         final location = _locationControllers[matchIndex].text.isNotEmpty
@@ -870,6 +863,8 @@ class _GameInputPageState extends State<GameInputPage> {
 
           final response = await callable.call(gameData);
 
+          print('🚀 _saveDataToFirestore: sending gameData for matchIndex=$matchIndex → $gameData');
+
           print("Cloud Functions response: ${response.data}");
         } catch (e) {
           print("Error saving game data: $e");
@@ -886,6 +881,8 @@ class _GameInputPageState extends State<GameInputPage> {
   Future<void> saveTentativeData() async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
     final data = _buildGameData();
+
+      print('📝 saveTentativeData: uid=$uid, data keys=${data.keys.toList()}');
 
     final tentativeCollection = FirebaseFirestore.instance
         .collection('users')
@@ -1111,7 +1108,7 @@ class _GameInputPageState extends State<GameInputPage> {
     }
     return {
       'games': games,
-      'numberOfMatches': numberOfMatches,
+      'numberOfMatches': games.length,
       'positions': _positions,
       'savedAt': Timestamp.now(),
     };

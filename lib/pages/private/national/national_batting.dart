@@ -359,6 +359,7 @@ class _NationalBattingState extends State<NationalBatting> {
         DataColumn(label: Center(child: _buildVerticalText('打率'))),
         DataColumn(label: Center(child: _buildVerticalText('打数'))),
         DataColumn(label: Center(child: _buildVerticalText('安打'))),
+        DataColumn(label: Center(child: _buildVerticalText('年齢'))),
       ];
     } else if (_selectedRankingType == '出塁率') {
       return [
@@ -381,6 +382,7 @@ class _NationalBattingState extends State<NationalBatting> {
         ), // チーム
         DataColumn(label: Center(child: _buildVerticalText('出塁率'))),
         DataColumn(label: Center(child: _buildVerticalText('打席'))),
+        DataColumn(label: Center(child: _buildVerticalText('年齢'))),
       ];
     } else if (_selectedRankingType == '長打率') {
       return [
@@ -407,6 +409,7 @@ class _NationalBattingState extends State<NationalBatting> {
         DataColumn(label: Center(child: _buildVerticalText('二塁打'))),
         DataColumn(label: Center(child: _buildVerticalText('三塁打'))),
         DataColumn(label: Center(child: _buildVerticalText('本塁打'))),
+        DataColumn(label: Center(child: _buildVerticalText('年齢'))),
       ];
     } else {
       return [
@@ -434,6 +437,7 @@ class _NationalBattingState extends State<NationalBatting> {
         ),
         if (_selectedRankingType != '盗塁')
           DataColumn(label: Center(child: _buildVerticalText('打数'))),
+        DataColumn(label: Center(child: _buildVerticalText('年齢'))),
       ];
     }
   }
@@ -527,6 +531,15 @@ class _NationalBattingState extends State<NationalBatting> {
             ),
           ),
         )),
+        DataCell(Center(
+          child: Text(
+            player['age']?.toString() ?? '0',
+            style: TextStyle(
+              fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
+              color: isUser ? Colors.blue : Colors.black,
+            ),
+          ),
+        )),
       ];
     } else if (_selectedRankingType == '本塁打' ||
         _selectedRankingType == '盗塁' ||
@@ -609,6 +622,15 @@ class _NationalBattingState extends State<NationalBatting> {
               ),
             ),
           )),
+        DataCell(Center(
+          child: Text(
+            player['age']?.toString() ?? '0',
+            style: TextStyle(
+              fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
+              color: isUser ? Colors.blue : Colors.black,
+            ),
+          ),
+        )),
       ];
     } else if (_selectedRankingType == '長打率') {
       return [
@@ -724,6 +746,15 @@ class _NationalBattingState extends State<NationalBatting> {
             ),
           ),
         )),
+        DataCell(Center(
+          child: Text(
+            player['age']?.toString() ?? '0',
+            style: TextStyle(
+              fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
+              color: isUser ? Colors.blue : Colors.black,
+            ),
+          ),
+        )),
       ];
     } else if (_selectedRankingType == '出塁率') {
       return [
@@ -797,6 +828,15 @@ class _NationalBattingState extends State<NationalBatting> {
         DataCell(Center(
           child: Text(
             player['totalBats']?.toString() ?? '0',
+            style: TextStyle(
+              fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
+              color: isUser ? Colors.blue : Colors.black,
+            ),
+          ),
+        )),
+        DataCell(Center(
+          child: Text(
+            player['age']?.toString() ?? '0',
             style: TextStyle(
               fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
               color: isUser ? Colors.blue : Colors.black,
