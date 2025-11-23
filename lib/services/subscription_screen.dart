@@ -27,12 +27,14 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       final offerings = await Purchases.getOfferings();
       final packages = offerings.all['B-Net']?.availablePackages ?? [];
 
+      if (!mounted) return;
       setState(() {
         _packages = packages;
         _isLoading = false;
       });
     } catch (e) {
       print('❌ パッケージ取得エラー: $e');
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
@@ -40,6 +42,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   Future<void> _loadCustomerInfo() async {
     try {
       final info = await Purchases.getCustomerInfo();
+      if (!mounted) return;
       setState(() {
         _customerInfo = info;
       });
@@ -115,7 +118,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
           purchasedProductId,
         );
         await _loadCustomerInfo();
-        setState(() {}); // 🔁 UI更新
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("✅ 購入を復元しました")),

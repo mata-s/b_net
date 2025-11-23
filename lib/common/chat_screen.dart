@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // クリップボード用
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:video_player/video_player.dart'; // 動画再生用
@@ -36,14 +37,174 @@ class _ChatScreenState extends State<ChatScreen> {
   User? _user;
   VideoPlayerController? _videoController;
   List<File> _imageFiles = [];
+  late final Stream<QuerySnapshot> _messageStream;
+  String? _userName; // Firestore 上のユーザー名
+  String? _userProfileImageUrl; // Firestore 上のプロフィール画像URL
   bool _isIconVisible = false; // アイコンの表示/非表示を制御するフラグ
   bool _isUploading = false;
   bool _isSending = false;
+  bool _isMarkingRead = false; // 未読リセット中かどうかのフラグ
+
+  Future<void> _markCurrentRoomAsRead() async {
+    if (_isMarkingRead) return;
+    if (_user == null) return;
+    if (widget.roomId == null || widget.roomId!.isEmpty) return;
+
+    _isMarkingRead = true;
+    try {
+      await _firestore.collection('chatRooms').doc(widget.roomId).update({
+        'unreadCounts.${_user!.uid}': 0,
+      });
+    } catch (e) {
+      print('⚠️ _markCurrentRoomAsRead でエラー: $e');
+    } finally {
+      _isMarkingRead = false;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _user = _auth.currentUser;
+    _loadCurrentUserProfile();
+
+    // チャットメッセージのストリームは一度だけ作成して使い回す
+    if (widget.roomId != null && widget.roomId!.isNotEmpty) {
+      _messageStream = _firestore
+          .collection('chatRooms')
+          .doc(widget.roomId)
+          .collection('messages')
+          .orderBy('createdAt', descending: true)
+          .snapshots();
+    } else {
+      // roomId がない場合でも型的に初期化しておく（使われない想定）
+      _messageStream = const Stream.empty();
+    }
+  }
+
+  Future<void> _loadCurrentUserProfile() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+
+    try {
+      final doc =
+          await _firestore.collection('users').doc(currentUser.uid).get();
+      final data = doc.data() ?? {};
+
+      // Firestore の name / userName を優先して使う
+      final nameFromFirestore = (data['name'] as String?)?.trim();
+      final userNameFromFirestore = (data['userName'] as String?)?.trim();
+
+      String resolvedName;
+      if (nameFromFirestore != null && nameFromFirestore.isNotEmpty) {
+        resolvedName = nameFromFirestore;
+      } else if (userNameFromFirestore != null &&
+          userNameFromFirestore.isNotEmpty) {
+        resolvedName = userNameFromFirestore;
+      } else if (currentUser.displayName != null &&
+          currentUser.displayName!.trim().isNotEmpty) {
+        resolvedName = currentUser.displayName!.trim();
+      } else {
+        resolvedName = '匿名';
+      }
+
+      final profileImageFromFirestore =
+        (data['profileImageUrl'] as String?)?.trim()
+        ?? (data['profileImage'] as String?)?.trim();
+
+      setState(() {
+        _userName = resolvedName;
+        _userProfileImageUrl =
+            (profileImageFromFirestore != null &&
+                    profileImageFromFirestore.isNotEmpty)
+                ? profileImageFromFirestore
+                : (currentUser.photoURL ?? '');
+      });
+
+      print(
+          '🔥 _loadCurrentUserProfile: uid=${currentUser.uid}, name=$_userName, data=$data');
+    } catch (e) {
+      print('⚠️ _loadCurrentUserProfile でエラー: $e');
+      setState(() {
+        _userName = (currentUser.displayName != null &&
+                currentUser.displayName!.isNotEmpty)
+            ? currentUser.displayName!
+            : '匿名';
+        _userProfileImageUrl = currentUser.photoURL ?? '';
+      });
+    }
+  }
+
+  Future<Map<String, String>> _resolveSenderInfo() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      return {
+        'name': '匿名',
+        'profileImageUrl': '',
+      };
+    }
+
+    // すでに _loadCurrentUserProfile で取得済みならそれを使う
+    if (_userName != null && _userName!.isNotEmpty) {
+      return {
+        'name': _userName!,
+        'profileImageUrl': _userProfileImageUrl ?? (currentUser.photoURL ?? ''),
+      };
+    }
+
+    try {
+      final doc =
+          await _firestore.collection('users').doc(currentUser.uid).get();
+      final data = doc.data() ?? {};
+
+      final nameFromFirestore = (data['name'] as String?)?.trim();
+      final userNameFromFirestore = (data['userName'] as String?)?.trim();
+      final profileImageFromFirestore =
+          (data['profileImageUrl'] as String?)?.trim();
+
+      String resolvedName;
+      if (nameFromFirestore != null && nameFromFirestore.isNotEmpty) {
+        resolvedName = nameFromFirestore;
+      } else if (userNameFromFirestore != null &&
+          userNameFromFirestore.isNotEmpty) {
+        resolvedName = userNameFromFirestore;
+      } else if (currentUser.displayName != null &&
+          currentUser.displayName!.trim().isNotEmpty) {
+        resolvedName = currentUser.displayName!.trim();
+      } else {
+        resolvedName = '匿名';
+      }
+
+      final resolvedProfileImageUrl =
+          (profileImageFromFirestore != null &&
+                  profileImageFromFirestore.isNotEmpty)
+              ? profileImageFromFirestore
+              : (currentUser.photoURL ?? '');
+
+      // 解決した結果を state にキャッシュしておく
+      setState(() {
+        _userName = resolvedName;
+        _userProfileImageUrl = resolvedProfileImageUrl;
+      });
+
+      print(
+          '✨ _resolveSenderInfo: uid=${currentUser.uid}, name=$resolvedName');
+
+      return {
+        'name': resolvedName,
+        'profileImageUrl': resolvedProfileImageUrl,
+      };
+    } catch (e) {
+      print('⚠️ _resolveSenderInfo でエラーが発生: $e');
+      final fallbackName =
+          (currentUser.displayName != null && currentUser.displayName!.isNotEmpty)
+              ? currentUser.displayName!
+              : '匿名';
+      return {
+        'name': fallbackName,
+        'profileImageUrl': currentUser.photoURL ?? '',
+      };
+    }
   }
 
   Future<void> _sendMessage(String messageText,
@@ -58,8 +219,11 @@ class _ChatScreenState extends State<ChatScreen> {
             videoUrl != null) &&
         _user != null) {
       String senderId = _user!.uid; // 送信者のユーザーID
-      String senderName = _user!.displayName ?? '匿名';
-      String senderProfileImageUrl = _user!.photoURL ?? '';
+
+      // 🔹 送信直前に必ず Firestore の name を含めて解決する
+      final senderInfo = await _resolveSenderInfo();
+      final String senderName = senderInfo['name'] ?? '匿名';
+      final String senderProfileImageUrl = senderInfo['profileImageUrl'] ?? '';
 
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         DocumentReference chatRoomRef = FirebaseFirestore.instance
@@ -154,17 +318,13 @@ class _ChatScreenState extends State<ChatScreen> {
       List<File> imageFiles =
           selectedImages.map((image) => File(image.path)).toList();
       setState(() {
+        // ここでは送信せず、プレビュー用に保持しておく
         _imageFiles = imageFiles;
-        _isUploading = true; // 🔹 アップロード開始時に `true`
-      });
-      await _uploadImages(imageFiles);
-      setState(() {
-        _isUploading = false; // 🔹 アップロード完了時に `false`
       });
     }
   }
 
-  Future<void> _uploadImages(List<File> imageFiles) async {
+  Future<void> _uploadImages(List<File> imageFiles, {String messageText = ''}) async {
     List<String> imageUrls = [];
     for (File imageFile in imageFiles) {
       File compressedImage = await _compressImage(imageFile);
@@ -175,7 +335,8 @@ class _ChatScreenState extends State<ChatScreen> {
       String downloadUrl = await storageRef.getDownloadURL();
       imageUrls.add(downloadUrl);
     }
-    await _sendMessage('', imageUrls: imageUrls);
+    // テキスト付きで送信可能にする
+    await _sendMessage(messageText, imageUrls: imageUrls);
   }
 
   Future<File> _compressImage(File imageFile) async {
@@ -262,26 +423,33 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
       ),
-      body: Column(
-        children: [
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          // どこか他の箇所をタップしたらキーボードを閉じる
+          FocusScope.of(context).unfocus();
+        },
+        child: Column(
+          children: [
           Expanded(
             child: StreamBuilder(
-              stream: _firestore
-                  .collection('chatRooms')
-                  .doc(widget.roomId)
-                  .collection('messages')
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
+              stream: _messageStream,
               builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                // 最初のデータがまだ来ていないときだけローディングを表示
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                if (snapshot.data!.docs.isEmpty) {
                   return const Center(child: Text('メッセージがありません'));
                 }
 
                 final messages = snapshot.data!.docs;
+
+                // 🔔 この画面を開いている間は自分の未読カウントを 0 にリセット
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _markCurrentRoomAsRead();
+                });
 
                 return ListView.builder(
                   reverse: true,
@@ -309,6 +477,10 @@ class _ChatScreenState extends State<ChatScreen> {
                             _formatDateHeader(createdAt);
                       }
                     }
+
+                    // 🔹 メッセージのリアクションを取得
+                    String? reaction = message['reaction'] as String?;
+
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -326,8 +498,15 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
 
                         // 💬 **メッセージの吹き出し**
-                        _buildMessageTile(message['text'] ?? '', createdAt,
-                            imageUrls, videoUrl, isMe),
+                        _buildMessageTile(
+                          message['text'] ?? '',
+                          createdAt,
+                          imageUrls,
+                          videoUrl,
+                          isMe,
+                          reaction,
+                          messages[index].id,
+                        ),
                       ],
                     );
                   },
@@ -335,6 +514,56 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
+          if (_imageFiles.isNotEmpty)
+            SizedBox(
+              height: 90,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _imageFiles.length,
+                itemBuilder: (context, index) {
+                  final file = _imageFiles[index];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            file,
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _imageFiles.removeAt(index);
+                              });
+                            },
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.black54,
+                                shape: BoxShape.circle,
+                              ),
+                              padding: const EdgeInsets.all(2),
+                              child: const Icon(
+                                Icons.close,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
           if (_isUploading) // 🔹 画像・動画アップロード中のみ表示
             const Padding(
               padding: EdgeInsets.all(8.0),
@@ -353,7 +582,7 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.add), // トリガーボタン
+                    icon: Icon(_isIconVisible ? Icons.remove : Icons.add,),
                     onPressed: () {
                       setState(() {
                         _isIconVisible = !_isIconVisible; // アイコン表示/非表示の切り替え
@@ -365,11 +594,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       icon: const Icon(Icons.image),
                       onPressed: () => _pickImages(),
                     ),
-                  if (_isIconVisible) // _isIconVisibleがtrueの場合のみ表示
-                    IconButton(
-                      icon: const Icon(Icons.videocam),
-                      onPressed: () => _pickVideo(),
-                    ),
+                  // if (_isIconVisible) // _isIconVisibleがtrueの場合のみ表示
+                  //   IconButton(
+                  //     icon: const Icon(Icons.videocam),
+                  //     onPressed: () => _pickVideo(),
+                  //   ),
                   Expanded(
                     child: TextField(
                       controller: _messageController,
@@ -387,7 +616,31 @@ class _ChatScreenState extends State<ChatScreen> {
                         : const Icon(Icons.send),
                     onPressed: (_isSending || _isUploading)
                         ? null
-                        : () => _sendMessage(_messageController.text), // 送信処理
+                        : () async {
+                            final text = _messageController.text.trim();
+                            // 何も入力も選択もない場合は何もしない
+                            if (text.isEmpty && _imageFiles.isEmpty) {
+                              return;
+                            }
+
+                            // 画像が選択されている場合は、テキスト＋画像をまとめて送信
+                            if (_imageFiles.isNotEmpty) {
+                              setState(() {
+                                _isUploading = true;
+                              });
+                              try {
+                                final files = List<File>.from(_imageFiles);
+                                await _uploadImages(files, messageText: text);
+                              } finally {
+                                setState(() {
+                                  _isUploading = false;
+                                });
+                              }
+                            } else {
+                              // テキストのみ
+                              await _sendMessage(text);
+                            }
+                          },
                   ),
                 ],
               ),
@@ -396,11 +649,18 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(height: 30),
         ],
       ),
+      ),
     );
   }
 
-  Widget _buildMessageTile(String messageText, Timestamp? createdAt,
-      List<String> imageUrls, String? videoUrl, bool isMe) {
+  Widget _buildMessageTile(
+      String messageText,
+      Timestamp? createdAt,
+      List<String> imageUrls,
+      String? videoUrl,
+      bool isMe,
+      String? reaction,
+      String messageId) {
     return Padding(
       padding: const EdgeInsets.symmetric(
           vertical: 5, horizontal: 10), // 🔹 吹き出し全体のパディング追加
@@ -479,12 +739,140 @@ class _ChatScreenState extends State<ChatScreen> {
                       },
                       child: const Icon(Icons.play_circle_filled, size: 50),
                     ),
-                  if (messageText.isNotEmpty)
-                    Text(
-                      messageText,
-                      style: const TextStyle(fontSize: 16),
-                      softWrap: true,
+                   if (messageText.isNotEmpty)
+  GestureDetector(
+    onLongPress: () async {
+      // 長押しでメニューを表示（コピー / リアクション / キャンセル）
+      final result = await showModalBottomSheet<String>(
+        context: context,
+        builder: (BuildContext context) {
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.copy),
+                  title: const Text('コピー'),
+                  onTap: () {
+                    Navigator.pop(context, 'copy');
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.emoji_emotions),
+                  title: const Text('リアクション'),
+                  onTap: () {
+                    Navigator.pop(context, 'reaction');
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.close),
+                  title: const Text('キャンセル'),
+                  onTap: () {
+                    Navigator.pop(context, 'cancel');
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (result == 'copy') {
+        // コピー処理
+        await Clipboard.setData(
+          ClipboardData(text: messageText),
+        );
+        ScaffoldMessenger.of(this.context).showSnackBar(
+          const SnackBar(
+            content: Text('メッセージをコピーしました'),
+          ),
+        );
+      } else if (result == 'reaction') {
+        // リアクション選択用のボトムシート
+        final emoji = await showModalBottomSheet<String>(
+          context: context,
+          builder: (BuildContext context) {
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12.0, horizontal: 16.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _buildReactionEmojiButton(context, '👍'),
+                        _buildReactionEmojiButton(context, '❤️'),
+                        _buildReactionEmojiButton(context, '😂'),
+                        _buildReactionEmojiButton(context, '😮'),
+                        _buildReactionEmojiButton(context, '👏'),
+                        _buildReactionEmojiButton(context, '🙇'),
+                      ],
                     ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.remove_circle),
+                    title: const Text('リアクションを削除'),
+                    onTap: () {
+                      Navigator.pop(context, ''); // 空文字で削除
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.close),
+                    title: const Text('キャンセル'),
+                    onTap: () {
+                      Navigator.pop(context, null);
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+
+        if (emoji != null) {
+          // Firestore に reaction フィールドを保存（空文字なら削除扱い）
+          final messageRef = _firestore
+              .collection('chatRooms')
+              .doc(widget.roomId)
+              .collection('messages')
+              .doc(messageId);
+
+          if (emoji.isEmpty) {
+            await messageRef.update({'reaction': FieldValue.delete()});
+          } else {
+            await messageRef.update({'reaction': emoji});
+          }
+        }
+      }
+    },
+    child: Text(
+      messageText,
+      style: const TextStyle(fontSize: 16),
+      softWrap: true,
+    ),
+  ),
+  if (reaction != null && reaction.isNotEmpty)
+  Padding(
+    padding: const EdgeInsets.only(top: 4.0),
+    child: Align(
+      alignment: Alignment.centerRight,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Text(
+          reaction,
+          style: const TextStyle(fontSize: 14),
+        ),
+      ),
+    ),
+  ),
                 ],
               ),
             ),
@@ -535,4 +923,16 @@ class FullScreenImagePage extends StatelessWidget {
       ),
     );
   }
+}
+
+Widget _buildReactionEmojiButton(BuildContext context, String emoji) {
+  return InkWell(
+    onTap: () {
+      Navigator.pop(context, emoji);
+    },
+    child: Text(
+      emoji,
+      style: const TextStyle(fontSize: 28),
+    ),
+  );
 }

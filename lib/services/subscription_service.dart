@@ -72,9 +72,10 @@ class SubscriptionService {
           .doc(platform)
           .set({
         'productId': purchasedProductId,
-        'purchaseDate': purchaseDate,
-        'expiryDate': expiryDate,
+        'purchaseDate': Timestamp.fromDate(purchaseDate),
+        'expiryDate': Timestamp.fromDate(expiryDate),
         'status': entitlement.isActive ? 'active' : 'inactive',
+        'platform': platform,
       });
 
       print(

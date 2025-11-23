@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart'; // 日付フォーマット用
@@ -92,6 +93,34 @@ class _SignUpPageState extends State<SignUpPage> {
   ];
   String? _selectedPrefecture;
 
+    Future<void> _setupFcmForNewUser(String uid) async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+
+      // iOS向けの通知権限リクエスト（Androidは基本的に不要だが呼んでも問題なし）
+      await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      final token = await messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .update({
+          'fcmTokens': FieldValue.arrayUnion([token]),
+        });
+        print('✅ FCM token saved for user $uid: $token');
+      } else {
+        print('⚠️ FCM token is null or empty for user $uid');
+      }
+    } catch (e) {
+      print('⚠️ Error setting up FCM for new user $uid: $e');
+    }
+  }
+
   Future<void> _pickImage() async {
     final pickedFile =
         await ImagePicker().pickImage(source: ImageSource.gallery);
@@ -179,17 +208,12 @@ class _SignUpPageState extends State<SignUpPage> {
           'createdAt': Timestamp.now(),
         });
 
+        await _setupFcmForNewUser(userCredential.user!.uid);
+
         try {
-          final purchaserInfo = await Purchases.getCustomerInfo();
-          final currentAppUserID = purchaserInfo.originalAppUserId;
-          if (currentAppUserID.contains('anonymous')) {
-            print('👻 匿名ユーザーなので logOut スキップ');
-          } else {
-            await Purchases.logOut();
-            print('✅ RevenueCat: logOut 完了');
-          }
+          // ✅ Firebase UID で RevenueCat にログイン（logOut は不要）
           await Purchases.logIn(userCredential.user!.uid);
-          print('✅ RevenueCat: logIn 完了');
+          print('✅ RevenueCat: logIn 完了 (${userCredential.user!.uid})');
         } catch (e) {
           print('⚠️ RevenueCatログイン時のエラー: $e');
         }

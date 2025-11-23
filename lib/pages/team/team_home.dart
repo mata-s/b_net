@@ -247,7 +247,7 @@ class _TeamHomePageState extends State<TeamHomePage> {
 
                 try {
                   // RevenueCat を Firebase UID で再ログイン
-                  await Purchases.logOut();
+                  // await Purchases.logOut();
                   await Purchases.logIn(user.uid);
                   print('✅ RevenueCat: Firebase UID にログイン (${user.uid})');
 
@@ -317,7 +317,13 @@ class _TeamHomePageState extends State<TeamHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+      return WillPopScope(
+    // iOSの横スワイプやAndroidの戻るボタンで前のページに戻れないようにする
+    onWillPop: () async {
+      // false を返すと「戻る」操作をキャンセルする
+      return false;
+    },
+    child: Scaffold(
       appBar: AppBar(
         title: Text('${widget.team['teamName']}'),
       ),
@@ -363,6 +369,7 @@ class _TeamHomePageState extends State<TeamHomePage> {
           ),
         ],
       ),
+    ),
     );
   }
 }

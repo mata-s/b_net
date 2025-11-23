@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import '../home_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -19,6 +20,34 @@ class _LoginPageState extends State<LoginPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   bool _obscureText = true; // パスワード表示非表示のフラグ
+
+  Future<void> _setupFcmForLoggedInUser(String uid) async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+
+      // 通知権限リクエスト（iOS向け）
+      await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      final token = await messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .update({
+          'fcmTokens': FieldValue.arrayUnion([token]),
+        });
+        print('✅ FCM token saved for user $uid: $token');
+      } else {
+        print('⚠️ FCM token is null or empty for user $uid');
+      }
+    } catch (e) {
+      print('⚠️ Error setting up FCM for logged-in user $uid: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -38,23 +67,13 @@ class _LoginPageState extends State<LoginPage> {
 
       if (user != null) {
         try {
-          // 👻 現在の RevenueCat ユーザーを確認
-          final purchaserInfo = await Purchases.getCustomerInfo();
-          final currentAppUserID = purchaserInfo.originalAppUserId;
-
-          if (currentAppUserID.contains('anonymous')) {
-            print('👻 現在は匿名ユーザーなので logOut スキップ');
-          } else {
-            await Purchases.logOut();
-            print('✅ RevenueCat: logOut 完了');
-          }
+          // ✅ Firebase UID で RevenueCat にログイン（logOut は不要）
+          await Purchases.logIn(user.uid);
         } catch (e) {
-          print('⚠️ RevenueCat logOut エラー（無視してOK）: $e');
         }
 
-        // ✅ Firebase UID で RevenueCat にログイン
-        await Purchases.logIn(user.uid);
-        print('✅ RevenueCat: logIn 完了 (${user.uid})');
+        // 🔔 ログインユーザーの FCM トークンを即時登録・更新
+        await _setupFcmForLoggedInUser(user.uid);
       }
 
       // ✅ 画面遷移

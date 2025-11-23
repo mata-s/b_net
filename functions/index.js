@@ -1,5 +1,6 @@
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
+import {getMessaging} from "firebase-admin/messaging";
 import * as functions from "firebase-functions";
 import {onRequest} from "firebase-functions/v2/https";
 import {onCall} from "firebase-functions/v2/https";
@@ -11,6 +12,7 @@ import {CloudTasksClient} from "@google-cloud/tasks";
 initializeApp();
 const db = getFirestore();
 const client = new CloudTasksClient();
+const messaging = getMessaging();
 
 const project =
   process.env.GCLOUD_PROJECT ||
@@ -7835,3 +7837,1616 @@ export const updateTeamAverageAge = onDocumentWritten(
     },
 );
 
+// チャットメッセージ保存後に通知を送る
+export const onChatMessageCreated =
+onDocumentCreated("chatRooms/{roomId}/messages/{messageId}", async (event) => {
+  const roomId = event.params.roomId;
+
+  // メッセージデータを取得
+  const snapshot = event.data;
+  const messageData = snapshot ? snapshot.data() : null;
+  if (!messageData) {
+    console.log("⚠️ messageData is empty, skipping notification.");
+    return;
+  }
+
+  const senderId = messageData.userId;
+  const senderName = messageData.userName || "新しいメッセージ";
+  const senderProfileImageUrl = messageData.userProfileImageUrl || "";
+  const text = messageData.text || "";
+  const hasImages =
+    Array.isArray(messageData.imageUrls) && messageData.imageUrls.length > 0;
+  const hasVideo = !!messageData.videoUrl;
+
+  // 通知本文の内容を決定
+  let body = text;
+  if (!body) {
+    if (hasImages && hasVideo) {
+      body = "画像と動画が送信されました";
+    } else if (hasImages) {
+      body = "画像が送信されました";
+    } else if (hasVideo) {
+      body = "動画が送信されました";
+    } else {
+      body = "新しいメッセージが届きました";
+    }
+  }
+
+  try {
+    // 該当チャットルームの参加者を取得
+    const chatRoomRef = db.collection("chatRooms").doc(roomId);
+    const chatRoomSnap = await chatRoomRef.get();
+
+    if (!chatRoomSnap.exists) {
+      console.log(`⚠️ chatRoom ${roomId} not found, skipping notification.`);
+      return;
+    }
+
+    const chatRoom = chatRoomSnap.data() || {};
+    const participants = Array.isArray(chatRoom.participants) ?
+      chatRoom.participants :
+      [];
+
+    if (!participants.length) {
+      console.log(`⚠️ chatRoom ${roomId} has no participants.`);
+      return;
+    }
+
+    // 送信者以外を通知対象にする
+    const targetUserIds = participants.filter((uid) => uid !== senderId);
+
+    if (!targetUserIds.length) {
+      console.log(`⚠️ No target users for room ${roomId}.`);
+      return;
+    }
+
+    const tokens = [];
+
+    // 各ユーザーの FCM トークンを取得
+    for (const uid of targetUserIds) {
+      const userSnap = await db.collection("users").doc(uid).get();
+      if (!userSnap.exists) continue;
+
+      const userData = userSnap.data() || {};
+      const fcmTokens = userData.fcmTokens;
+
+      if (Array.isArray(fcmTokens)) {
+        // 配列形式の場合
+        tokens.push(...fcmTokens.filter((t) => typeof t === "string" && t));
+      } else if (fcmTokens && typeof fcmTokens === "object") {
+        // {token: true} のようなマップ形式の場合
+        tokens.push(
+            ...Object.keys(fcmTokens).filter(
+                (t) => typeof t === "string" && t,
+            ),
+        );
+      }
+    }
+
+    if (!tokens.length) {
+      console.log("⚠️ No FCM tokens found for target users.");
+      return;
+    }
+
+    // 通知ペイロードを構築
+    const multicastMessage = {
+      tokens,
+      notification: {
+        title: senderName,
+        body,
+      },
+      data: {
+        roomId: roomId,
+        // 通知を受け取った側から見た「相手」の情報として sender を渡す
+        recipientId: senderId,
+        recipientName: senderName,
+        recipientProfileImageUrl: senderProfileImageUrl,
+        click_action: "FLUTTER_NOTIFICATION_CLICK",
+        type: "chat",
+      },
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          clickAction: "FLUTTER_NOTIFICATION_CLICK",
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
+    };
+
+    const response = await messaging.sendEachForMulticast(multicastMessage);
+    console.log(
+        `📨 Sent chat notifications for room ${roomId}. Success: 
+        ${response.successCount}, Failure: ${response.failureCount}`,
+    );
+  } catch (error) {
+    console.error("🚨 Error sending chat notification:", error);
+  }
+});
+
+/**
+ * teams/{teamId}/schedule/{scheduleId} が作成されたときに
+ * チームメンバー全員に「スケジュール追加」のプッシュ通知を送る
+ */
+export const onTeamScheduleCreated = onDocumentCreated(
+    "teams/{teamId}/schedule/{scheduleId}",
+    async (event) => {
+      const snap = event.data;
+      const {teamId, scheduleId} = event.params;
+
+      if (!snap) {
+        console.log("No schedule snapshot; skip notification");
+        return;
+      }
+
+      // Firestore ドキュメントの中身を取得
+      const data = snap.data() || {};
+
+      // Firestore 上では game_date と title はトップレベルのフィールド
+      const gameDateField = data.game_date;
+      const title = data.title || "イベント";
+
+      let dateText = "";
+
+      // game_date が Timestamp か文字列かを判定してテキスト化
+      if (gameDateField instanceof Timestamp) {
+        const d = gameDateField.toDate();
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        dateText = `${month}月${day}日`;
+      } else if (typeof gameDateField === "string") {
+        const m = gameDateField.match(/(\d{1,2})月(\d{1,2})日/);
+        if (m) {
+          dateText = `${m[1]}月${m[2]}日`;
+        } else {
+          dateText = gameDateField;
+        }
+      }
+
+      // チームメンバー一覧を取得
+      const teamSnap = await db.collection("teams").doc(teamId).get();
+      const teamData = teamSnap.data() || {};
+      const memberIds = Array.isArray(teamData.members) ? teamData.members : [];
+
+      if (memberIds.length === 0) {
+        console.log("No team members; skip schedule notification");
+        return;
+      }
+
+      // 各メンバーの FCM トークンを集める
+      const tokenSet = new Set();
+
+      for (const memberId of memberIds) {
+        const userSnap = await db.collection("users").doc(memberId).get();
+        if (!userSnap.exists) continue;
+
+        const userData = userSnap.data() || {};
+        const fcmTokens = Array.isArray(userData.fcmTokens) ?
+        userData.fcmTokens :
+        [];
+
+        for (const t of fcmTokens) {
+          if (t && typeof t === "string") {
+            tokenSet.add(t);
+          }
+        }
+      }
+
+      const tokens = Array.from(tokenSet);
+
+      if (tokens.length === 0) {
+        console.log(
+            "No FCM tokens for team members; skip schedule notification",
+        );
+        return;
+      }
+
+      const notificationTitle =
+      dateText && title ?
+        `${dateText}に${title}が予定されました` :
+        `${title}が予定されました`;
+
+      const notificationBody = "リアクションしましょう";
+
+      const message = {
+        notification: {
+          title: notificationTitle,
+          body: notificationBody,
+        },
+        data: {
+          type: "schedule",
+          teamId: teamId,
+          scheduleId: scheduleId,
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+        },
+        android: {
+          priority: "high",
+          notification: {
+            sound: "default",
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+            },
+          },
+        },
+        tokens,
+      };
+
+      try {
+      // getMessaging() から作った messaging を使う
+        const response = await messaging.sendEachForMulticast(message);
+        console.log(
+            `✅ Sent schedule notification to ${tokens.length} devices`,
+            safeStringify(response),
+        );
+      } catch (err) {
+        console.error("🚨 Error sending schedule notification", err);
+      }
+    },
+);
+
+/**
+ * teams/{teamId}/schedule/{scheduleId} の comments または stamps が更新されたときに
+ * チームメンバー全員に「リアクションがあった」通知を送る
+ */
+export const onTeamScheduleReactionUpdated = onDocumentWritten(
+    "teams/{teamId}/schedule/{scheduleId}",
+    async (event) => {
+      const beforeSnap = event.data && event.data.before;
+      const afterSnap = event.data && event.data.after;
+      const {teamId, scheduleId} = event.params;
+
+      // 作成や削除はスキップ（更新時のみ）
+      if (
+        !beforeSnap || !afterSnap || !beforeSnap.exists || !afterSnap.exists
+      ) {
+        console.log("Skip reaction notification (create/delete).");
+        return;
+      }
+
+      const before = beforeSnap.data() || {};
+      const after = afterSnap.data() || {};
+
+      const beforeComments = before.comments || {};
+      const afterComments = after.comments || {};
+      const beforeStamps = before.stamps || {};
+      const afterStamps = after.stamps || {};
+
+      const commentsChanged =
+        JSON.stringify(beforeComments) !== JSON.stringify(afterComments);
+      const stampsChanged =
+        JSON.stringify(beforeStamps) !== JSON.stringify(afterStamps);
+
+      if (!commentsChanged && !stampsChanged) {
+        console.log(
+            "No comments/stamps change; skip schedule reaction notification.",
+        );
+        return;
+      }
+
+      // タイトル・日付は最新の after 側を使う
+      const gameDateField = after.game_date;
+      const title = after.title || "イベント";
+
+      let dateText = "";
+
+      if (gameDateField instanceof Timestamp) {
+        const d = gameDateField.toDate();
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        dateText = `${month}月${day}日`;
+      } else if (typeof gameDateField === "string") {
+        const m = gameDateField.match(/(\d{1,2})月(\d{1,2})日/);
+        if (m) {
+          dateText = `${m[1]}月${m[2]}日`;
+        } else {
+          dateText = gameDateField;
+        }
+      }
+
+      // チームメンバー一覧を取得
+      const teamSnap = await db.collection("teams").doc(teamId).get();
+      const teamData = teamSnap.data() || {};
+      const memberIds = Array.isArray(teamData.members) ? teamData.members : [];
+
+      if (memberIds.length === 0) {
+        console.log("No team members; skip schedule reaction notification");
+        return;
+      }
+
+      const tokenSet = new Set();
+
+      for (const memberId of memberIds) {
+        const userSnap = await db.collection("users").doc(memberId).get();
+        if (!userSnap.exists) continue;
+
+        const userData = userSnap.data() || {};
+        const fcmTokens = Array.isArray(userData.fcmTokens) ?
+          userData.fcmTokens :
+          [];
+
+        for (const t of fcmTokens) {
+          if (t && typeof t === "string") {
+            tokenSet.add(t);
+          }
+        }
+      }
+
+      const tokens = Array.from(tokenSet);
+
+      if (tokens.length === 0) {
+        console.log(
+            "No FCM tokens; skip schedule reaction notification",
+        );
+        return;
+      }
+
+      // コメント / スタンプの差分から、誰が何をしたかを推定して本文を作る
+      // Firestore 上の comments / stamps は配列 or マップのどちらでも動くようにする
+      const commentsList = Array.isArray(afterComments) ?
+        afterComments :
+        Object.values(afterComments || {});
+      const stampsList = Array.isArray(afterStamps) ?
+        afterStamps :
+        Object.values(afterStamps || {});
+
+      let latestCommentUser = null;
+      let latestCommentText = "";
+      if (commentsChanged && commentsList.length > 0) {
+        const lastComment = commentsList[commentsList.length - 1] || {};
+        latestCommentUser = lastComment.userName || lastComment.name || "誰か";
+
+        // Firestore 側では comment / text / message など、どのキーでも安全に拾う
+        const rawCommentText =
+          (typeof lastComment.comment === "string" && lastComment.comment) ||
+          (typeof lastComment.text === "string" && lastComment.text) ||
+          (typeof lastComment.message === "string" && lastComment.message) ||
+          "";
+        latestCommentText = rawCommentText;
+      }
+
+      let latestStampUser = null;
+      let latestStampLabel = "";
+      if (stampsChanged && stampsList.length > 0) {
+        const lastStamp = stampsList[stampsList.length - 1] || {};
+        latestStampUser = lastStamp.userName || lastStamp.name || "誰か";
+        // スタンプの種類があればラベルに利用
+        const stampType = lastStamp.stampType || lastStamp.type || "";
+        latestStampLabel = stampType ? `${stampType}` : "スタンプ";
+      }
+
+      // 本文を組み立て（「誰々：コメント」「誰々：スタンプ」形式）
+      let bodyText = "リアクションがありました";
+
+      if (latestCommentUser && latestStampUser) {
+        // コメントとスタンプ両方変わったとき
+        const shortComment =
+          latestCommentText && typeof latestCommentText === "string" ?
+            (latestCommentText.length > 20 ?
+              `${latestCommentText.slice(0, 20)}…` :
+              latestCommentText) :
+            "";
+        const commentLine = shortComment ?
+          `${latestCommentUser}：${shortComment}` :
+          `${latestCommentUser}：コメント`;
+        const stampLine = `${latestStampUser}：${latestStampLabel}`;
+        bodyText = `${commentLine}\n${stampLine}`;
+      } else if (latestCommentUser) {
+        const shortComment =
+          latestCommentText && typeof latestCommentText === "string" ?
+            (latestCommentText.length > 20 ?
+              `${latestCommentText.slice(0, 20)}…` :
+              latestCommentText) :
+            "";
+        bodyText = shortComment ?
+          `${latestCommentUser}：${shortComment}` :
+          `${latestCommentUser}：コメントが追加されました`;
+      } else if (latestStampUser) {
+        bodyText = `${latestStampUser}：${latestStampLabel}`;
+      }
+
+      const notificationTitle =
+        dateText && title ?
+          `${dateText}の${title}` :
+          title || "イベント";
+
+      const message = {
+        notification: {
+          title: notificationTitle,
+          body: bodyText,
+        },
+        data: {
+          type: "schedule",
+          teamId: teamId,
+          scheduleId: scheduleId,
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+        },
+        android: {
+          priority: "high",
+          notification: {
+            sound: "default",
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+            },
+          },
+        },
+        tokens,
+      };
+
+      try {
+        const response = await messaging.sendEachForMulticast(message);
+        console.log(
+            `✅ Sent schedule reaction notification to ${tokens.length} devices`,
+            safeStringify(response),
+        );
+      } catch (err) {
+        console.error("🚨 Error sending schedule reaction notification", err);
+      }
+    },
+);
+
+// ================= MVP 共通ヘルパー =================
+// MVP Cloud Tasks queue paths and functions base URL
+const mvpReminderQueuePath =
+  client.queuePath(project, location, "mvp-reminder-queue");
+const mvpTallyQueuePath =
+  client.queuePath(project, location, "mvp-tally-queue");
+
+// v2 HTTPS Functions のベースURL（Cloud Tasks から叩く用）
+const functionsBaseUrl =
+  `https://${location}-${project}.cloudfunctions.net`;
+
+/**
+ * 指定したユーザーID配列から FCM トークンをまとめて取得
+ * @param {string[]} userIds
+ * @return {Promise<string[]>}
+ */
+async function getFcmTokensForUsers(userIds) {
+  const tokens = [];
+
+  for (const uid of userIds) {
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!userSnap.exists) continue;
+
+    const userData = userSnap.data() || {};
+    const userTokens = userData.fcmTokens || [];
+
+    if (Array.isArray(userTokens)) {
+      for (const t of userTokens) {
+        if (typeof t === "string" && t) {
+          tokens.push(t);
+        }
+      }
+    }
+  }
+
+  return tokens;
+}
+
+/**
+ * 月間MVPが作成されたときに通知を送る
+ * パス: teams/{teamId}/mvp_month/{mvpId}
+ */
+export const onMvpMonthCreated = onDocumentCreated(
+    "teams/{teamId}/mvp_month/{mvpId}",
+    async (event) => {
+      const snap = event.data;
+      if (!snap) {
+        console.log("No snapshot in onMvpMonthCreated");
+        return;
+      }
+
+      const data = snap.data() || {};
+      const teamId = event.params.teamId;
+      const mvpId = event.params.mvpId;
+
+      const theme = data.theme || "月間MVP";
+
+      const startRaw = data.voteStartDate;
+      const endRaw = data.voteEndDate;
+      const deadlineRaw = data.voteDeadline || endRaw;
+
+      const toDate = (v) => (v && v.toDate ? v.toDate() : null);
+
+      const start = toDate(startRaw);
+      const end = toDate(endRaw);
+      const deadline = toDate(deadlineRaw);
+
+      const fmt = (d) =>
+      d ? `${d.getMonth() + 1}月${d.getDate()}日` : "未設定";
+
+      const periodText =
+      start && end ? `${fmt(start)}〜${fmt(end)}` : null;
+
+      // 通知タイトル・本文
+      const title = `${theme}`;
+      const body = periodText ?
+      `投票期間：${periodText}` :
+      "チームページから投票できます";
+
+      // チームメンバーの FCM トークン取得
+      const teamDoc = await db.collection("teams").doc(teamId).get();
+      if (!teamDoc.exists) {
+        console.log("Team doc not found:", teamId);
+        return;
+      }
+
+      const teamData = teamDoc.data() || {};
+      const memberIds = teamData.members || [];
+
+      const tokenSet = new Set();
+
+      for (const uid of memberIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+        const userData = userDoc.data() || {};
+        const fcmTokens = userData.fcmTokens || [];
+        for (const t of fcmTokens) {
+          if (t) tokenSet.add(t);
+        }
+      }
+
+      const tokens = Array.from(tokenSet);
+      if (tokens.length === 0) {
+        console.log("No FCM tokens for MVP notice");
+        return;
+      }
+
+      const message = {
+        tokens,
+        notification: {title, body},
+        data: {
+          type: "mvp_vote",
+          teamId,
+          mvpId,
+          theme,
+        },
+        android: {
+          priority: "high",
+          notification: {clickAction: "FLUTTER_NOTIFICATION_CLICK"},
+        },
+        apns: {
+          payload: {
+            aps: {
+              "sound": "default",
+              "content-available": 1,
+            },
+          },
+          headers: {
+            "apns-priority": "10",
+          },
+        },
+      };
+
+      const res = await messaging.sendEachForMulticast(message);
+      console.log("MVP notice sent:", res.successCount, "success");
+
+      // --- Cloud Tasks で「締切前リマインド」と「集計日お知らせ」を予約 ---
+      if (deadline) {
+        const now = new Date();
+
+        // 「締切直前」= 締切の3時間前（必要に応じてここを調整）
+        const reminderTime = new Date(deadline.getTime() - 3 * 60 * 60 * 1000);
+        const tallyTime = deadline; // 集計日は締切日時そのもの
+
+        const toScheduleTime = (d) => ({
+          seconds: Math.floor(d.getTime() / 1000),
+        });
+
+        // 1) 締切前リマインド（未投票者向け）
+        if (reminderTime > now) {
+          try {
+            await client.createTask({
+              parent: mvpReminderQueuePath,
+              task: {
+                scheduleTime: toScheduleTime(reminderTime),
+                httpRequest: {
+                  httpMethod: "POST",
+                  url: `${functionsBaseUrl}/mvpVoteReminderTask`,
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: Buffer.from(
+                      JSON.stringify({teamId, mvpId}),
+                  ).toString("base64"),
+                },
+              },
+            });
+            console.log("📥 Enqueued MVP vote reminder task", {
+              teamId,
+              mvpId,
+              reminderTime: reminderTime.toISOString(),
+            });
+          } catch (e) {
+            console.error("🚨 Failed to enqueue MVP vote reminder task", e);
+          }
+        }
+
+        // 2) 集計日お知らせ（作成者向け）
+        if (tallyTime > now) {
+          try {
+            await client.createTask({
+              parent: mvpTallyQueuePath,
+              task: {
+                scheduleTime: toScheduleTime(tallyTime),
+                httpRequest: {
+                  httpMethod: "POST",
+                  url: `${functionsBaseUrl}/mvpTallyNoticeTask`,
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: Buffer.from(
+                      JSON.stringify({teamId, mvpId}),
+                  ).toString("base64"),
+                },
+              },
+            });
+            console.log("📥 Enqueued MVP tally notice task", {
+              teamId,
+              mvpId,
+              tallyTime: tallyTime.toISOString(),
+            });
+          } catch (e) {
+            console.error("🚨 Failed to enqueue MVP tally notice task", e);
+          }
+        }
+      }
+    },
+);
+
+// ================= MVP: 結果発表通知 =================
+export const onMvpTallied = onDocumentWritten(
+    "mvp_month/{mvpMonthId}",
+    async (event) => {
+      const beforeSnap = event.data.before;
+      const afterSnap = event.data.after;
+
+      if (!afterSnap || !afterSnap.exists) {
+        return;
+      }
+
+      const beforeData = beforeSnap && beforeSnap.exists ?
+      beforeSnap.data() : null;
+      const afterData = afterSnap.data() || {};
+
+      const wasTallied = beforeData && beforeData.isTallied === true;
+      const isTallied = afterData.isTallied === true;
+
+      // false → true のときだけ通知
+      if (!isTallied || wasTallied) {
+        return;
+      }
+
+      const mvpMonthId = event.params.mvpMonthId;
+      const teamId = afterData.teamId;
+
+      if (!teamId) {
+        console.log(
+            `⚠️ teamId 未設定の mvp_month（結果通知スキップ）: ${mvpMonthId}`,
+        );
+        return;
+      }
+
+      const teamSnap = await db.collection("teams").doc(teamId).get();
+      if (!teamSnap.exists) {
+        console.log(`⚠️ team not found for MVP result: ${teamId}`);
+        return;
+      }
+
+      const teamData = teamSnap.data() || {};
+      const members = teamData.members || [];
+
+      if (!Array.isArray(members) || members.length === 0) {
+        console.log(`ℹ️ メンバーなし teamId: ${teamId}`);
+        return;
+      }
+
+      const tokens = await getFcmTokensForUsers(members);
+      if (tokens.length === 0) {
+        console.log(
+            `⚠️ MVP 結果通知先トークンなし: teamId ${teamId}`,
+        );
+        return;
+      }
+
+      const theme = afterData.theme || "MVP";
+      const title = `「${theme}」の結果が発表されました`;
+      const body = "アプリから結果をチェックしてみましょう。";
+
+      await messaging.sendEachForMulticast({
+        notification: {title, body},
+        tokens,
+        data: {
+          type: "mvpResult",
+          teamId: String(teamId),
+          mvpMonthId: String(mvpMonthId),
+        },
+      });
+
+      console.log(
+          `🎉 MVP 結果発表通知送信: mvp_month ${mvpMonthId}, ` +
+        `teamId=${teamId}, members=${members.length}`,
+      );
+    },
+);
+
+// ================= MVP: 締切前リマインド（未投票者向け） =================
+export const mvpVoteReminderTask = onRequest(
+    {
+      timeoutSeconds: 540,
+      region: "asia-northeast1",
+    },
+    async (req, res) => {
+      try {
+        const {teamId, mvpId} = req.body || {};
+        if (!teamId || !mvpId) {
+          res.status(400).send("Missing teamId or mvpId");
+          return;
+        }
+
+        const teamIdStr = String(teamId);
+        const mvpIdStr = String(mvpId);
+
+        // MVP ドキュメントを取得
+        const mvpRef = db
+            .collection("teams")
+            .doc(teamIdStr)
+            .collection("mvp_month")
+            .doc(mvpIdStr);
+        const mvpSnap = await mvpRef.get();
+
+        if (!mvpSnap.exists) {
+          console.log("mvpVoteReminderTask: MVP doc not found", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          });
+          res.status(200).send("MVP doc not found");
+          return;
+        }
+
+        const mvpData = mvpSnap.data() || {};
+        const theme = mvpData.theme || "MVP";
+
+        // チームメンバーと未投票者の抽出
+        const teamSnap = await db.collection("teams").doc(teamIdStr).get();
+        if (!teamSnap.exists) {
+          console.log(
+              "mvpVoteReminderTask: team not found", {teamId: teamIdStr},
+          );
+          res.status(200).send("team not found");
+          return;
+        }
+
+        const teamData = teamSnap.data() || {};
+        const members = Array.isArray(teamData.members) ? teamData.members : [];
+
+        if (!members.length) {
+          console.log("mvpVoteReminderTask: no members", {teamId: teamIdStr});
+          res.status(200).send("no members");
+          return;
+        }
+
+        // votes サブコレクションから投票済みユーザーIDを取得
+        const votesSnap = await mvpRef.collection("votes").get();
+        const votedSet = new Set();
+        votesSnap.forEach((doc) => votedSet.add(doc.id));
+
+        const notVoted = members.filter((uid) => !votedSet.has(uid));
+
+        if (!notVoted.length) {
+          console.log("mvpVoteReminderTask: all members already voted", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          });
+          res.status(200).send("all voted");
+          return;
+        }
+
+        const tokens = await getFcmTokensForUsers(notVoted);
+        if (!tokens.length) {
+          console.log(
+              "mvpVoteReminderTask: no FCM tokens for non-voters",
+              {teamId: teamIdStr, mvpId: mvpIdStr},
+          );
+          res.status(200).send("no tokens");
+          return;
+        }
+
+        const title = `${theme} の投票締切が近づいています`;
+        const body = "まだ投票していない人は、忘れずに投票しましょう。";
+
+        const result = await messaging.sendEachForMulticast({
+          tokens,
+          notification: {title, body},
+          data: {
+            type: "mvpVoteReminder",
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          },
+        });
+
+        console.log("🎯 MVP vote reminder sent", {
+          teamId: teamIdStr,
+          mvpId: mvpIdStr,
+          success: result.successCount,
+          failure: result.failureCount,
+          targetUsers: notVoted.length,
+        });
+
+        res.status(200).send("ok");
+      } catch (err) {
+        console.error("🚨 mvpVoteReminderTask error", err);
+        res.status(500).send("error");
+      }
+    },
+);
+
+// ================= MVP: 集計日当日のお知らせ（作成者向け） =================
+export const mvpTallyNoticeTask = onRequest(
+    {
+      timeoutSeconds: 540,
+      region: "asia-northeast1",
+    },
+    async (req, res) => {
+      try {
+        const {teamId, mvpId} = req.body || {};
+        if (!teamId || !mvpId) {
+          res.status(400).send("Missing teamId or mvpId");
+          return;
+        }
+
+        const teamIdStr = String(teamId);
+        const mvpIdStr = String(mvpId);
+
+        const mvpRef = db
+            .collection("teams")
+            .doc(teamIdStr)
+            .collection("mvp_month")
+            .doc(mvpIdStr);
+        const mvpSnap = await mvpRef.get();
+
+        if (!mvpSnap.exists) {
+          console.log("mvpTallyNoticeTask: MVP doc not found", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          });
+          res.status(200).send("MVP doc not found");
+          return;
+        }
+
+        const mvpData = mvpSnap.data() || {};
+        const theme = mvpData.theme || "MVP";
+        const createdBy = mvpData.createdBy || {};
+        const createdUid =
+          createdBy.uid || createdBy.userId || createdBy.id || null;
+
+        if (!createdUid) {
+          console.log("mvpTallyNoticeTask: createdBy UID not found", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          });
+          res.status(200).send("no creator uid");
+          return;
+        }
+
+        const tokens = await getFcmTokensForUsers([createdUid]);
+        if (!tokens.length) {
+          console.log("mvpTallyNoticeTask: no FCM tokens for creator", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+            createdUid,
+          });
+          res.status(200).send("no tokens");
+          return;
+        }
+
+        const title = `${theme} の集計日になりました`;
+        const body = "MVPの集計を行いましょう。";
+
+        const result = await messaging.sendEachForMulticast({
+          tokens,
+          notification: {title, body},
+          data: {
+            type: "mvpTallyNotice",
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          },
+        });
+
+        console.log("📊 MVP tally notice sent", {
+          teamId: teamIdStr,
+          mvpId: mvpIdStr,
+          createdUid,
+          success: result.successCount,
+          failure: result.failureCount,
+        });
+
+        res.status(200).send("ok");
+      } catch (err) {
+        console.error("🚨 mvpTallyNoticeTask error", err);
+        res.status(500).send("error");
+      }
+    },
+);
+
+
+// ================= 年間MVP 共通ヘルパー =================
+// 年間MVP 用 Cloud Tasks queue paths
+const mvpYearReminderQueuePath =
+  client.queuePath(project, location, "mvp-year-reminder-queue");
+const mvpYearTallyQueuePath =
+  client.queuePath(project, location, "mvp-year-tally-queue");
+
+/**
+ * 年間MVPが作成されたときに通知を送る
+ * パス: teams/{teamId}/mvp_year/{mvpId}
+ */
+export const onMvpYearCreated = onDocumentCreated(
+    "teams/{teamId}/mvp_year/{mvpId}",
+    async (event) => {
+      const snap = event.data;
+      if (!snap) {
+        console.log("No snapshot in onMvpYearCreated");
+        return;
+      }
+
+      const data = snap.data() || {};
+      const teamId = event.params.teamId;
+      const mvpId = event.params.mvpId;
+
+      const theme = data.theme || "年間MVP";
+
+      const startRaw = data.voteStartDate;
+      const endRaw = data.voteEndDate;
+      const deadlineRaw = data.voteDeadline || endRaw;
+
+      const toDate = (v) => (v && v.toDate ? v.toDate() : null);
+
+      const start = toDate(startRaw);
+      const end = toDate(endRaw);
+      const deadline = toDate(deadlineRaw);
+
+      const fmt = (d) =>
+        d ? `${d.getMonth() + 1}月${d.getDate()}日` : "未設定";
+
+      const periodText =
+        start && end ? `${fmt(start)}〜${fmt(end)}` : null;
+
+      // 通知タイトル・本文
+      const title = `${theme}`;
+      const body = periodText ?
+        `投票期間：${periodText}` :
+        "チームページから投票できます";
+
+      // チームメンバーの FCM トークン取得
+      const teamDoc = await db.collection("teams").doc(teamId).get();
+      if (!teamDoc.exists) {
+        console.log("Team doc not found (Year MVP):", teamId);
+        return;
+      }
+
+      const teamData = teamDoc.data() || {};
+      const memberIds = teamData.members || [];
+
+      const tokenSet = new Set();
+
+      for (const uid of memberIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+        const userData = userDoc.data() || {};
+        const fcmTokens = userData.fcmTokens || [];
+        for (const t of fcmTokens) {
+          if (t) tokenSet.add(t);
+        }
+      }
+
+      const tokens = Array.from(tokenSet);
+      if (tokens.length === 0) {
+        console.log("No FCM tokens for Year MVP notice");
+        return;
+      }
+
+      const message = {
+        tokens,
+        notification: {title, body},
+        data: {
+          type: "mvp_year_vote",
+          teamId,
+          mvpId,
+          theme,
+        },
+        android: {
+          priority: "high",
+          notification: {clickAction: "FLUTTER_NOTIFICATION_CLICK"},
+        },
+        apns: {
+          payload: {
+            aps: {
+              "sound": "default",
+              "content-available": 1,
+            },
+          },
+          headers: {
+            "apns-priority": "10",
+          },
+        },
+      };
+
+      const res = await messaging.sendEachForMulticast(message);
+      console.log("Year MVP notice sent:", res.successCount, "success");
+
+      // --- Cloud Tasks で「締切前リマインド」と「集計日お知らせ」を予約 ---
+      if (deadline) {
+        const now = new Date();
+
+        // 「締切直前」= 締切の3時間前（必要に応じてここを調整）
+        const reminderTime =
+          new Date(deadline.getTime() - 3 * 60 * 60 * 1000);
+        const tallyTime = deadline; // 集計日は締切日時そのもの
+
+        const toScheduleTime = (d) => ({
+          seconds: Math.floor(d.getTime() / 1000),
+        });
+
+        // 1) 締切前リマインド（未投票者向け）
+        if (reminderTime > now) {
+          try {
+            await client.createTask({
+              parent: mvpYearReminderQueuePath,
+              task: {
+                scheduleTime: toScheduleTime(reminderTime),
+                httpRequest: {
+                  httpMethod: "POST",
+                  url: `${functionsBaseUrl}/mvpYearVoteReminderTask`,
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: Buffer.from(
+                      JSON.stringify({teamId, mvpId}),
+                  ).toString("base64"),
+                },
+              },
+            });
+            console.log("📥 Enqueued Year MVP vote reminder task", {
+              teamId,
+              mvpId,
+              reminderTime: reminderTime.toISOString(),
+            });
+          } catch (e) {
+            console.error(
+                "🚨 Failed to enqueue Year MVP vote reminder task",
+                e,
+            );
+          }
+        }
+
+        // 2) 集計日お知らせ（作成者向け）
+        if (tallyTime > now) {
+          try {
+            await client.createTask({
+              parent: mvpYearTallyQueuePath,
+              task: {
+                scheduleTime: toScheduleTime(tallyTime),
+                httpRequest: {
+                  httpMethod: "POST",
+                  url: `${functionsBaseUrl}/mvpYearTallyNoticeTask`,
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: Buffer.from(
+                      JSON.stringify({teamId, mvpId}),
+                  ).toString("base64"),
+                },
+              },
+            });
+            console.log("📥 Enqueued Year MVP tally notice task", {
+              teamId,
+              mvpId,
+              tallyTime: tallyTime.toISOString(),
+            });
+          } catch (e) {
+            console.error(
+                "🚨 Failed to enqueue Year MVP tally notice task",
+                e,
+            );
+          }
+        }
+      }
+    },
+);
+
+// ================= 年間MVP: 結果発表通知 =================
+export const onMvpYearTallied = onDocumentWritten(
+    "mvp_year/{mvpYearId}",
+    async (event) => {
+      const beforeSnap = event.data.before;
+      const afterSnap = event.data.after;
+
+      if (!afterSnap || !afterSnap.exists) {
+        return;
+      }
+
+      const beforeData =
+        beforeSnap && beforeSnap.exists ? beforeSnap.data() : null;
+      const afterData = afterSnap.data() || {};
+
+      const wasTallied = beforeData && beforeData.isTallied === true;
+      const isTallied = afterData.isTallied === true;
+
+      // false → true のときだけ通知
+      if (!isTallied || wasTallied) {
+        return;
+      }
+
+      const mvpYearId = event.params.mvpYearId;
+      const teamId = afterData.teamId;
+
+      if (!teamId) {
+        console.log(
+            "⚠️ teamId 未設定の mvp_year（結果通知スキップ）:",
+            mvpYearId,
+        );
+        return;
+      }
+
+      const teamSnap = await db.collection("teams").doc(teamId).get();
+      if (!teamSnap.exists) {
+        console.log("⚠️ team not found for Year MVP result:", teamId);
+        return;
+      }
+
+      const teamData = teamSnap.data() || {};
+      const members = teamData.members || [];
+
+      if (!Array.isArray(members) || members.length === 0) {
+        console.log("ℹ️ メンバーなし teamId(Year MVP):", teamId);
+        return;
+      }
+
+      const tokens = await getFcmTokensForUsers(members);
+      if (tokens.length === 0) {
+        console.log(
+            "⚠️ Year MVP 結果通知先トークンなし: teamId",
+            teamId,
+        );
+        return;
+      }
+
+      const theme = afterData.theme || "年間MVP";
+      const title = `「${theme}」の年間MVP結果が発表されました`;
+      const body = "アプリから結果をチェックしてみましょう。";
+
+      await messaging.sendEachForMulticast({
+        notification: {title, body},
+        tokens,
+        data: {
+          type: "mvpYearResult",
+          teamId: String(teamId),
+          mvpYearId: String(mvpYearId),
+        },
+      });
+
+      console.log(
+          "🎉 Year MVP 結果発表通知送信:",
+          "mvp_year", mvpYearId,
+          "teamId=", teamId,
+          "members=", members.length,
+      );
+    },
+);
+
+// ================= 年間MVP: 締切前リマインド（未投票者向け） =================
+export const mvpYearVoteReminderTask = onRequest(
+    {
+      timeoutSeconds: 540,
+      region: "asia-northeast1",
+    },
+    async (req, res) => {
+      try {
+        const {teamId, mvpId} = req.body || {};
+        if (!teamId || !mvpId) {
+          res.status(400).send("Missing teamId or mvpId");
+          return;
+        }
+
+        const teamIdStr = String(teamId);
+        const mvpIdStr = String(mvpId);
+
+        // MVP ドキュメントを取得
+        const mvpRef = db
+            .collection("teams")
+            .doc(teamIdStr)
+            .collection("mvp_year")
+            .doc(mvpIdStr);
+        const mvpSnap = await mvpRef.get();
+
+        if (!mvpSnap.exists) {
+          console.log("mvpYearVoteReminderTask: MVP doc not found", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          });
+          res.status(200).send("MVP doc not found");
+          return;
+        }
+
+        const mvpData = mvpSnap.data() || {};
+        const theme = mvpData.theme || "年間MVP";
+
+        // チームメンバーと未投票者の抽出
+        const teamSnap = await db.collection("teams").doc(teamIdStr).get();
+        if (!teamSnap.exists) {
+          console.log(
+              "mvpYearVoteReminderTask: team not found",
+              {teamId: teamIdStr},
+          );
+          res.status(200).send("team not found");
+          return;
+        }
+
+        const teamData = teamSnap.data() || {};
+        const members = Array.isArray(teamData.members) ?
+          teamData.members :
+          [];
+
+        if (!members.length) {
+          console.log(
+              "mvpYearVoteReminderTask: no members",
+              {teamId: teamIdStr},
+          );
+          res.status(200).send("no members");
+          return;
+        }
+
+        // votes サブコレクションから投票済みユーザーIDを取得
+        const votesSnap = await mvpRef.collection("votes").get();
+        const votedSet = new Set();
+        votesSnap.forEach((doc) => votedSet.add(doc.id));
+
+        const notVoted = members.filter((uid) => !votedSet.has(uid));
+
+        if (!notVoted.length) {
+          console.log(
+              "mvpYearVoteReminderTask: all members already voted",
+              {teamId: teamIdStr, mvpId: mvpIdStr},
+          );
+          res.status(200).send("all voted");
+          return;
+        }
+
+        const tokens = await getFcmTokensForUsers(notVoted);
+        if (!tokens.length) {
+          console.log(
+              "mvpYearVoteReminderTask: no FCM tokens for non-voters",
+              {teamId: teamIdStr, mvpId: mvpIdStr},
+          );
+          res.status(200).send("no tokens");
+          return;
+        }
+
+        const title = `${theme} の年間MVP投票締切が近づいています`;
+        const body = "まだ投票していない人は、忘れずに投票しましょう。";
+
+        const result = await messaging.sendEachForMulticast({
+          tokens,
+          notification: {title, body},
+          data: {
+            type: "mvpYearVoteReminder",
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          },
+        });
+
+        console.log("🎯 Year MVP vote reminder sent", {
+          teamId: teamIdStr,
+          mvpId: mvpIdStr,
+          success: result.successCount,
+          failure: result.failureCount,
+          targetUsers: notVoted.length,
+        });
+
+        res.status(200).send("ok");
+      } catch (err) {
+        console.error("🚨 mvpYearVoteReminderTask error", err);
+        res.status(500).send("error");
+      }
+    },
+);
+
+// ================= 年間MVP: 集計日当日のお知らせ（作成者向け） =================
+export const mvpYearTallyNoticeTask = onRequest(
+    {
+      timeoutSeconds: 540,
+      region: "asia-northeast1",
+    },
+    async (req, res) => {
+      try {
+        const {teamId, mvpId} = req.body || {};
+        if (!teamId || !mvpId) {
+          res.status(400).send("Missing teamId or mvpId");
+          return;
+        }
+
+        const teamIdStr = String(teamId);
+        const mvpIdStr = String(mvpId);
+
+        const mvpRef = db
+            .collection("teams")
+            .doc(teamIdStr)
+            .collection("mvp_year")
+            .doc(mvpIdStr);
+        const mvpSnap = await mvpRef.get();
+
+        if (!mvpSnap.exists) {
+          console.log("mvpYearTallyNoticeTask: MVP doc not found", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          });
+          res.status(200).send("MVP doc not found");
+          return;
+        }
+
+        const mvpData = mvpSnap.data() || {};
+        const theme = mvpData.theme || "年間MVP";
+        const createdBy = mvpData.createdBy || {};
+        const createdUid =
+          createdBy.uid || createdBy.userId || createdBy.id || null;
+
+        if (!createdUid) {
+          console.log("mvpYearTallyNoticeTask: createdBy UID not found", {
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          });
+          res.status(200).send("no creator uid");
+          return;
+        }
+
+        const tokens = await getFcmTokensForUsers([createdUid]);
+        if (!tokens.length) {
+          console.log(
+              "mvpYearTallyNoticeTask: no FCM tokens for creator",
+              {teamId: teamIdStr, mvpId: mvpIdStr, createdUid},
+          );
+          res.status(200).send("no tokens");
+          return;
+        }
+
+        const title = `${theme} の年間MVP集計日になりました`;
+        const body = "年間MVPの集計を行いましょう。";
+
+        const result = await messaging.sendEachForMulticast({
+          tokens,
+          notification: {title, body},
+          data: {
+            type: "mvpYearTallyNotice",
+            teamId: teamIdStr,
+            mvpId: mvpIdStr,
+          },
+        });
+
+        console.log("📊 Year MVP tally notice sent", {
+          teamId: teamIdStr,
+          mvpId: mvpIdStr,
+          createdUid,
+          success: result.successCount,
+          failure: result.failureCount,
+        });
+
+        res.status(200).send("ok");
+      } catch (err) {
+        console.error("🚨 mvpYearTallyNoticeTask error", err);
+        res.status(500).send("error");
+      }
+    },
+);
+
+// ================= チーム目標作成時の通知 =================
+// teams/{teamId}/goals/{goalId} が作成されたら、
+// period に応じて「今月 / 年間」のチーム目標決定通知を送る。
+export const onTeamGoalCreated = onDocumentCreated(
+    "teams/{teamId}/goals/{goalId}",
+    async (event) => {
+      const snap = event.data;
+      if (!snap) {
+        console.log("onTeamGoalCreated: no snapshot, skip.");
+        return;
+      }
+
+      const goalRef = snap.ref;
+
+      // 🔒 多重実行ガード（at-least-once 対策）
+      let alreadyNotified = false;
+      await db.runTransaction(async (tx) => {
+        const doc = await tx.get(goalRef);
+        const d = doc.data() || {};
+        if (d._goalCreatedNotified) {
+          alreadyNotified = true;
+          return;
+        }
+        // まだ通知していない場合だけフラグを立てる
+        tx.set(goalRef, {_goalCreatedNotified: true}, {merge: true});
+      });
+
+      if (alreadyNotified) {
+        console.log("onTeamGoalCreated: already notified, skip.");
+        return;
+      }
+
+      const data = snap.data() || {};
+      const period = data.period;
+      if (period !== "month" && period !== "year") {
+      // 月間・年間以外の目標は通知しない
+        return;
+      }
+
+      const teamId = event.params.teamId;
+      console.log(
+          "onTeamGoalCreated: teamId=",
+          teamId,
+          "period=",
+          period,
+      );
+
+      // チームメンバー取得
+      const teamSnap = await db.collection("teams").doc(teamId).get();
+      if (!teamSnap.exists) {
+        console.log("onTeamGoalCreated: team not found:", teamId);
+        return;
+      }
+
+      const teamData = teamSnap.data() || {};
+      const members = Array.isArray(teamData.members) ?
+      teamData.members :
+      [];
+
+      if (!members.length) {
+        console.log(
+            "onTeamGoalCreated: no members for team:",
+            teamId,
+        );
+        return;
+      }
+
+      // チームメンバーの FCM トークンを取得
+      const tokensRaw = await getFcmTokensForUsers(members);
+      // 🔁 念のため重複トークンも排除しておく
+      const tokens = Array.from(new Set(tokensRaw || []));
+      if (!tokens.length) {
+        console.log(
+            "onTeamGoalCreated: no FCM tokens for team:",
+            teamId,
+        );
+        return;
+      }
+
+      // 通知タイトル・本文
+      let title = "";
+      const body = "チームページから確認しましょう。";
+
+      if (period === "month") {
+        title = "今月のチーム目標が決まりました";
+      } else if (period === "year") {
+        title = "年間のチーム目標が決まりました";
+      }
+
+      // Flutter 側で遷移を判定するための type を付与
+      const type =
+      period === "month" ? "team_goal_month" : "team_goal_year";
+
+      try {
+        const message = {
+          notification: {title, body},
+          tokens,
+          data: {
+            type,
+            teamId: String(teamId),
+            period: String(period),
+          },
+          android: {
+            priority: "high",
+            notification: {
+              sound: "default",
+              clickAction: "FLUTTER_NOTIFICATION_CLICK",
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: "default",
+              },
+            },
+          },
+        };
+
+        const res = await messaging.sendEachForMulticast(message);
+        console.log(
+            "onTeamGoalCreated: notification sent:",
+            "success=",
+            res.successCount,
+            "failure=",
+            res.failureCount,
+        );
+      } catch (err) {
+        console.error("onTeamGoalCreated: send error:", err);
+      }
+    },
+);
+
+// ================= チーム加入通知 =================
+export const onUserJoinedTeam = onDocumentWritten(
+    "users/{userId}",
+    async (event) => {
+      const before = event.data && event.data.before ?
+  event.data.before.data() || {} :
+  {};
+
+      const after = event.data && event.data.after ?
+  event.data.after.data() || {} :
+  {};
+
+      const beforeTeams = before.teams || [];
+      const afterTeams = after.teams || [];
+
+      // 新しく追加されたチームIDを検出
+      const addedTeams = afterTeams.filter((t) => !beforeTeams.includes(t));
+      if (addedTeams.length === 0) {
+        return; // 追加なければ終了
+      }
+
+      const joinedTeamId = addedTeams[0];
+
+      // チームデータ取得
+      const teamSnap = await db.collection("teams").doc(joinedTeamId).get();
+      if (!teamSnap.exists) return;
+
+      const teamData = teamSnap.data() || {};
+      const teamName = teamData.teamName || "チーム";
+
+      // ユーザー情報取得
+      const userId = event.params.userId;
+      const userSnap = await db.collection("users").doc(userId).get();
+      const userData = userSnap.data() || {};
+      const tokens = userData.fcmTokens || [];
+
+      if (!tokens.length) {
+        console.log("No FCM tokens for user:", userId);
+        return;
+      }
+
+      // 通知メッセージ
+      const message = {
+        notification: {
+          title: "チーム参加完了",
+          body: `${teamName} に参加しました！`,
+        },
+        tokens,
+        data: {
+          type: "joined_team",
+          teamId: joinedTeamId,
+        },
+        android: {
+          priority: "high",
+          notification: {sound: "default"},
+        },
+        apns: {
+          payload: {aps: {sound: "default"}},
+        },
+      };
+
+      await messaging.sendEachForMulticast(message);
+    },
+);
