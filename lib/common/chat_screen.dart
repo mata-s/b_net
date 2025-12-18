@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:http/http.dart' as http;
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -912,8 +915,44 @@ class FullScreenImagePage extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.download),
-            onPressed: () {
-              // 保存機能を実装
+            onPressed: () async {
+              try {
+                final uri = Uri.parse(imageUrl);
+                final response = await http.get(uri);
+
+                if (response.statusCode == 200) {
+                  final Uint8List bytes = Uint8List.fromList(response.bodyBytes);
+
+                  final result = await ImageGallerySaver.saveImage(
+                    bytes,
+                    quality: 80,
+                    name: 'bnet_${DateTime.now().millisecondsSinceEpoch}',
+                  );
+
+                  final isSuccess = (result['isSuccess'] == true) ||
+                      (result['isSuccessful'] == true);
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        isSuccess ? '画像を保存しました' : '画像の保存に失敗しました',
+                      ),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('画像のダウンロードに失敗しました'),
+                    ),
+                  );
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('画像の保存中にエラーが発生しました'),
+                  ),
+                );
+              }
             },
           ),
         ],

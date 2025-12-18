@@ -8,9 +8,10 @@ import 'fielding_pitching_tab.dart'; // 守備/投手タブ
 class IndividualHome extends StatefulWidget {
   final String userUid;
   final List<String> userPosition;
+  final bool hasActiveSubscription;
 
   const IndividualHome(
-      {super.key, required this.userUid, required this.userPosition});
+      {super.key, required this.userUid, required this.userPosition, required this.hasActiveSubscription});
 
   @override
   _IndividualHomeState createState() => _IndividualHomeState();
@@ -462,7 +463,9 @@ class _IndividualHomeState extends State<IndividualHome>
                                   MaterialPageRoute(
                                     builder: (context) => GradeDetailTab(
                                         userUid: widget.userUid,
-                                        userPosition: widget.userPosition),
+                                        userPosition: widget.userPosition,
+                                        hasActiveSubscription: widget.hasActiveSubscription
+                                        ),
                                   ),
                                 );
                               },

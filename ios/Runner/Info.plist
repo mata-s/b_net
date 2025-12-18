@@ -31,6 +31,8 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>画像を保存するために写真へのアクセスが必要です。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>プロフィール画像を撮影するためにカメラを使用します。</string>
 	<key>NSMicrophoneUsageDescription</key>

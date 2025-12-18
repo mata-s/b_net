@@ -7,6 +7,7 @@ import 'package:b_net/pages/team/team_schedule_calendar.dart';
 import 'package:b_net/pages/team/team_settings_page.dart';
 import 'package:b_net/pages/team/team_mission_page.dart';
 import 'package:b_net/pages/team/team_mvp_vote_page.dart';
+import 'package:b_net/services/team_subscription_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // FirebaseAuthを追加
 import 'package:flutter/material.dart';
@@ -15,7 +16,14 @@ import 'member_parts/invite_member_page.dart'; // チームに招待するペー
 import 'team_account.dart'; // チームアカウント切り替えページ
 import 'member_parts/team_members_page.dart'; // チームメンバー一覧ページ
 import '../../home_page.dart'; // 個人ページ
+
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
+enum TeamPlanTier {
+  none,
+  gold,
+  platina,
+}
 
 class TeamHomePage extends StatefulWidget {
   final Map<String, dynamic> team;
@@ -50,12 +58,43 @@ class _TeamHomePageState extends State<TeamHomePage> {
   String teamPrefecture = ""; // チームの都道府県
   bool isLoading = true;
   int? maxWinStreak;
+  bool _hasActiveTeamSubscription = false;
+  TeamPlanTier _teamPlanTier = TeamPlanTier.none;
+
+  // @override
+  // void initState() {
+  //   super.initState();
+  //   _fetchTeamData();
+  //   _checkTeamSubscriptionStatus();
+  // }
 
   @override
-  void initState() {
-    super.initState();
-    _fetchTeamData(); // チームの都道府県と最多連勝記録を取得
+void initState() {
+  super.initState();
+  _init();
+}
+
+Future<void> _init() async {
+  try {
+    final teamId = widget.team['teamId'] as String?;
+    if (teamId != null && teamId.isNotEmpty) {
+      try {
+        await Purchases.logIn(teamId);
+        print('✅ RevenueCat: teamId でログイン ($teamId)');
+      } catch (e) {
+        print('⚠️ RevenueCat teamIdログイン失敗: $e');
+      }
+    }
+
+    await _fetchTeamData();            // チーム情報（都道府県など）
+    await _checkTeamSubscriptionStatus(); // サブスク情報（gold / platina）
+    _initializePages();                // ← ここで初めてページを組み立てる
+  } finally {
+    setState(() {
+      isLoading = false;
+    });
   }
+}
 
   Future<void> _fetchTeamData() async {
     try {
@@ -83,10 +122,47 @@ class _TeamHomePageState extends State<TeamHomePage> {
         teamPrefecture = "未設定";
         maxWinStreak = null;
       });
-    } finally {
-      _initializePages();
+    }
+  }
+
+  Future<void> _checkTeamSubscriptionStatus() async {
+    final teamId = widget.team['teamId'] as String?;
+    if (teamId == null || teamId.isEmpty) return;
+  
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(teamId)
+          .collection('subscription')
+          .where('status', isEqualTo: 'active')
+          .limit(1)
+          .get();
+  
+      if (!mounted) return;
+  
+      TeamPlanTier tier = TeamPlanTier.none;
+  
+      if (snapshot.docs.isNotEmpty) {
+        final data = snapshot.docs.first.data();
+        final productId = (data['productId'] ?? '') as String;
+  
+        if (productId.contains('teamPlatina')) {
+          tier = TeamPlanTier.platina;
+        } else if (productId.contains('teamGold')) {
+          tier = TeamPlanTier.gold;
+        }
+      }
+  
       setState(() {
-        isLoading = false;
+        _hasActiveTeamSubscription = snapshot.docs.isNotEmpty;
+        _teamPlanTier = tier;
+      });
+    } catch (e) {
+      print('❌ チームのサブスク状態取得に失敗: $e');
+      if (!mounted) return;
+      setState(() {
+        _hasActiveTeamSubscription = false;
+        _teamPlanTier = TeamPlanTier.none;
       });
     }
   }
@@ -103,17 +179,22 @@ class _TeamHomePageState extends State<TeamHomePage> {
         selectedGameTypeFilter: '全試合', // 初期値
         startDate: DateTime(2000, 1, 1), // 開始日
         endDate: DateTime.now(), // 終了日
-      ), // memberIds を渡す
+        hasActiveTeamSubscription: _hasActiveTeamSubscription,
+      ), 
       TeamCalenderTab(teamId: widget.team['teamId']),
       PrefectureTeamRanking(
         teamId: widget.team['teamId'],
         teamPrefecture: teamPrefecture,
+        hasActiveTeamSubscription: _hasActiveTeamSubscription,
+        teamPlanTier: _teamPlanTier,
       ),
       NationalTeamRanking(
         teamId: widget.team['teamId'],
         teamPrefecture: teamPrefecture,
+        hasActiveTeamSubscription: _hasActiveTeamSubscription,
+        teamPlanTier: _teamPlanTier,
       ),
-      TeamMvpVotePage(teamId: widget.team['teamId']),
+      TeamMvpVotePage(teamId: widget.team['teamId'], hasActiveTeamSubscription: _hasActiveTeamSubscription, teamPlanTier: _teamPlanTier,),
       TeamScheduleCalendar(teamId: widget.team['teamId']),
     ];
   }
@@ -156,7 +237,7 @@ class _TeamHomePageState extends State<TeamHomePage> {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (context) =>
-                      TeamMissionPage(teamId: widget.team['teamId']),
+                      TeamMissionPage(teamId: widget.team['teamId'], hasActiveTeamSubscription: _hasActiveTeamSubscription),
                 ),
               );
             },
@@ -307,6 +388,18 @@ class _TeamHomePageState extends State<TeamHomePage> {
                 MaterialPageRoute(
                     builder: (context) =>
                         TeamSettingsPage(teamId: widget.team['teamId'])),
+              );
+            },
+          ),
+          ListTile(
+          leading: const Icon(Icons.workspace_premium),
+            title: const Text('チームプラン'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                    TeamSubscriptionScreen(teamId: widget.team['teamId'])),
               );
             },
           ),

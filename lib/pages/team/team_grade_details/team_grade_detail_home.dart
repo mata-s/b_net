@@ -2,13 +2,15 @@ import 'package:b_net/pages/team/team_grade_details/atBat_detail_tab.dart';
 import 'package:b_net/pages/team/team_grade_details/batting_detail_tab.dart';
 import 'package:b_net/pages/team/team_grade_details/pitching_detail_tab.dart';
 import 'package:b_net/pages/team/team_grade_details/team_batted_ball_detail.dart';
+import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 class TeamGradeDetailHome extends StatefulWidget {
   final String teamId;
-  const TeamGradeDetailHome({Key? key, required this.teamId}) : super(key: key);
+  final bool hasActiveTeamSubscription;
+  const TeamGradeDetailHome({Key? key, required this.teamId, required this.hasActiveTeamSubscription}) : super(key: key);
 
   @override
   _TeamGradeDetailHomeState createState() => _TeamGradeDetailHomeState();
@@ -158,6 +160,17 @@ class _TeamGradeDetailHomeState extends State<TeamGradeDetailHome>
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.hasActiveTeamSubscription) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: TeamSubscriptionGuard(
+          isLocked: true,
+          initialPage: 2,
+          showCloseButton: true,
+          teamId: widget.teamId,
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 240, 251, 252),
       appBar: AppBar(

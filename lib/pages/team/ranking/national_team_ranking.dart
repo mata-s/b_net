@@ -1,15 +1,21 @@
+import 'package:b_net/pages/team/team_home.dart';
+import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 
 class NationalTeamRanking extends StatefulWidget {
   final String teamId; // チームID
-  final String teamPrefecture; // チームの都道府県
+  final String teamPrefecture;
+  final bool hasActiveTeamSubscription;
+  final TeamPlanTier teamPlanTier;
 
   const NationalTeamRanking({
     super.key,
     required this.teamId,
-    required this.teamPrefecture, // 修正
+    required this.teamPrefecture,
+    required this.hasActiveTeamSubscription,
+    required this.teamPlanTier,
   });
 
   @override
@@ -132,6 +138,13 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.teamPlanTier != TeamPlanTier.platina) {
+      return TeamSubscriptionGuard(
+        isLocked: true,
+        initialPage: 1,
+        teamId: widget.teamId,
+      );
+    }
     return Scaffold(
       body: SingleChildScrollView(
         child: Column(

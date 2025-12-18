@@ -2,6 +2,7 @@ import 'package:b_net/common/chat_room_list_screen.dart';
 import 'package:b_net/common/notices/notices_page.dart';
 import 'package:b_net/common/post_list_page.dart';
 import 'package:b_net/common/search_page.dart';
+import 'package:b_net/pages/private/annual_results.dart';
 import 'package:b_net/pages/private/director_and_manager.dart';
 import 'package:b_net/pages/private/director/director_calendar.dart';
 import 'package:b_net/pages/private/manager/manager_geme_page.dart';
@@ -12,6 +13,7 @@ import 'package:b_net/pages/private/ranking/ranking_page.dart';
 import 'package:b_net/pages/private/setting.dart';
 import 'package:b_net/pages/team/create_team.dart';
 import 'package:b_net/pages/team/team_account.dart';
+import 'package:b_net/services/subscription_screen.dart';
 import 'package:flutter/material.dart';
 import 'pages/private/individual_home.dart';
 import 'pages/private/profile_page.dart';
@@ -52,13 +54,36 @@ class _HomePageState extends State<HomePage> {
   int unreadChatCount = 0;
   // List<String> userPosition = [];
   // String? userTeamId;
+  bool _hasActiveSubscription = false;
 
   @override
   void initState() {
-    super.initState();
-    _checkUnreadNotices();
-    _fetchUnreadMessageCount();
+  super.initState();
+  _checkUnreadNotices();
+  _fetchUnreadMessageCount();
+  _checkSubscriptionStatus().then((_) {
     _initializePages();
+  });
+  }
+
+    /// 個人サブスクが「active」かどうかチェック
+  Future<void> _checkSubscriptionStatus() async {
+    final uid = widget.userUid;
+    if (uid.isEmpty) return;
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('subscription')
+        .where('status', isEqualTo: 'active')
+        .limit(1)
+        .get();
+
+    if (!mounted) return;
+
+    setState(() {
+      _hasActiveSubscription = snapshot.docs.isNotEmpty;
+    });
   }
 
   /// **未読チャット数を取得**
@@ -142,6 +167,7 @@ class _HomePageState extends State<HomePage> {
           : IndividualHome(
               userUid: widget.userUid,
               userPosition: widget.userPosition,
+              hasActiveSubscription: _hasActiveSubscription
             ),
       widget.userPosition.contains('マネージャー')
           ? ManagerGemePage(
@@ -149,15 +175,17 @@ class _HomePageState extends State<HomePage> {
           : widget.userPosition.contains('監督')
               ? DirectoCalendar(
                   userUid: widget.userUid, teamId: widget.userTeamId ?? '')
-              : PrivateCalendarTab(userUid: widget.userUid, positions: widget.userPosition,),
+              : PrivateCalendarTab(userUid: widget.userUid, positions: widget.userPosition, hasActiveSubscription: _hasActiveSubscription,),
       PostListPage(userUid: widget.userUid, userName: widget.accountName),
       RankingPage(
         uid: widget.userUid,
         prefecture: widget.userPrefecture,
+        hasActiveSubscription: _hasActiveSubscription,
       ),
       NationalPage(
         uid: widget.userUid,
         prefecture: widget.userPrefecture,
+        hasActiveSubscription: _hasActiveSubscription,
       ),
       ChatRoomListScreen(onUnreadCountChanged: _updateUnreadChatCount),
     ];
@@ -219,7 +247,7 @@ class _HomePageState extends State<HomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => MissionPage(userUid: widget.userUid),
+                    builder: (context) => MissionPage(userUid: widget.userUid, hasActiveSubscription: _hasActiveSubscription),
                   ),
                 );
               },
@@ -271,6 +299,18 @@ class _HomePageState extends State<HomePage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.star),
+              title: const Text('成績'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AnnualResultsPage(userPosition: widget.userPosition,),
+                  ),
+                );
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.campaign),
               title: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -295,6 +335,18 @@ class _HomePageState extends State<HomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => SettingsPage()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.star),
+              title: const Text('プレミアムプラン'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SubscriptionScreen(),
+                  ),
                 );
               },
             ),

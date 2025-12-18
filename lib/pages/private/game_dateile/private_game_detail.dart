@@ -1,3 +1,4 @@
+import 'package:b_net/common/subscription_guard.dart';
 import 'package:b_net/pages/private/game_dateile/Categorized_game_page.dart';
 import 'package:b_net/pages/private/game_dateile/categorized_game_list_page.dart';
 import 'package:b_net/pages/private/game_dateile/game_detail_page.dart';
@@ -7,7 +8,8 @@ import 'package:flutter/material.dart';
 
 class PrivateGameDetail extends StatefulWidget {
   final String userUid;
-  const PrivateGameDetail({super.key, required this.userUid});
+  final bool hasActiveSubscription;
+  const PrivateGameDetail({super.key, required this.userUid, required this.hasActiveSubscription});
 
   @override
   State<PrivateGameDetail> createState() => _PrivateGameDetailState();
@@ -103,6 +105,9 @@ class _PrivateGameDetailState extends State<PrivateGameDetail> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.hasActiveSubscription) {
+      return const SubscriptionGuard(isLocked: true, initialPage: 4);
+    }
     return Scaffold(
       resizeToAvoidBottomInset: true,
       body: Column(

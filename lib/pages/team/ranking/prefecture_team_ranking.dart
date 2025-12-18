@@ -1,15 +1,21 @@
+import 'package:b_net/pages/team/team_home.dart';
+import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 
 class PrefectureTeamRanking extends StatefulWidget {
-  final String teamId; // チームID
-  final String teamPrefecture; // チームの都道府県
+  final String teamId;
+  final String teamPrefecture;
+  final bool hasActiveTeamSubscription;
+  final TeamPlanTier teamPlanTier;
 
   const PrefectureTeamRanking({
     super.key,
     required this.teamId,
-    required this.teamPrefecture, // 修正
+    required this.teamPrefecture,
+    required this.hasActiveTeamSubscription,
+    required this.teamPlanTier
   });
 
   @override
@@ -805,6 +811,13 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.teamPlanTier != TeamPlanTier.platina) {
+      return TeamSubscriptionGuard(
+        isLocked: true,
+        initialPage: 0,
+        teamId: widget.teamId,
+      );
+    }
     // チームのランクを取得
     final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
         ? '_age_${_selectedAgeGroup}'
@@ -834,6 +847,7 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
         !_teams.any((team) =>
             team['id']?.toString() == widget.teamId.toString() &&
             (int.tryParse(team['rank']?.toString() ?? '0') ?? 0) <= 10);
+
 
     return Scaffold(
       body: SingleChildScrollView(

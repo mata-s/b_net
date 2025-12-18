@@ -1,3 +1,4 @@
+import 'package:b_net/common/subscription_guard.dart';
 import 'package:b_net/pages/private/goal_list_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -7,8 +8,9 @@ enum GoalType { hits, scores, custom }
 
 class MissionPage extends StatefulWidget {
   final String userUid;
+  final bool hasActiveSubscription;
 
-  const MissionPage({Key? key, required this.userUid}) : super(key: key);
+  const MissionPage({Key? key, required this.userUid, required this.hasActiveSubscription}) : super(key: key);
 
   @override
   _MissionPageState createState() => _MissionPageState();
@@ -512,9 +514,19 @@ class _MissionPageState extends State<MissionPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.hasActiveSubscription) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: const SubscriptionGuard(
+          isLocked: true,
+          initialPage: 5,
+          showCloseButton: true,
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('チーム目標'),
+        title: const Text('目標'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),

@@ -1,4 +1,5 @@
 import 'package:b_net/pages/team/team_goal_list_page.dart';
+import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,8 +8,9 @@ enum GoalType { hits, scores, custom }
 
 class TeamMissionPage extends StatefulWidget {
   final String teamId;
+  final bool hasActiveTeamSubscription;
 
-  const TeamMissionPage({Key? key, required this.teamId}) : super(key: key);
+  const TeamMissionPage({Key? key, required this.teamId, required this.hasActiveTeamSubscription}) : super(key: key);
 
   @override
   _TeamMissionPageState createState() => _TeamMissionPageState();
@@ -510,6 +512,17 @@ class _TeamMissionPageState extends State<TeamMissionPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.hasActiveTeamSubscription) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: TeamSubscriptionGuard(
+          isLocked: true,
+          initialPage: 4,
+          showCloseButton: true,
+          teamId: widget.teamId,
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('チーム目標'),

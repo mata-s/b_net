@@ -1,3 +1,4 @@
+import 'package:b_net/common/subscription_guard.dart';
 import 'package:b_net/pages/private/grade_details/atBat_detail_page.dart';
 import 'package:b_net/pages/private/grade_details/batted_ball_detail.dart';
 import 'package:b_net/pages/private/grade_details/batting_detail_page.dart';
@@ -9,9 +10,10 @@ import 'package:flutter/material.dart';
 class GradeDetailTab extends StatefulWidget {
   final String userUid;
   final List<String> userPosition;
+  final bool hasActiveSubscription;
 
   const GradeDetailTab(
-      {super.key, required this.userUid, required this.userPosition});
+      {super.key, required this.userUid, required this.userPosition, required this.hasActiveSubscription});
 
   @override
   _GradeDetailTabState createState() => _GradeDetailTabState();
@@ -169,6 +171,16 @@ class _GradeDetailTabState extends State<GradeDetailTab>
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.hasActiveSubscription) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: const SubscriptionGuard(
+          isLocked: true,
+          initialPage: 3,
+          showCloseButton: true,
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 240, 251, 252),
       appBar: AppBar(

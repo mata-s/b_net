@@ -1,3 +1,4 @@
+import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -9,6 +10,7 @@ class TeamRankingPage extends StatefulWidget {
   final DateTime startDate;
   final DateTime endDate;
   final bool yearOnly;
+  final bool hasActiveTeamSubscription;
 
   const TeamRankingPage({
     super.key,
@@ -18,6 +20,7 @@ class TeamRankingPage extends StatefulWidget {
     required this.startDate,
     required this.endDate,
     required this.yearOnly,
+    required this.hasActiveTeamSubscription
   });
 
   @override
@@ -189,6 +192,13 @@ class _TeamRankingPageState extends State<TeamRankingPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.hasActiveTeamSubscription) {
+      return TeamSubscriptionGuard(
+        isLocked: true,
+        initialPage: 5,
+        teamId: widget.teamId,
+      );
+    }
     return Scaffold(
       body: SingleChildScrollView(
         child: Column(

@@ -1,4 +1,3 @@
-import 'package:b_net/services/team_subscription_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -23,17 +22,6 @@ class _TeamSettingsPageState extends State<TeamSettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          ListTile(
-            title: const Text('サブスク'),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) =>
-                        TeamSubscriptionScreen(teamId: widget.teamId)),
-              );
-            },
-          ),
           ListTile(
             title: const Text('通知'),
             trailing: Switch(

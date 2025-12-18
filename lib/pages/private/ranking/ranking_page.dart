@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:b_net/pages/private/ranking/batting_ranking.dart';
 import 'package:b_net/pages/private/ranking/pitching_ranking.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:b_net/common/subscription_guard.dart';
 
 class RankingPage extends StatefulWidget {
   final String uid;
   final String prefecture;
+  final bool hasActiveSubscription;
 
-  const RankingPage({super.key, required this.uid, required this.prefecture});
+  const RankingPage({super.key, required this.uid, required this.prefecture, required this.hasActiveSubscription});
 
   @override
   State<RankingPage> createState() => _RankingPageState();
@@ -19,61 +21,62 @@ class _RankingPageState extends State<RankingPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Column(
+      body: Stack(
         children: [
-          // アイコンボタンで切り替え
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Column(
             children: [
-              IconButton(
-                icon: Icon(
-                  FontAwesomeIcons.baseballBatBall,
-                  color: _currentIndex == 0 ? Colors.blue : Colors.grey,
-                  size: 30,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _currentIndex = 0;
-                  });
-                },
-                tooltip: '打撃ランキング',
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      FontAwesomeIcons.baseballBatBall,
+                      color: _currentIndex == 0 ? Colors.blue : Colors.grey,
+                      size: 30,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _currentIndex = 0;
+                      });
+                    },
+                    tooltip: '打撃ランキング',
+                  ),
+                  Icon(Icons.swap_horiz),
+                  SizedBox(height: 16),
+                  IconButton(
+                    icon: Icon(
+                      Icons.sports_baseball,
+                      color: _currentIndex == 1 ? Colors.blue : Colors.grey,
+                      size: 30,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _currentIndex = 1;
+                      });
+                    },
+                    tooltip: '投手ランキング',
+                  ),
+                ],
               ),
-              Icon(Icons.swap_horiz),
-              SizedBox(
-                height: 16,
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.sports_baseball,
-                  color: _currentIndex == 1 ? Colors.blue : Colors.grey,
-                  size: 30,
+              const SizedBox(height: 10),
+              Expanded(
+                child: IndexedStack(
+                  index: _currentIndex,
+                  children: [
+                    BattingRanking(
+                      uid: widget.uid,
+                      prefecture: widget.prefecture,
+                    ),
+                    PitchingRanking(
+                      uid: widget.uid,
+                      prefecture: widget.prefecture,
+                    ),
+                  ],
                 ),
-                onPressed: () {
-                  setState(() {
-                    _currentIndex = 1;
-                  });
-                },
-                tooltip: '投手ランキング',
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          // IndexedStackでページを切り替え
-          Expanded(
-            child: IndexedStack(
-              index: _currentIndex,
-              children: [
-                BattingRanking(
-                  uid: widget.uid,
-                  prefecture: widget.prefecture,
-                ),
-                PitchingRanking(
-                  uid: widget.uid,
-                  prefecture: widget.prefecture,
-                ),
-              ],
-            ),
-          ),
+          SubscriptionGuard(isLocked: !widget.hasActiveSubscription),
         ],
       ),
     );

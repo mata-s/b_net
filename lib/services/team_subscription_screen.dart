@@ -49,6 +49,13 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
   Future<void> _loadCustomerInfo() async {
     try {
       final info = await Purchases.getCustomerInfo();
+
+          // 🐛 デバッグ: entitlements と appUserId を確認
+    print('🧾 [Team] entitlements.all: ${info.entitlements.all.keys}');
+    print('🟢 [Team] entitlements.active: ${info.entitlements.active.keys}');
+    print('👤 [Team] appUserId: ${info.originalAppUserId}');
+
+
       setState(() {
         _customerInfo = info;
       });
@@ -64,6 +71,12 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
 
       // 🔄 最新のCustomerInfoを取得
       final updatedInfo = await Purchases.getCustomerInfo();
+
+
+// 🐛 購入直後の entitlements の状態を確認
+print('🧾 [Team BUY] entitlements.all: ${updatedInfo.entitlements.all.keys}');
+print('🟢 [Team BUY] entitlements.active: ${updatedInfo.entitlements.active.keys}');
+print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
 
       // 今回購入した Store Product のID（ゴールド / プラチナ、月額 / 年額 など）
       final purchasedProductId = package.storeProduct.identifier;
@@ -170,9 +183,30 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
               padding: EdgeInsets.all(16),
               child: Column(
                 children: [
-                  GoldFeaturesSection(),
-                  PlatinumFeaturesSection(),
-                  SizedBox(height: 24),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text(
+                          "あなたのチームを、もう一段強く。",
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          "プランを選んで、使える機能をチーム全員で最大化しよう。",
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.black54,
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
                   ..._packages.map((package) {
                     final id = package.storeProduct.identifier;
                     final isMonthly =
@@ -214,6 +248,8 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
                           : 'B-Net Team Gold Monthly';
                     }
 
+                    print('🎫 [Team] 使用する entitlementKey: $entitlementKey');
+
                     final entitlement =
                         _customerInfo?.entitlements.active[entitlementKey];
 
@@ -252,6 +288,10 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
                       ),
                     );
                   }),
+                  const SizedBox(height: 24),
+                  const PlanComparisonTable(),
+                  SizedBox(height: 24),
+                  const TeamFeaturesSection(),
                   SizedBox(height: 32),
                 ],
               ),
@@ -319,45 +359,12 @@ class SubscriptionPlanCard extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: disabled ? null : onPressed,
-                child: Text(disabled ? '購入できません' : priceText ?? '購入'),
+                child: Text(disabled ? '登録中' : priceText ?? '購入'),
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class GoldFeaturesSection extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return FeatureBox(
-      title: "🥇 ゴールドプランでできること",
-      color: Colors.amber.shade100,
-      borderColor: Colors.amber,
-      features: [
-        FeatureBullet(icon: Icons.emoji_events, text: "都道府県ランキングに参加して、腕試し！"),
-        FeatureBullet(icon: Icons.sports_baseball, text: "ライバルと競って記録を更新しよう！"),
-        FeatureBullet(icon: Icons.groups, text: "ヒット数で県内チームに貢献！他県に勝とう！"),
-      ],
-    );
-  }
-}
-
-class PlatinumFeaturesSection extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return FeatureBox(
-      title: "💎 プラチナプランでできること",
-      color: Colors.blue.shade50,
-      borderColor: Colors.blueAccent,
-      features: [
-        FeatureBullet(icon: Icons.emoji_events, text: "都道府県ランキングに参加できる！"),
-        FeatureBullet(icon: Icons.star, text: "全国ランキングの1位の成績をチェック可能！"),
-        FeatureBullet(icon: Icons.bar_chart, text: "詳細な成績分析機能が解放！"),
-        FeatureBullet(icon: Icons.lock_open, text: "今後追加される全ての機能が利用可能！"),
-      ],
     );
   }
 }
@@ -428,6 +435,314 @@ class FeatureBox extends StatelessWidget {
           ),
           SizedBox(height: 16),
           ...features,
+        ],
+      ),
+    );
+  }
+}
+
+class TeamFeaturesSection extends StatelessWidget {
+  const TeamFeaturesSection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final features = [
+      TeamFeatureCard(
+        icon: Icons.leaderboard,
+        title: 'チーム全員でランキングに参加できる',
+        description: 'チームの成績がランキングに反映され、\n'
+            '全員の活躍が数字で見えるようになります。\n'
+            'みんなで上位を目指そう！',
+      ),
+      TeamFeatureCard(
+        icon: Icons.groups,
+        title: '全国の強豪チームを覗いてみよう',
+        description: '全国の強豪チームの成績や傾向を見ると、刺激と発見が生まれる。\n'
+            '次に目指すチーム像が、自然とイメージできます。',
+      ),
+      TeamFeatureCard(
+        icon: Icons.analytics,
+        title: 'チーム全体の詳細データがわかる',
+        description: '打球の分布や打撃傾向に加えて、投手の傾向も分析。\n'
+            'チーム全体の強みと課題がより明確になります。',
+      ),
+      TeamFeatureCard(
+        icon: Icons.stadium,
+        title: 'チーム別・球場別の成績も見られる',
+        description: 'どのチームに強いか、\n'
+            'チームがどの球場と相性がいいかをデータで分析できます。',
+      ),
+      TeamFeatureCard(
+        icon: Icons.flag,
+        title: 'チーム目標を決めると、一体感が生まれる',
+        description: 'チームで月や年間の目標を共有すると、\n'
+            '練習や試合への意識が揃い、達成感をチーム全員で分かち合える強いチームになります。',
+      ),
+      TeamFeatureCard(
+        icon: Icons.emoji_events,
+        title: 'チーム内ランキングで盛り上がれる',
+        description: '楽しみながら競い合うことで、自然とモチベーションが高まります。',
+      ),
+      TeamFeatureCard(
+        icon: Icons.military_tech,
+        title: 'MVP投票で仲間の活躍を称えよう',
+        description: '月間・年間MVPをチームで決めて、\n'
+            '活躍した仲間をみんなで称えられます。',
+      ),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "チームプランでできること",
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...features,
+        ],
+      ),
+    );
+  }
+}
+
+class TeamFeatureCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+
+  const TeamFeatureCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 28, color: Colors.deepOrange),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    height: 1.5,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PlanComparisonTable extends StatelessWidget {
+  const PlanComparisonTable({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final headerStyle = TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.bold,
+    );
+
+    final cellStyle = TextStyle(
+      fontSize: 14,
+      height: 1.4,
+    );
+
+    Widget check(bool enabled) {
+      return Icon(
+        enabled ? Icons.check_circle : Icons.remove_circle,
+        color: enabled ? Colors.green : Colors.grey,
+        size: 20,
+      );
+    }
+
+    return Container(
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "プラン比較",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          SizedBox(height: 16),
+
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("機能", style: headerStyle)),
+              Expanded(child: Text("ゴールド", style: headerStyle, textAlign: TextAlign.center)),
+              Expanded(child: Text("プラチナ", style: headerStyle, textAlign: TextAlign.center)),
+            ],
+          ),
+          SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("チームランキング参加", style: cellStyle)),
+              Expanded(child: Align(child: check(false))),
+              Expanded(child: Align(child: check(true))),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          // 2
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("全国強豪チームの閲覧", style: cellStyle)),
+              Expanded(child: Align(child: check(false))),
+              Expanded(child: Align(child: check(true))),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          // 3
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("チーム内ランキング", style: cellStyle)),
+              Expanded(child: Align(child: check(true))),
+              Expanded(child: Align(child: check(true))),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          // 4
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("詳細データ分析", style: cellStyle)),
+              Expanded(child: Align(child: check(true))),
+              Expanded(child: Align(child: check(true))),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          // 5
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("球場別・対戦チーム別成績", style: cellStyle)),
+              Expanded(child: Align(child: check(true))),
+              Expanded(child: Align(child: check(true))),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          // 6
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("チーム目標／意識共有", style: cellStyle)),
+              Expanded(child: Align(child: check(true))),
+              Expanded(child: Align(child: check(true))),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          // 7
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("MVP投票", style: cellStyle)),
+              Expanded(child: Align(child: check(false))),
+              Expanded(child: Align(child: check(true))),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          // Per-person monthly price (static)
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("1人あたり\n（月額・10人計算）", style: cellStyle)),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    "150円",
+                    style: cellStyle,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    "180円",
+                    style: cellStyle,
+                  ),
+                ),
+              ),
+            ],
+          ),
+           SizedBox(height: 12),
+
+          Row(
+            children: [
+              Expanded(flex: 2, child: Text("1人あたり\n（年額換算・10人計算）", style: cellStyle)),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    "約133円",
+                    style: cellStyle,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    "約162円",
+                    style: cellStyle),
+                  ),
+              ),
+            ],
+          ),
         ],
       ),
     );

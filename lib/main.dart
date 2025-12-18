@@ -645,6 +645,15 @@ Future<Widget> _getInitialPage() async {
   final user = FirebaseAuth.instance.currentUser;
   if (user != null) {
     await _setupMessagingForUser(user.uid);
+
+    // 🔐 RevenueCat に Firebase の UID でログインして、appUserID を固定する
+    try {
+      await Purchases.logIn(user.uid);
+      print('✅ RevenueCat logIn succeeded for ${user.uid}');
+    } catch (e) {
+      print('⚠️ RevenueCat logIn failed: $e');
+    }
+
     try {
       final userDoc = await FirebaseFirestore.instance
           .collection('users')

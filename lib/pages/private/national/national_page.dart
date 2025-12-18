@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:b_net/pages/private/national/national_batting.dart';
 import 'package:b_net/pages/private/national/national_pitching.dart';
 import 'package:b_net/pages/private/national/national_hit.dart';
+import 'package:b_net/common/subscription_guard.dart';
 
 class NationalPage extends StatefulWidget {
   final String uid;
   final String prefecture;
+  final bool hasActiveSubscription;
 
-  const NationalPage({super.key, required this.uid, required this.prefecture});
+  const NationalPage({super.key, required this.uid, required this.prefecture, required this.hasActiveSubscription});
 
   @override
   State<NationalPage> createState() => _NationalPageState();
@@ -18,12 +20,15 @@ class _NationalPageState extends State<NationalPage> {
   int _currentIndex = 0; // 現在のインデックス
   final List<String> selectTypes = [
     'みんなのヒット！',
-    '打撃(各県上位1名)',
-    '投手(各県上位1名)',
+    '打撃(各県1位)',
+    '投手(各県1位)',
   ];
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.hasActiveSubscription) {
+      return const SubscriptionGuard(isLocked: true, initialPage: 1);
+    }
     return Scaffold(
       body: Column(
         children: [

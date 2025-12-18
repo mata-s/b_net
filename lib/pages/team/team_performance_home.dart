@@ -12,6 +12,7 @@ class TeamPerformanceHome extends StatefulWidget {
   final String selectedGameTypeFilter;
   final DateTime startDate;
   final DateTime endDate;
+  final bool hasActiveTeamSubscription;
 
   const TeamPerformanceHome({
     super.key,
@@ -21,6 +22,7 @@ class TeamPerformanceHome extends StatefulWidget {
     required this.selectedGameTypeFilter,
     required this.startDate,
     required this.endDate,
+    required this.hasActiveTeamSubscription,
   });
 
   @override
@@ -480,6 +482,7 @@ class _TeamPerformanceHomeState extends State<TeamPerformanceHome>
                               MaterialPageRoute(
                                 builder: (context) => TeamGradeDetailHome(
                                   teamId: widget.teamId,
+                                  hasActiveTeamSubscription: widget.hasActiveTeamSubscription,
                                 ),
                               ),
                             );
@@ -588,6 +591,7 @@ class _TeamPerformanceHomeState extends State<TeamPerformanceHome>
                   startDate: startDate,
                   endDate: endDate,
                   yearOnly: selectedPeriodFilter == '年を選択',
+                  hasActiveTeamSubscription: widget.hasActiveTeamSubscription,
                 ),
               ],
             ),

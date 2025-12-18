@@ -42,6 +42,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   Future<void> _loadCustomerInfo() async {
     try {
       final info = await Purchases.getCustomerInfo();
+
+    print('🧾 entitlements.all: ${info.entitlements.all.keys}');
+    print('🟢 entitlements.active: ${info.entitlements.active.keys}');
+    print('👤 appUserId: ${info.originalAppUserId}');
+
       if (!mounted) return;
       setState(() {
         _customerInfo = info;
@@ -152,8 +157,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
-        title: Text("サブスクリプション"),
+        title: const Text("個人プラン"),
         actions: [
           TextButton(
             onPressed: _restorePurchase,
@@ -171,8 +177,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               padding: EdgeInsets.all(16),
               child: Column(
                 children: [
-                  PremiumFeaturesSection(),
-                  SizedBox(height: 20),
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: Text(
+                      "あなたの野球を、もう一段楽しく。",
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.left,
+                    ),
+                  ),
                   ..._packages.map((package) {
                     final id = package.storeProduct.identifier;
                     final isMonthly = id.contains('1month');
@@ -226,6 +241,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                       ),
                     );
                   }),
+                  const SizedBox(height: 24),
+                  const PremiumFeaturesSection(),
                 ],
               ),
             ),
@@ -300,33 +317,143 @@ class SubscriptionPlanCard extends StatelessWidget {
 }
 
 class PremiumFeaturesSection extends StatelessWidget {
+  const PremiumFeaturesSection({super.key});
+
   @override
   Widget build(BuildContext context) {
+    final features = [
+      _PremiumFeatureCard(
+        icon: Icons.leaderboard,
+        title: 'ランキングに参加しよう！',
+        description: '数字で成長が見えると、野球がもっと楽しくなる。\n'
+            'あなたもランキングに参加してみよう！',
+      ),
+      _PremiumFeatureCard(
+        icon: Icons.flag_circle,
+        title: '都道府県対抗ヒットバトル',
+        description: 'あなたの一打が地元のスコアに加算される。\n'
+            '都道府県ごとのヒット合計で順位が決まる白熱バトル！',
+      ),
+      _PremiumFeatureCard(
+        icon: Icons.workspace_premium,
+        title: '全国トップ選手を覗いてみよう',
+        description: '全国の強者の成績を見ると、刺激と発見がある。\n'
+            'あなたの次の目標が自然と見つかります。',
+      ),
+      _PremiumFeatureCard(
+        icon: Icons.analytics,
+        title: '打撃のさらに詳細がわかる',
+        description: '打球の分布や打撃傾向など、\n'
+            'いつもの成績表では見えない打撃のクセが見えてきます。',
+      ),
+      _PremiumFeatureCard(
+        icon: Icons.stadium,
+        title: 'チーム別・球場別の成績も見られる',
+        description: 'どのチーム相手に強いか、\n'
+            'どの球場と相性がいいかをデータで分析できます。',
+      ),
+      _PremiumFeatureCard(
+        icon: Icons.flag,
+        title: '目標を決めると、野球がもっと楽しくなる',
+        description: '月の目標や、1年のテーマを決めるだけで、\n'
+            '野球に取り組む毎日がもっとワクワクします。',
+      ),
+    ];
+
     return Container(
-      padding: EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.orange.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.shade300),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "🎖️ プレミアムプランの特典",
+          const Text(
+            "有料プランでできること",
             style: TextStyle(
-              fontSize: 20,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Colors.deepOrange,
             ),
           ),
-          SizedBox(height: 16),
-          FeatureBullet(icon: Icons.emoji_events, text: "都道府県ランキングに参加して、腕試し！"),
-          FeatureBullet(
-              icon: Icons.sports_baseball, text: "ライバルと競い合いながら、記録をどんどん伸ばそう！"),
-          FeatureBullet(icon: Icons.groups, text: "ヒット数で県内チームに貢献！他県に勝利を！"),
-          FeatureBullet(
-              icon: Icons.star, text: "全国のトッププレイヤーの成績をチェックして刺激を受けよう！"),
+          const SizedBox(height: 8),
+          const Text(
+            "このプランに登録すると、こんな機能が使えるようになります。",
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          ...features,
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumFeatureCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+
+  const _PremiumFeatureCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            size: 28,
+            color: Colors.deepOrange,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    height: 1.5,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

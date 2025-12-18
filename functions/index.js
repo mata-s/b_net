@@ -8359,13 +8359,14 @@ export const onMvpMonthCreated = onDocumentCreated(
 
       const startRaw = data.voteStartDate;
       const endRaw = data.voteEndDate;
-      const deadlineRaw = data.voteDeadline || endRaw;
+      // const deadlineRaw = data.voteDeadline || endRaw;
 
       const toDate = (v) => (v && v.toDate ? v.toDate() : null);
 
       const start = toDate(startRaw);
       const end = toDate(endRaw);
-      const deadline = toDate(deadlineRaw);
+      const deadline = end;
+      // const deadline = toDate(deadlineRaw);
 
       const fmt = (d) =>
       d ? `${d.getMonth() + 1}月${d.getDate()}日` : "未設定";
@@ -8440,9 +8441,13 @@ export const onMvpMonthCreated = onDocumentCreated(
       if (deadline) {
         const now = new Date();
 
-        // 「締切直前」= 締切の3時間前（必要に応じてここを調整）
-        const reminderTime = new Date(deadline.getTime() - 3 * 60 * 60 * 1000);
-        const tallyTime = deadline; // 集計日は締切日時そのもの
+        // ✅ 締切前日 19:00 にリマインド
+        const reminderTime = new Date(deadline);
+        reminderTime.setDate(reminderTime.getDate() - 1);
+        reminderTime.setHours(19, 0, 0, 0);
+
+        // 集計日は締切日時そのもの
+        const tallyTime = deadline;
 
         const toScheduleTime = (d) => ({
           seconds: Math.floor(d.getTime() / 1000),
@@ -8511,7 +8516,7 @@ export const onMvpMonthCreated = onDocumentCreated(
 
 // ================= MVP: 結果発表通知 =================
 export const onMvpTallied = onDocumentWritten(
-    "mvp_month/{mvpMonthId}",
+    "teams/{teamId}/mvp_month/{mvpMonthId}",
     async (event) => {
       const beforeSnap = event.data.before;
       const afterSnap = event.data.after;
@@ -8520,15 +8525,21 @@ export const onMvpTallied = onDocumentWritten(
         return;
       }
 
-      const beforeData = beforeSnap && beforeSnap.exists ?
-      beforeSnap.data() : null;
       const afterData = afterSnap.data() || {};
 
-      const wasTallied = beforeData && beforeData.isTallied === true;
-      const isTallied = afterData.isTallied === true;
+      // isTallied フラグの「前後」を明示的に取得
+      const beforeTallied =
+        beforeSnap && beforeSnap.exists ?
+          beforeSnap.get("isTallied") :
+          null;
+      const afterTallied =
+        afterSnap && afterSnap.exists ?
+          afterSnap.get("isTallied") :
+          null;
 
-      // false → true のときだけ通知
-      if (!isTallied || wasTallied) {
+      // isTallied が false / null / undefined → true に変わったときだけ通知
+      const becameTallied = beforeTallied !== true && afterTallied === true;
+      if (!becameTallied) {
         return;
       }
 
@@ -8813,13 +8824,14 @@ export const onMvpYearCreated = onDocumentCreated(
 
       const startRaw = data.voteStartDate;
       const endRaw = data.voteEndDate;
-      const deadlineRaw = data.voteDeadline || endRaw;
+      // const deadlineRaw = data.voteDeadline || endRaw;
 
       const toDate = (v) => (v && v.toDate ? v.toDate() : null);
 
       const start = toDate(startRaw);
       const end = toDate(endRaw);
-      const deadline = toDate(deadlineRaw);
+      const deadline = end;
+      // const deadline = toDate(deadlineRaw);
 
       const fmt = (d) =>
         d ? `${d.getMonth() + 1}月${d.getDate()}日` : "未設定";
@@ -8894,10 +8906,13 @@ export const onMvpYearCreated = onDocumentCreated(
       if (deadline) {
         const now = new Date();
 
-        // 「締切直前」= 締切の3時間前（必要に応じてここを調整）
-        const reminderTime =
-          new Date(deadline.getTime() - 3 * 60 * 60 * 1000);
-        const tallyTime = deadline; // 集計日は締切日時そのもの
+        // ✅ 締切前日 19:00 にリマインドを飛ばす
+        const reminderTime = new Date(deadline);
+        reminderTime.setDate(reminderTime.getDate() - 1);
+        reminderTime.setHours(19, 0, 0, 0);
+
+        // 集計日は締切日時そのもの
+        const tallyTime = deadline;
 
         const toScheduleTime = (d) => ({
           seconds: Math.floor(d.getTime() / 1000),
@@ -8972,7 +8987,7 @@ export const onMvpYearCreated = onDocumentCreated(
 
 // ================= 年間MVP: 結果発表通知 =================
 export const onMvpYearTallied = onDocumentWritten(
-    "mvp_year/{mvpYearId}",
+    "teams/{teamId}/mvp_year/{mvpYearId}",
     async (event) => {
       const beforeSnap = event.data.before;
       const afterSnap = event.data.after;
@@ -8981,15 +8996,21 @@ export const onMvpYearTallied = onDocumentWritten(
         return;
       }
 
-      const beforeData =
-        beforeSnap && beforeSnap.exists ? beforeSnap.data() : null;
       const afterData = afterSnap.data() || {};
 
-      const wasTallied = beforeData && beforeData.isTallied === true;
-      const isTallied = afterData.isTallied === true;
+      // isTallied フラグの「前後」を明示的に取得
+      const beforeTallied =
+        beforeSnap && beforeSnap.exists ?
+          beforeSnap.get("isTallied") :
+          null;
+      const afterTallied =
+        afterSnap && afterSnap.exists ?
+          afterSnap.get("isTallied") :
+          null;
 
-      // false → true のときだけ通知
-      if (!isTallied || wasTallied) {
+      // isTallied が false / null / undefined → true に変わったときだけ通知
+      const becameTallied = beforeTallied !== true && afterTallied === true;
+      if (!becameTallied) {
         return;
       }
 
@@ -9448,5 +9469,447 @@ export const onUserJoinedTeam = onDocumentWritten(
       };
 
       await messaging.sendEachForMulticast(message);
+    },
+);
+
+// 毎年12月2日に年間ランキング情報をユーザーごとに保存
+export const aggregateAnnualRanking = onSchedule(
+    {
+      schedule: "0 0 2 12 *", // 毎年12月2日 00:00（Asia/Tokyo）
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const yearKey = `${year}_total`;
+
+      console.log("📊 aggregateAnnualRanking started for year:", year);
+
+      try {
+        const usersSnap = await db.collection("users").get();
+        console.log("👥 aggregateAnnualRanking users count:", usersSnap.size);
+
+        for (const userDoc of usersSnap.docs) {
+          const uid = userDoc.id;
+          const userData = userDoc.data() || {};
+          const prefecture = userData.prefecture || null;
+          const positions = Array.isArray(userData.positions) ?
+            userData.positions : [];
+
+          if (!prefecture || typeof prefecture !== "string") {
+            console.log("ℹ️ Skipping user without prefecture:", uid);
+            continue;
+          }
+
+          const annualData = {
+            year,
+            prefecture,
+            positions,
+            updatedAt: Timestamp.now(),
+          };
+
+          // --- 打撃年度ランキングの取得 ---
+          try {
+            const battingQuerySnap = await db
+                .collection("battingAverageRanking")
+                .doc(yearKey)
+                .collection(prefecture)
+                .where("id", "==", uid)
+                .limit(1)
+                .get();
+
+            if (!battingQuerySnap.empty) {
+              const battingSnap = battingQuerySnap.docs[0];
+              annualData.batting = battingSnap.data() || {};
+            } else {
+              console.log(
+                  "ℹ️ No batting ranking doc for user:",
+                  {uid, yearKey, prefecture},
+              );
+            }
+          } catch (err) {
+            console.error(
+                "🚨 Error fetching batting ranking for user:",
+                uid,
+                err,
+            );
+          }
+
+          // --- 投手年度ランキングの取得（ポジションに「投手」が含まれる場合のみ） ---
+          if (positions.includes("投手")) {
+            try {
+              const pitcherQuerySnap = await db
+                  .collection("pitcherRanking")
+                  .doc(yearKey)
+                  .collection(prefecture)
+                  .where("id", "==", uid)
+                  .limit(1)
+                  .get();
+
+              if (!pitcherQuerySnap.empty) {
+                const pitcherSnap = pitcherQuerySnap.docs[0];
+                annualData.pitcher = pitcherSnap.data() || {};
+              } else {
+                console.log(
+                    "ℹ️ No pitcher ranking doc for user:",
+                    {uid, yearKey, prefecture},
+                );
+              }
+            } catch (err) {
+              console.error(
+                  "🚨 Error fetching pitcher ranking for user:",
+                  uid,
+                  err,
+              );
+            }
+          }
+
+          // ユーザーごとの AnnualRanking/{year} に保存
+          try {
+            const annualRef = db
+                .collection("users")
+                .doc(uid)
+                .collection("AnnualRanking")
+                .doc(String(year));
+
+            await annualRef.set(annualData, {merge: true});
+            console.log(
+                "✅ Saved AnnualRanking for user:",
+                {uid, year},
+            );
+          } catch (err) {
+            console.error(
+                "🚨 Error saving AnnualRanking for user:",
+                uid,
+                err,
+            );
+          }
+        }
+
+        console.log("🎉 aggregateAnnualRanking completed for year:", year);
+      } catch (err) {
+        console.error("🚨 aggregateAnnualRanking failed:", err);
+      }
+    },
+);
+
+// 都道府県別・全国人数分布の保存（prefecturePeople）
+export const syncRankingStatsToPrefecturePeople = onSchedule(
+    {
+      schedule: "0 1 2 12 *", // 毎年12月2日 01:00（Asia/Tokyo）
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const yearKey = `${year}_total`;
+
+      console.log("📊 syncRankingStatsToPrefecturePeople started:", {
+        year,
+        yearKey,
+      });
+
+      try {
+        await syncBattingPrefecturePeople(year, yearKey);
+        await syncPitcherPrefecturePeople(year, yearKey);
+        console.log(
+            "✅ syncRankingStatsToPrefecturePeople completed:",
+            {year, yearKey},
+        );
+      } catch (err) {
+        console.error("🚨 syncRankingStatsToPrefecturePeople failed:", err);
+      }
+    },
+);
+
+/**
+ * 都道府県別（打撃）の人数分布を prefecturePeople に同期する
+ *
+ * @param {number} year - 対象の年（例: 2025）
+ * @param {string} yearKey - ランキング年度キー（例: "2025_total"）
+ */
+async function syncBattingPrefecturePeople(year, yearKey) {
+  const battingYearDocRef =
+    db.collection("battingAverageRanking").doc(yearKey);
+
+  // 年度ドキュメント配下の都道府県サブコレクション一覧を取得（「全国」含む想定）
+  const battingCollections = await battingYearDocRef.listCollections();
+
+  console.log(
+      "📝 Batting collections for yearKey:",
+      yearKey,
+      battingCollections.map((c) => c.id),
+  );
+
+  for (const col of battingCollections) {
+    const prefectureId = col.id; // 例: "全国", "沖縄県" など
+    const statsDocRef = col.doc("stats");
+    const statsSnap = await statsDocRef.get();
+
+    if (!statsSnap.exists) {
+      console.log(
+          "ℹ️ No batting stats doc found for prefecture:",
+          {yearKey, prefectureId},
+      );
+      continue;
+    }
+
+    const statsData = statsSnap.data() || {};
+
+    // prefecturePeople/{prefecture}/{year}/batting
+    const destRef = db
+        .collection("prefecturePeople")
+        .doc(prefectureId)
+        .collection(String(year))
+        .doc("batting");
+
+    await destRef.set(statsData, {merge: true});
+
+    console.log("✅ Saved batting prefecturePeople stats:", {
+      prefectureId,
+      year,
+    });
+
+    // 全国コレクションにある hits ドキュメントも prefecturePeople にコピー
+    if (prefectureId === "全国") {
+      const hitsDocRef = col.doc("hits");
+      const hitsSnap = await hitsDocRef.get();
+
+      if (hitsSnap.exists) {
+        const hitsData = hitsSnap.data() || {};
+
+        // prefecturePeople/全国/{year}/hits
+        const hitsDestRef = db
+            .collection("prefecturePeople")
+            .doc("全国")
+            .collection(String(year))
+            .doc("hits");
+
+        await hitsDestRef.set(hitsData, {merge: true});
+
+        console.log("✅ Saved nationwide hits prefecturePeople stats:", {
+          year,
+        });
+      } else {
+        console.log(
+            "ℹ️ No nationwide hits doc found:",
+            {yearKey, prefectureId},
+        );
+      }
+    }
+  }
+}
+
+/**
+ * 都道府県別（投手）の人数分布を prefecturePeople に同期する
+ *
+ * @param {number} year - 対象の年（例: 2025）
+ * @param {string} yearKey - ランキング年度キー（例: "2025_total"）
+ */
+async function syncPitcherPrefecturePeople(year, yearKey) {
+  const pitcherYearDocRef =
+    db.collection("pitcherRanking").doc(yearKey);
+
+  const pitcherCollections = await pitcherYearDocRef.listCollections();
+
+  console.log(
+      "📝 Pitcher collections for yearKey:",
+      yearKey,
+      pitcherCollections.map((c) => c.id),
+  );
+
+  for (const col of pitcherCollections) {
+    const prefectureId = col.id; // 例: "全国", "沖縄県" など
+    const statsDocRef = col.doc("stats");
+    const statsSnap = await statsDocRef.get();
+
+    if (!statsSnap.exists) {
+      console.log(
+          "ℹ️ No pitcher stats doc found for prefecture:",
+          {yearKey, prefectureId},
+      );
+      continue;
+    }
+
+    const statsData = statsSnap.data() || {};
+
+    // prefecturePeople/{prefecture}/{year}/pitcher
+    const destRef = db
+        .collection("prefecturePeople")
+        .doc(prefectureId)
+        .collection(String(year))
+        .doc("pitcher");
+
+    await destRef.set(statsData, {merge: true});
+
+    console.log("✅ Saved pitcher prefecturePeople stats:", {
+      prefectureId,
+      year,
+    });
+  }
+}
+
+// ================= 年間チームランキング集計 =================
+export const aggregateAnnualTeamRanking = onSchedule(
+    {
+      schedule: "0 2 2 12 *", // 毎年12月2日 02:00（Asia/Tokyo）
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const yearKey = `${year}_all`;
+
+      console.log("📊 aggregateAnnualTeamRanking started for year:", year);
+
+      try {
+        const teamsSnap = await db.collection("teams").get();
+        console.log(
+            "👥 aggregateAnnualTeamRanking teams count:", teamsSnap.size,
+        );
+
+        for (const teamDoc of teamsSnap.docs) {
+          const teamId = teamDoc.id;
+          const teamData = teamDoc.data() || {};
+          const prefecture = teamData.prefecture || null;
+
+          if (!prefecture || typeof prefecture !== "string") {
+            console.log("ℹ️ Skipping team without prefecture:", teamId);
+            continue;
+          }
+
+          const annualData = {
+            year,
+            prefecture,
+            updatedAt: Timestamp.now(),
+          };
+
+          try {
+            // /teamRanking/{year}_total/{prefecture} から id == teamId のドキュメントを取得
+            const teamRankingColRef = db
+                .collection("teamRanking")
+                .doc(yearKey)
+                .collection(prefecture);
+
+            const rankingQuerySnap = await teamRankingColRef
+                .where("id", "==", teamId)
+                .limit(1)
+                .get();
+
+            if (!rankingQuerySnap.empty) {
+              const rankingSnap = rankingQuerySnap.docs[0];
+              annualData.teamRanking = rankingSnap.data() || {};
+            } else {
+              console.log(
+                  "ℹ️ No team ranking doc for team:",
+                  {teamId, yearKey, prefecture},
+              );
+            }
+          } catch (err) {
+            console.error(
+                "🚨 Error fetching team ranking for team:",
+                teamId,
+                err,
+            );
+          }
+
+          // /teams/{teamId}/AnnualRanking/{year} に保存
+          try {
+            const annualRef = db
+                .collection("teams")
+                .doc(teamId)
+                .collection("AnnualRanking")
+                .doc(String(year));
+
+            await annualRef.set(annualData, {merge: true});
+            console.log(
+                "✅ Saved Team AnnualRanking:",
+                {teamId, year},
+            );
+          } catch (err) {
+            console.error(
+                "🚨 Error saving Team AnnualRanking:",
+                teamId,
+                err,
+            );
+          }
+        }
+
+        console.log("🎉 aggregateAnnualTeamRanking completed for year:", year);
+      } catch (err) {
+        console.error("🚨 aggregateAnnualTeamRanking failed:", err);
+      }
+    },
+);
+
+// ================= 年間チーム数集計（numberOfTeams） =================
+export const syncNumberOfTeamsStats = onSchedule(
+    {
+      schedule: "0 3 2 12 *", // 毎年12月2日 03:00（Asia/Tokyo）
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const yearKey = `${year}_all`;
+
+      console.log("📊 syncNumberOfTeamsStats started:", {year, yearKey});
+
+      try {
+        const teamYearDocRef = db.collection("teamRanking").doc(yearKey);
+
+        // /teamRanking/{year}_total 配下のサブコレクション（全国＋各都道府県）を取得
+        const collections = await teamYearDocRef.listCollections();
+        console.log(
+            "📝 teamRanking collections for yearKey:",
+            yearKey,
+            collections.map((c) => c.id),
+        );
+
+        for (const col of collections) {
+          const prefectureId = col.id; // 例: "全国", "北海道", "沖縄県" など
+
+          // /teamRanking/{year}_total/{prefecture}/stats から取得
+          const statsDocRef = col.doc("stats");
+          const statsSnap = await statsDocRef.get();
+
+          if (!statsSnap.exists) {
+            console.log(
+                "ℹ️ No team stats doc for prefecture:",
+                {yearKey, prefectureId},
+            );
+            continue;
+          }
+
+          const statsData = statsSnap.data() || {};
+          // ここには、例として以下が含まれている想定:
+          // - totalTeamsCount（全国）
+          // - teamsCount（都道府県）
+          // - stats（配列）
+          // - totalTeams_age_0_17 〜 totalTeams_age_90_100 など
+
+          // 保存先: /numberOfTeams/{prefecture}/{year}/stats
+          const destRef = db
+              .collection("numberOfTeams")
+              .doc(prefectureId)
+              .collection(String(year))
+              .doc("stats");
+
+          await destRef.set(statsData, {merge: true});
+
+          console.log("✅ Saved numberOfTeams stats:", {
+            prefectureId,
+            year,
+          });
+        }
+
+        console.log("🎉 syncNumberOfTeamsStats completed:", {year, yearKey});
+      } catch (err) {
+        console.error("🚨 syncNumberOfTeamsStats failed:", err);
+      }
     },
 );
