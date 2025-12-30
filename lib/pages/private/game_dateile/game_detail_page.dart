@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 class GameDetailPage extends StatelessWidget {
   final Map<String, dynamic> gameData;
   final bool isPitcher;
+  final bool isCatcher;
 
   const GameDetailPage({
     super.key,
     required this.gameData,
     required this.isPitcher,
+    this.isCatcher = false,
+
   });
 
   @override
@@ -63,6 +66,8 @@ class GameDetailPage extends StatelessWidget {
                   Text('登板: ${gameData['appearanceType'] ?? ''}'),
                   const SizedBox(width: 45),
                   Text('対戦打者: ${gameData['battersFaced'] ?? 0}人'),
+                  const SizedBox(width: 45),
+                  Text('球数: ${gameData['pitchCount'] ?? 0}球'),
                 ],
               ),
               const SizedBox(height: 10),
@@ -93,8 +98,27 @@ class GameDetailPage extends StatelessWidget {
             if (gameData['atBats'] != null && gameData['atBats'] is List)
               ...List.generate((gameData['atBats'] as List).length, (index) {
                 final atBat = gameData['atBats'][index];
-                return Text(
-                  '${atBat['at_bat']}打席目: ${atBat['position'] ?? '不明'} - ${atBat['result'] ?? '不明'}',
+                final swingCount = atBat['swingCount'];
+                final batterPitchCount = atBat['batterPitchCount'];
+
+                String extraInfo = '';
+                if (swingCount != null) {
+                  extraInfo += 'スイング数: $swingCount';
+                }
+                if (batterPitchCount != null) {
+                  if (extraInfo.isNotEmpty) extraInfo += ' / ';
+                  extraInfo += '球数: $batterPitchCount';
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '${atBat['at_bat']}打席目: '
+                    '${atBat['position'] ?? '不明'} - '
+                    '${atBat['result'] ?? '不明'}'
+                    '${extraInfo.isNotEmpty ? '（$extraInfo）' : ''}',
+                    style: const TextStyle(fontSize: 14),
+                  ),
                 );
               }),
             const SizedBox(height: 10),
@@ -120,6 +144,14 @@ class GameDetailPage extends StatelessWidget {
                 Text('失策: ${gameData['errors'] ?? 0}'),
               ],
             ),
+            if (isCatcher) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text('盗塁刺し: ${gameData['caughtStealing'] ?? 0}'),
+                ],
+              ),
+            ],
             const SizedBox(height: 20),
 
             // メモ

@@ -369,9 +369,6 @@ class _TeamProfilePageState extends State<TeamProfilePage> {
                                     ),
                                     child: Row(
                                       children: [
-                                        const Icon(Icons.lock_open,
-                                            size: 16, color: Colors.grey),
-                                        const SizedBox(width: 4),
                                         const Text(
                                           'ベーシック',
                                           style: TextStyle(

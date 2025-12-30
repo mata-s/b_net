@@ -37,8 +37,8 @@ class _BattingRankingState extends State<BattingRanking> {
 
   // 年齢層のラベルマップ
   Map<String, String> ageGroupLabels = {
-    '0_17': '10代未満',
-    '18_29': '20代',
+    '0_19': '10代',
+    '20_29': '20代',
     '30_39': '30代',
     '40_49': '40代',
     '50_59': '50代',
@@ -80,6 +80,7 @@ class _BattingRankingState extends State<BattingRanking> {
         final exists = snapshot.docs.any((doc) => doc.id.contains('_age_$group'));
         if (exists) foundGroups.add(group);
       }
+      if (!mounted) return;
       setState(() {
         _availableAgeGroups = foundGroups;
         if (!_availableAgeGroups.contains(_selectedAgeGroup)) {
@@ -98,6 +99,7 @@ class _BattingRankingState extends State<BattingRanking> {
       final exists = snapshot.docs.any((doc) => doc.id.contains('_age_$group'));
       if (exists) foundGroups.add(group);
     }
+    if (!mounted) return;
     setState(() {
       _availableAgeGroups = foundGroups;
       if (!_availableAgeGroups.contains(_selectedAgeGroup)) {
@@ -127,6 +129,7 @@ class _BattingRankingState extends State<BattingRanking> {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _year = year; // 年を設定
       });
@@ -144,6 +147,7 @@ class _BattingRankingState extends State<BattingRanking> {
 
         // 先月モードで「打率ランキング」以外を選択している場合、何も表示しない
         if (_selectedRankingType != '打率ランキング') {
+          if (!mounted) return;
           setState(() {
             _players = [];
             _userData = null;
@@ -195,7 +199,7 @@ class _BattingRankingState extends State<BattingRanking> {
             }
             loadedAgeData = true;
             if (!_isSeasonMode) {
-              print('📆 月別年齢別データ取得: PrefectureTop10_age_${_selectedAgeGroup} (base=$basePath) count=${players.length}');
+              // print('📆 月別年齢別データ取得: PrefectureTop10_age_${_selectedAgeGroup} (base=$basePath) count=${players.length}');
             }
           }
         }
@@ -231,7 +235,7 @@ class _BattingRankingState extends State<BattingRanking> {
               }
             }
             if (!_isSeasonMode) {
-              print('📆 月別全年齢データ取得: battingAverageRank (base=$basePath) count=${players.length}');
+              // print('📆 月別全年齢データ取得: battingAverageRank (base=$basePath) count=${players.length}');
             }
           }
         }
@@ -683,6 +687,7 @@ class _BattingRankingState extends State<BattingRanking> {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _players = players;
         _userData = userData;
@@ -692,6 +697,7 @@ class _BattingRankingState extends State<BattingRanking> {
       // print('最終的なユーザー自身のデータ: $_userData'); // 最終的なユーザーデータ確認
     } catch (e) {
       print('Firestoreからのデータ取得中にエラーが発生しました: $e');
+      if (!mounted) return;
       setState(() {
         _players = [];
         _userData = null;
@@ -759,12 +765,14 @@ class _BattingRankingState extends State<BattingRanking> {
       }
     }
 
+    if (!mounted) return;
     setState(() {
       _year = year; // 見出しの年も合わせておく
       _playersCount = count;
     });
   } catch (e) {
     print('stats取得エラー: $e');
+    if (!mounted) return;
     setState(() {
       _playersCount = 0;
     });

@@ -403,6 +403,10 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
                           width: 45,
                         ),
                         Text('対戦打者: ${eventData['battersFaced'] ?? 0}人'),
+                        const SizedBox(
+                          width: 45,
+                        ),
+                        Text('球数: ${eventData['pitchCount'] ?? 0}球'),
                       ],
                     ),
                     const SizedBox(height: 10),
@@ -439,15 +443,35 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
                   ],
 
                   // 打席結果
-                  const Text(
-                    '打席結果',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                const Text('打席結果',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            if (eventData['atBats'] != null && eventData['atBats'] is List)
+              ...List.generate((eventData['atBats'] as List).length, (index) {
+                final atBat = eventData['atBats'][index];
+                final swingCount = atBat['swingCount'];
+                final batterPitchCount = atBat['batterPitchCount'];
+
+                String extraInfo = '';
+                if (swingCount != null) {
+                  extraInfo += 'スイング数: $swingCount';
+                }
+                if (batterPitchCount != null) {
+                  if (extraInfo.isNotEmpty) extraInfo += ' / ';
+                  extraInfo += '球数: $batterPitchCount';
+                }
+
+                                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '${atBat['at_bat']}打席目: '
+                    '${atBat['position'] ?? '不明'} - '
+                    '${atBat['result'] ?? '不明'}'
+                    '${extraInfo.isNotEmpty ? '（$extraInfo）' : ''}',
+                    style: const TextStyle(fontSize: 14),
                   ),
-                  const SizedBox(height: 10),
-                  ...(eventData['atBats'] as List<dynamic>).map((atBat) {
-                    return Text(
-                        '${atBat['at_bat']}打席目: ${atBat['position'] ?? '不明'} - ${atBat['result'] ?? '不明'}');
-                  }),
+                );
+              }),
                   const SizedBox(height: 10),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -473,6 +497,14 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
                       Text('失策: ${eventData['errors'] ?? 0}'),
                     ],
                   ),
+                  if (userPositions.contains('捕手')) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text('盗塁刺し: ${eventData['caughtStealing'] ?? 0}'),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 20),
 
                   // メモ

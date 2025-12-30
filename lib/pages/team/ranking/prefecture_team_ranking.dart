@@ -43,8 +43,8 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
   ];
 
   Map<String, String> ageGroupLabels = {
-    '0_17': '10代未満',
-    '18_29': '20代',
+    '0_19': '10代',
+    '20_29': '20代',
     '30_39': '30代',
     '40_49': '40代',
     '50_59': '50代',
@@ -195,7 +195,7 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
             }
             loadedAgeData = true;
             if (!_isSeasonMode) {
-              print('📆 月別年齢別データ取得: PrefectureTop10_age_${_selectedAgeGroup} (base=$basePath) count=${teams.length}');
+              // print('📆 月別年齢別データ取得: PrefectureTop10_age_${_selectedAgeGroup} (base=$basePath) count=${teams.length}');
             }
           }
         }
@@ -231,7 +231,7 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
               }
             }
             if (!_isSeasonMode) {
-              print('📆 月別全年齢データ取得: winRateRank (base=$basePath) count=${teams.length}');
+              // print('📆 月別全年齢データ取得: winRateRank (base=$basePath) count=${teams.length}');
             }
           }
         }
@@ -760,8 +760,6 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
         _teamData = teamData;
       });
 
-      print('最終的なプレイヤーデータ: $_teams'); // 最終的なプレイヤーデータ確認
-      print('最終的なユーザー自身のデータ: $_teamData'); // 最終的なユーザーデータ確認
     } catch (e) {
       print('Firestoreからのデータ取得中にエラーが発生しました: $e');
       setState(() {

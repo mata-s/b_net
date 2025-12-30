@@ -356,86 +356,135 @@ class _PrivateGameDetailState extends State<PrivateGameDetail> {
             itemCount: filteredGames.length,
             itemBuilder: (context, index) {
               final game = filteredGames[index];
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => GameDetailPage(
-                        gameData: game,
-                        isPitcher: userPositions.contains('投手'),
-                      ),
-                    ),
-                  );
-                },
-                child: Card(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 12, horizontal: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 1行目: gameType と日付
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              game['gameType'] ?? '（種類不明）',
-                              style: const TextStyle(
-                                  fontSize: 13, color: Colors.grey),
-                            ),
-                            Text(
-                              '${game['gameDate'].month}月${game['gameDate'].day}日',
-                              style: const TextStyle(
-                                  fontSize: 13, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
+              return Padding(
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  child: Material(
+    color: Theme.of(context).cardColor,
+    borderRadius: BorderRadius.circular(16),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => GameDetailPage(
+              gameData: game,
+              isPitcher: userPositions.contains('投手'),
+              isCatcher: userPositions.contains('捕手'),
+            ),
+          ),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Theme.of(context).dividerColor.withOpacity(0.6),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 上段: 試合種別 / 日付（ピル）
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _MiniPill(
+                  icon: Icons.local_offer_outlined,
+                  label: (game['gameType'] ?? '（種類不明）').toString(),
+                ),
+                _MiniPill(
+                  icon: Icons.calendar_today_outlined,
+                  label: '${game['gameDate'].month}月${game['gameDate'].day}日',
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
 
-                        // 2行目: VS相手 @球場
-                        Text(
-                          'VS ${game['opponent'] ?? '不明'} @${game['location'] ?? '場所不明'}',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
-
-                        // 3行目: 打席結果（position - result）
-                        if (game['atBats'] != null && game['atBats'] is List)
-                          Wrap(
-                            spacing: 8.0, // アイテム間の間隔
-                            runSpacing: 4.0, // 折り返したときの縦の間隔
-                            children:
-                                (game['atBats'] as List).map<Widget>((atBat) {
-                              final pos = atBat['position'] ?? '';
-                              final res = atBat['result'] ?? '';
-                              return Text(
-                                '$posー$res',
-                                style: const TextStyle(fontSize: 14),
-                              );
-                            }).toList(),
-                          ),
-                        // 投手なら投球回を表示
-                        if (userPositions.contains('投手') &&
-                            ((game['inningsThrow'] ?? 0) > 0 ||
-                                (game['outFraction'] ?? '') != '')) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            '投球回: ${game['inningsThrow']}${(game['outFraction'] != null && game['outFraction'] != '0' && game['outFraction'].toString().isNotEmpty) ? 'と${game['outFraction']}' : ''}',
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        ],
-                      ],
+            // 中段: VS相手
+            Row(
+              children: [
+                const Icon(Icons.sports_baseball, size: 16),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'VS ${game['opponent'] ?? '不明'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-              );
+              ],
+            ),
+            const SizedBox(height: 6),
+
+            // 球場
+            Row(
+              children: [
+                const Icon(Icons.place_outlined, size: 16, color: Colors.grey),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    (game['location'] ?? '場所不明').toString(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            // 打席結果（チップ化）
+            if (game['atBats'] != null && game['atBats'] is List) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: (game['atBats'] as List).map<Widget>((atBat) {
+                  final pos = (atBat['position'] ?? '').toString();
+                  final res = (atBat['result'] ?? '').toString();
+                  final text = (pos.isNotEmpty && res.isNotEmpty)
+                      ? '$posー$res'
+                      : (res.isNotEmpty ? res : '');
+
+                  if (text.isEmpty) return const SizedBox.shrink();
+                  return _SoftChip(label: text);
+                }).toList(),
+              ),
+            ],
+
+            // 投手なら投球回（行表示）
+            if (userPositions.contains('投手') &&
+                ((game['inningsThrow'] ?? 0) > 0 ||
+                    (game['outFraction'] ?? '') != '')) ...[
+              const SizedBox(height: 10),
+              _SoftRow(
+                icon: Icons.sports,
+                text:
+                    '投球回: ${game['inningsThrow']}${(game['outFraction'] != null && game['outFraction'] != '0' && game['outFraction'].toString().isNotEmpty) ? 'と${game['outFraction']}' : ''}',
+              ),
+            ],
+          ],
+        ),
+      ),
+    ),
+  ),
+);
             },
           ),
         ),
@@ -550,4 +599,90 @@ String formatPercentage(num value) {
 String formatPercentageEra(num value) {
   double doubleValue = value.toDouble(); // num を double に変換
   return doubleValue.toStringAsFixed(2); // 小数点第2位までフォーマット
+}
+
+class _MiniPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _MiniPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withOpacity(0.06)
+            : Colors.black.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.grey),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SoftChip extends StatelessWidget {
+  final String label;
+  const _SoftChip({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withOpacity(0.08)
+            : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).textTheme.bodyMedium?.color,
+        ),
+      ),
+    );
+  }
+}
+
+class _SoftRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _SoftRow({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.grey),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).textTheme.bodyMedium?.color,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

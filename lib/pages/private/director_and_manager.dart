@@ -291,96 +291,170 @@ class _DirectorAndManagerPageState extends State<DirectorAndManagerPage> {
                     itemCount: _memos.length,
                     itemBuilder: (context, index) {
                       final memo = _memos[index];
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => ViewMemoPage(
-                                memoData: memo,
-                                userUid: widget.userUid,
-                                userPosition: widget.userPosition,
+                      return Padding(
+  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  child: Material(
+    color: Theme.of(context).cardColor,
+    borderRadius: BorderRadius.circular(16),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ViewMemoPage(
+              memoData: memo,
+              userUid: widget.userUid,
+              userPosition: widget.userPosition,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Theme.of(context).dividerColor.withOpacity(0.6),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1行目: 対戦相手 + 日付バッジ
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (memo['opponent'] != null &&
+                          memo['opponent'].toString().isNotEmpty)
+                        Row(
+                          children: [
+                            const Icon(Icons.sports_baseball, size: 16),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'vs ${memo['opponent']}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
-                          );
-                        },
-                        child: Card(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (memo['opponent'] != null &&
-                                    memo['opponent'].toString().isNotEmpty)
-                                  Text(
-                                    'vs ${memo['opponent']}',
-                                    style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                const SizedBox(height: 4),
-                                if (memo['location'] != null &&
-                                    memo['location'].toString().isNotEmpty)
-                                  Text(
-                                    '@ ${memo['location']}',
-                                    style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                const SizedBox(height: 4),
-                                if ((memo['score'] != null &&
-                                        memo['score'].toString().isNotEmpty) ||
-                                    (memo['result'] != null &&
-                                        memo['result'].toString().isNotEmpty))
-                                  Row(
-                                    children: [
-                                      if (memo['score'] != null &&
-                                          memo['score'].toString().isNotEmpty)
-                                        Text(
-                                          memo['score'],
-                                          style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold),
-                                        ),
-                                      if (memo['score'] != null &&
-                                          memo['score'].toString().isNotEmpty &&
-                                          memo['result'] != null &&
-                                          memo['result'].toString().isNotEmpty)
-                                        const SizedBox(width: 10),
-                                      if (memo['result'] != null &&
-                                          memo['result'].toString().isNotEmpty)
-                                        Text(
-                                          memo['result'],
-                                          style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold),
-                                        ),
-                                    ],
-                                  ),
-                                if (memo['memo'] != null &&
-                                    memo['memo'].toString().isNotEmpty)
-                                  Text(
-                                    memo['memo'],
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  (memo['date'] as Timestamp)
-                                      .toDate()
-                                      .toString()
-                                      .split(' ')[0],
+                          ],
+                        ),
+                      if (memo['location'] != null &&
+                          memo['location'].toString().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.place_outlined,
+                                  size: 16, color: Colors.grey),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  memo['location'],
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                      fontSize: 12, color: Colors.grey),
+                                    fontSize: 13,
+                                    color: Colors.grey,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
-                      );
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                _DateBadge(
+                  text: (memo['date'] as Timestamp)
+                      .toDate()
+                      .toString()
+                      .split(' ')[0],
+                ),
+              ],
+            ),
+
+            // スコア/結果のチップ
+            if ((memo['score'] != null &&
+                    memo['score'].toString().isNotEmpty) ||
+                (memo['result'] != null &&
+                    memo['result'].toString().isNotEmpty))
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (memo['score'] != null &&
+                        memo['score'].toString().isNotEmpty)
+                      _InfoChip(
+                        icon: Icons.scoreboard_outlined,
+                        label: memo['score'].toString(),
+                      ),
+                    if (memo['result'] != null &&
+                        memo['result'].toString().isNotEmpty)
+                      _InfoChip(
+                        icon: Icons.emoji_events_outlined,
+                        label: memo['result'].toString(),
+                      ),
+                  ],
+                ),
+              ),
+
+            // メモ本文
+            if (memo['memo'] != null && memo['memo'].toString().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  memo['memo'],
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.35,
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                  ),
+                ),
+              ),
+
+            // 重要/読み直しのバッジ
+            if ((memo['isImportant'] == true) || (memo['shouldReread'] == true))
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    if (memo['isImportant'] == true)
+                      _TagPill(icon: Icons.star_rounded, label: '重要'),
+                    if (memo['shouldReread'] == true)
+                      _TagPill(icon: Icons.bookmark_added_rounded, label: '読み直し'),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  ),
+);
                     },
                   ),
           ),
@@ -399,6 +473,113 @@ class _DirectorAndManagerPageState extends State<DirectorAndManagerPage> {
           );
         },
         child: Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+class _DateBadge extends StatelessWidget {
+  final String text;
+  const _DateBadge({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withOpacity(0.06)
+            : Colors.black.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(999),
+      ),
+child: Row(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    const Icon(
+      Icons.calendar_today_outlined,
+      size: 14,
+      color: Colors.grey,
+    ),
+    const SizedBox(width: 6),
+    Text(
+      text,
+      style: const TextStyle(
+        fontSize: 12,
+        color: Colors.grey,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  ],
+),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _InfoChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withOpacity(0.08)
+            : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Colors.grey.shade700),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).textTheme.bodyMedium?.color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TagPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _TagPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.amber.withOpacity(0.12)
+            : Colors.amber.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Colors.amber.shade700),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.amber.shade200
+                  : Colors.amber.shade800,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -307,7 +307,7 @@ class _ScheduleInputPageState extends State<ScheduleInputPage> {
         .get();
     final data = teamDoc.data();
     final List<dynamic> memberUids = data?['members'] ?? [];
-    print('📣 members: $memberUids');
+    // print('📣 members: $memberUids');
 
     List<Map<String, dynamic>> fetchedMembers = [];
 

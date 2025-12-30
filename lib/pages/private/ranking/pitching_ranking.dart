@@ -36,8 +36,8 @@ class _PitchingRankingState extends State<PitchingRanking> {
   ];
 
   Map<String, String> ageGroupLabels = {
-    '0_17': '10代未満',
-    '18_29': '20代',
+    '0_19': '10代未満',
+    '20_29': '20代',
     '30_39': '30代',
     '40_49': '40代',
     '50_59': '50代',
@@ -80,6 +80,7 @@ class _PitchingRankingState extends State<PitchingRanking> {
         final exists = snapshot.docs.any((doc) => doc.id.contains('_age_$group'));
         if (exists) foundGroups.add(group);
       }
+      if (!mounted) return;
       setState(() {
         _availableAgeGroups = foundGroups;
         if (!_availableAgeGroups.contains(_selectedAgeGroup)) {
@@ -113,10 +114,11 @@ class _PitchingRankingState extends State<PitchingRanking> {
           .doc(widget.uid)
           .get();
       final positions = userDoc.data()?['positions'] as List<dynamic>? ?? [];
+      if (!mounted) return;
       setState(() {
         _isPitcher = positions.contains('投手');
       });
-      print('ユーザーの positions: $positions');
+      // print('ユーザーの positions: $positions');
     } catch (e) {
       print('positions 取得中にエラーが発生しました: $e');
     }
@@ -143,6 +145,7 @@ class _PitchingRankingState extends State<PitchingRanking> {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _year = year; // 年を設定
       });
@@ -513,16 +516,15 @@ else if (_selectedRankingType == '勝率ランキング') {
     };
   }
 }
-
+      if (!mounted) return;
       setState(() {
         _players = players;
         _userData = userData;
       });
 
-      print('最終的なプレイヤーデータ: $_players'); // 最終的なプレイヤーデータ確認
-      print('最終的なユーザー自身のデータ: $_userData'); // 最終的なユーザーデータ確認
     } catch (e) {
       print('Firestoreからのデータ取得中にエラーが発生しました: $e');
+      if (!mounted) return;
       setState(() {
         _players = [];
         _userData = null;
@@ -608,11 +610,13 @@ else if (_selectedRankingType == '勝率ランキング') {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _pitchersCount = count;
       });
     } catch (e) {
       print('pitcher stats取得エラー: $e');
+      if (!mounted) return;
       setState(() {
         _pitchersCount = 0;
       });

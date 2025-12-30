@@ -57,7 +57,7 @@ class _NationalPitchingState extends State<NationalPitching> {
       }
 
       final String docPath = 'pitcherRanking/${year}_total/全国/$rankingField';
-      print('Firestoreクエリパス: $docPath');
+      // print('Firestoreクエリパス: $docPath');
 
       final snapshot = await FirebaseFirestore.instance.doc(docPath).get();
 
@@ -79,7 +79,7 @@ class _NationalPitchingState extends State<NationalPitching> {
           _players = players;
         });
 
-        print('取得したプレイヤーデータ: $_players');
+        // print('取得したプレイヤーデータ: $_players');
       } else {
         print('データが存在しません: $docPath');
         setState(() {

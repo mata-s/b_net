@@ -6,6 +6,7 @@ class CategorizedGameListPage extends StatefulWidget {
   final String categoryType;
   final String categoryValue;
 
+
   const CategorizedGameListPage({
     Key? key,
     required this.teamId,
@@ -110,73 +111,220 @@ class _CategorizedGameListPageState extends State<CategorizedGameListPage> {
                   itemBuilder: (context, index) {
                     final game = games[index];
                     final date = game['gameDate'] as DateTime;
-                    return GestureDetector(
-                      onTap: () {},
-                      child: Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        elevation: 2,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 12, horizontal: 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 1行目: gameType と日付
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    game['game_type'] ?? '（種類不明）',
-                                    style: const TextStyle(
-                                        fontSize: 13, color: Colors.grey),
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(18),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            // 将来：試合詳細へ遷移
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(18),
+                              color: Theme.of(context).colorScheme.surface,
+                              border: Border.all(
+                                color: Theme.of(context).dividerColor.withOpacity(0.6),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(
+                                    Theme.of(context).brightness == Brightness.dark ? 0.18 : 0.06,
                                   ),
-                                  Text(
-                                    '${date.year}年${date.month}月${date.day}日',
-                                    style: const TextStyle(
-                                        fontSize: 13, color: Colors.grey),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
+                                  blurRadius: 18,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 上段：種別 / 日付 + 右端アイコン
+                                Row(
+                                  children: [
+                                    _MiniPill(
+                                      icon: Icons.local_offer_outlined,
+                                      label: (game['game_type'] ?? '（種類不明）').toString(),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _MiniPill(
+                                      icon: Icons.calendar_today_outlined,
+                                      label: '${date.year}/${date.month}/${date.day}',
+                                    ),
+                                    const Spacer(),
+                                    Icon(
+                                      Icons.chevron_right,
+                                      color: Colors.grey.withOpacity(0.7),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
 
-                              // 2行目: VS相手 @球場
-                              Text(
-                                'VS ${game['opponent'] ?? '不明'} @${game['location'] ?? '場所不明'}',
-                                style: const TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 4),
+                                // VS 相手
+                                Row(
+                                  children: [
+                                    const Icon(Icons.sports_baseball, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'VS ${game['opponent'] ?? '不明'}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
 
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Text(
-                                      '${game['score']?.toString() ?? '不明'} - ',
-                                      style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold)),
-                                  Text(
-                                      '${game['runs_allowed']?.toString() ?? '不明'}',
-                                      style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                              Text('試合結果: ${game['result'] ?? '不明'}',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold)),
-                            ],
+                                // 球場
+                                Row(
+                                  children: [
+                                    const Icon(Icons.place_outlined, size: 16, color: Colors.grey),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        (game['location'] ?? '場所不明').toString(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 12),
+                                Divider(height: 1, color: Theme.of(context).dividerColor.withOpacity(0.6)),
+                                const SizedBox(height: 12),
+
+                                // スコア + 結果（チップ）
+                                Row(
+                                  children: [
+                                    Text(
+                                      '${game['score'] ?? '-'}',
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 8),
+                                      child: Text(
+                                        'ー',
+                                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                    Text(
+                                      '${game['runs_allowed'] ?? '-'}',
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    _ResultChip(label: (game['result'] ?? '不明').toString()),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     );
                   },
                 ),
+    );
+  }
+}
+
+class _MiniPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _MiniPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withOpacity(0.08)
+            : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.grey),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResultChip extends StatelessWidget {
+  final String label;
+  const _ResultChip({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    Color bg;
+    Color fg;
+
+    final v = label.trim();
+    if (v.contains('勝')) {
+      bg = cs.primary.withOpacity(isDark ? 0.25 : 0.12);
+      fg = cs.primary;
+    } else if (v.contains('負')) {
+      bg = cs.error.withOpacity(isDark ? 0.25 : 0.12);
+      fg = cs.error;
+    } else if (v.contains('引') || v.contains('分')) {
+      bg = cs.tertiary.withOpacity(isDark ? 0.25 : 0.12);
+      fg = cs.tertiary;
+    } else {
+      bg = (isDark ? Colors.white : Colors.black).withOpacity(isDark ? 0.10 : 0.06);
+      fg = cs.onSurface.withOpacity(0.8);
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: fg.withOpacity(0.25)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          color: fg,
+        ),
+      ),
     );
   }
 }

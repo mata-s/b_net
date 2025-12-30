@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:purchases_flutter/purchases_flutter.dart';
 import 'team_home.dart'; // チームのホームページを表示するクラスをインポート
 
 class TeamAccountSwitchPage extends StatefulWidget {
@@ -143,12 +142,7 @@ class _TeamAccountSwitchPageState extends State<TeamAccountSwitchPage> {
         ),
       ),
     );
-
     try {
-      await Purchases.logOut();
-      await Purchases.logIn(team['teamId']);
-      print('✅ RevenueCat にチームIDでログイン: ${team['teamId']}');
-
       if (!mounted) return;
       Navigator.pop(context); // ローディング閉じる
 

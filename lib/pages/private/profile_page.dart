@@ -442,9 +442,10 @@ class _ProfilePageState extends State<ProfilePage> {
               // Firebase ログアウト
               await _auth.signOut();
 
-              // ログイン画面へ遷移
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (context) => LoginPage()),
+              // ログイン画面へ遷移（スタックをすべてクリア）
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const LoginPage()),
+                (route) => false,
               );
             },
           ),
@@ -556,19 +557,13 @@ class _ProfilePageState extends State<ProfilePage> {
                                 color: Colors.grey.withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.lock_open,
-                                      size: 16, color: Colors.grey),
-                                  const SizedBox(width: 4),
-                                  const Text(
-                                    'ベーシック',
-                                    style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w400,
-                                        color: Colors.grey),
-                                  ),
-                                ],
+                              child: const Text(
+                                'ベーシック',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w400,
+                                  color: Colors.grey,
+                                ),
                               ),
                             ),
                           ],

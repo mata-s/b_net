@@ -4,9 +4,9 @@ import 'package:b_net/pages/team/team_calender_tab.dart';
 import 'package:b_net/pages/team/team_performance_home.dart';
 import 'package:b_net/pages/team/team_profile.dart';
 import 'package:b_net/pages/team/team_schedule_calendar.dart';
-import 'package:b_net/pages/team/team_settings_page.dart';
 import 'package:b_net/pages/team/team_mission_page.dart';
 import 'package:b_net/pages/team/team_mvp_vote_page.dart';
+import 'package:b_net/pages/team/team_annual_results.dart';
 import 'package:b_net/services/team_subscription_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // FirebaseAuthを追加
@@ -79,8 +79,8 @@ Future<void> _init() async {
     final teamId = widget.team['teamId'] as String?;
     if (teamId != null && teamId.isNotEmpty) {
       try {
-        await Purchases.logIn(teamId);
-        print('✅ RevenueCat: teamId でログイン ($teamId)');
+        await Purchases.logIn('team:$teamId');
+        print('✅ RevenueCat: teamId でログイン (team:$teamId)');
       } catch (e) {
         print('⚠️ RevenueCat teamIdログイン失敗: $e');
       }
@@ -281,6 +281,19 @@ Future<void> _init() async {
             },
           ),
           ListTile(
+            leading: const Icon(Icons.bar_chart),
+            title: const Text('成績'),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => TeamAnnualResultsPage(
+                    teamId: widget.team['teamId'],
+                  ),
+                ),
+              );
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.swap_horiz),
             title: const Text('チームアカウント切り替え'),
             onTap: () {
@@ -327,10 +340,8 @@ Future<void> _init() async {
                 );
 
                 try {
-                  // RevenueCat を Firebase UID で再ログイン
-                  // await Purchases.logOut();
-                  await Purchases.logIn(user.uid);
-                  print('✅ RevenueCat: Firebase UID にログイン (${user.uid})');
+                  await Purchases.logIn('user:${user.uid}');
+                  print('✅ RevenueCat: Firebase UID にログイン (user:${user.uid})');
 
                   if (!context.mounted) return;
 
@@ -379,18 +390,6 @@ Future<void> _init() async {
                 ],
               ),
             ),
-          ListTile(
-            leading: const Icon(Icons.settings),
-            title: const Text('設定'),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) =>
-                        TeamSettingsPage(teamId: widget.team['teamId'])),
-              );
-            },
-          ),
           ListTile(
           leading: const Icon(Icons.workspace_premium),
             title: const Text('チームプラン'),

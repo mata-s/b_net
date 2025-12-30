@@ -212,20 +212,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                         (entitlement?.periodType ?? PeriodType.normal) ==
                             PeriodType.trial;
 
-                    final isNeverPurchased = entitlement == null;
 
-                    // 🔍 デバッグ出力
-                    print('🔍 intro price: ${package.storeProduct.introductoryPrice}');
-                    print('📦 プラン: $id');
-                    print('🎫 使用する entitlementKey: $entitlementKey');
-                    print('✅ 現在登録中: $isSubscribed');
-                    print('🧪 現在トライアル中？ → $isTrial');
-                    print('🆕 未購入？ → $isNeverPurchased');
-
-                    // 月額プランで、トライアル中またはまだ未購入なら「初月無料」バッジ
-                    final badge = (isMonthly && (isTrial || isNeverPurchased))
-                        ? '初月無料'
-                        : null;
+                    // 月額プランで、トライアル中のときだけ「初月無料」バッジ
+                    final badge = (isMonthly && isTrial) ? '初月無料' : null;
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 24),
@@ -243,6 +232,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   }),
                   const SizedBox(height: 24),
                   const PremiumFeaturesSection(),
+                  
+                  const SubscriptionLegalSection(
+                    privacyPolicyUrl: 'https://baseball-net.vercel.app/privacy',
+                    termsUrl: 'https://baseball-net.vercel.app/terms',
+                  ),
                 ],
               ),
             ),
@@ -480,6 +474,131 @@ class FeatureBullet extends StatelessWidget {
               text,
               style: TextStyle(fontSize: 15.5, height: 1.5),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SubscriptionLegalSection extends StatelessWidget {
+  final String privacyPolicyUrl;
+  final String termsUrl;
+
+  const SubscriptionLegalSection({
+    super.key,
+    required this.privacyPolicyUrl,
+    required this.termsUrl,
+  });
+
+  Future<void> _openUrl(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    final ok = await canLaunchUrl(uri);
+    if (ok) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ リンクを開けませんでした')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const textStyle = TextStyle(fontSize: 12, height: 1.5);
+    const appleEulaUrl =
+        'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+
+    final linkStyle = TextStyle(
+      fontSize: 12,
+      color: Theme.of(context).colorScheme.primary,
+      decorationColor: Theme.of(context).colorScheme.primary,
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(top: 24),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'サブスクリプションについて',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '・「月額プラン」は 1か月ごとの自動更新サブスクリプションです。',
+            style: textStyle,
+          ),
+          const Text(
+            '・「年額プラン」は 1年ごとの自動更新サブスクリプションです。',
+            style: textStyle,
+          ),
+          const Text(
+            '・料金は購入確定時に（iOSはApple ID、AndroidはGoogle Play）に請求されます。',
+            style: textStyle,
+          ),
+          const Text(
+            '・現在の期間が終了する24時間前までに自動更新をオフにしない限り、自動的に更新されます。',
+            style: textStyle,
+          ),
+          const Text(
+            '・解約/プラン変更は、アプリ内ではなく App Store / Google Play のサブスクリプション管理から行えます。解約しても、現在の請求期間が終了するまでは利用できます。',
+            style: textStyle,
+          ),
+          const Text(
+            '・（iOS）設定アプリ ＞ Apple ID ＞ サブスクリプション',
+            style: textStyle,
+          ),
+          const Text(
+            '・（Android）Google Play ＞ お支払いと定期購入 ＞ 定期購入',
+            style: textStyle,
+          ),
+          const Text(
+            '・無料トライアルがある場合、トライアル終了後に自動的に有料期間に切り替わります。',
+            style: textStyle,
+          ),
+          const Text(
+            '・無料トライアルを利用している場合、トライアル期間中に解約しても請求は発生しません。',
+            style: textStyle,
+          ),
+          const Text(
+            '・購入の復元（機種変更時など）は、画面右上の「復元」から行えます。',
+            style: textStyle,
+          ),
+          const Text(
+            '・払い戻し（返金）については、Apple / Google の規定に従い、原則としてストア側での対応となります。',
+            style: textStyle,
+          ),
+          const Text(
+            '・プランの有効期間中は、解約しても機能がすぐに止まることはありません（期間終了まで利用できます）。',
+            style: textStyle,
+          ),
+          const Text(
+            '・アプリ内の表示や利用可否は、ストアの購読状態（有効/失効）に基づいて反映されます。反映に少し時間がかかる場合があります。',
+            style: textStyle,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 4,
+            children: [
+              GestureDetector(
+                onTap: () => _openUrl(context, privacyPolicyUrl),
+                child: Text('プライバシーポリシー', style: linkStyle),
+              ),
+              GestureDetector(
+                onTap: () => _openUrl(context, termsUrl),
+                child: Text('利用規約', style: linkStyle),
+              ),
+              GestureDetector(
+                onTap: () => _openUrl(context, appleEulaUrl),
+                child: Text('Apple 標準利用規約 (EULA)', style: linkStyle),
+              ),
+            ],
           ),
         ],
       ),

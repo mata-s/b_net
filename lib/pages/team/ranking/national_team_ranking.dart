@@ -54,7 +54,7 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
 
       final String rankingField = _getRankingField();
       if (rankingField.isEmpty) {
-        print('無効なランキングタイプ: $_selectedRankingType');
+        // print('無効なランキングタイプ: $_selectedRankingType');
         setState(() {
           _teams = [];
         });
@@ -62,7 +62,7 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
       }
 
       final String docPath = 'teamRanking/${year}_all/全国/$rankingField';
-      print('Firestoreクエリパス: $docPath');
+      // print('Firestoreクエリパス: $docPath');
 
       final snapshot = await FirebaseFirestore.instance.doc(docPath).get();
 

@@ -1,3 +1,6 @@
+import * as dotenv from "dotenv";
+dotenv.config();
+
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
@@ -2053,88 +2056,6 @@ onRequest(async (req, res) => {
   }
 });
 
-// 毎日サブスク確認
-export const checkSubscriptionExpiry = onSchedule(
-    {
-      schedule: "0 0 * * *", // 毎日1:00AM
-      timeZone: "Asia/Tokyo",
-      timeoutSeconds: 1800,
-    },
-    async () => {
-      console.log("🔄 サブスクの有効期限チェック開始");
-
-      const usersSnapshot = await db.collection("users").get();
-
-      for (const userDoc of usersSnapshot.docs) {
-        const userId = userDoc.id;
-        const subscriptionRef =
-      db.collection("users").doc(userId).collection("subscription");
-
-        const subsSnapshot = await subscriptionRef.get();
-
-        for (const subDoc of subsSnapshot.docs) {
-          const subData = subDoc.data();
-
-          let expiryDate = null;
-          if (
-            subData.expiryDate &&
-            typeof subData.expiryDate.toDate === "function"
-          ) {
-            expiryDate = subData.expiryDate.toDate();
-          }
-
-          if (expiryDate && expiryDate < new Date()) {
-            await subDoc.ref.update({status: "inactive"});
-            console.log(`❌ サブスク期限切れ: ${userId} - ${subDoc.id}`);
-          }
-        }
-      }
-
-      console.log("✅ サブスクの有効期限チェック完了");
-    },
-);
-
-// 毎日チームサブスク確認
-export const checkTeamSubscriptionExpiry = onSchedule(
-    {
-      schedule: "0 1 * * *", // 毎日2:00AM
-      timeZone: "Asia/Tokyo",
-      timeoutSeconds: 1800,
-    },
-    async () => {
-      console.log("🔄 チームサブスクの有効期限チェック開始");
-
-      const teamSnapshot = await db.collection("teams").get();
-
-      for (const teamDoc of teamSnapshot.docs) {
-        const teamId = teamDoc.id;
-        const subscriptionRef =
-        db.collection("teams").doc(teamId).collection("subscription");
-
-        const subsSnapshot = await subscriptionRef.get();
-
-        for (const subDoc of subsSnapshot.docs) {
-          const subData = subDoc.data();
-
-          let expiryDate = null;
-          if (
-            subData.expiryDate &&
-          typeof subData.expiryDate.toDate === "function"
-          ) {
-            expiryDate = subData.expiryDate.toDate();
-          }
-
-          if (expiryDate && expiryDate < new Date()) {
-            await subDoc.ref.update({status: "inactive"});
-            console.log(`❌ チームサブスク期限切れ: ${teamId} - ${subDoc.id}`);
-          }
-        }
-      }
-
-      console.log("✅ チームサブスクの有効期限チェック完了");
-    },
-);
-
 // 週一チーム成績
 const gradesQueue = "team-grades-queue"; // 使用するキューの名前
 const gradesUrl = "https://processteamstats-etndg3x4ra-uc.a.run.app";
@@ -3844,8 +3765,8 @@ async function batchWriteData(db, collectionPath, data) {
  * @return {string} 年齢グループ（例: '30_39'）
  */
 function getAgeGroup(age) {
-  if (age >= 0 && age <= 17) return "0_17";
-  if (age >= 18 && age <= 29) return "18_29";
+  if (age >= 0 && age <= 19) return "0_19";
+  if (age >= 20 && age <= 29) return "20_29";
   if (age >= 30 && age <= 39) return "30_39";
   if (age >= 40 && age <= 49) return "40_49";
   if (age >= 50 && age <= 59) return "50_59";
@@ -4701,7 +4622,7 @@ async function saveRankingByPrefecture(playersByPrefecture, year, month) {
 async function saveMonthlyTop10RanksByPrefecture(
     playersByPrefecture, year, month) {
   const ageGroups = [
-    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "0_19", "20_29", "30_39", "40_49", "50_59",
     "60_69", "70_79", "80_89", "90_100",
   ];
 
@@ -4815,8 +4736,8 @@ async function saveMonthlyTop10RanksByPrefecturePitcher(
     month,
 ) {
   const ageGroups = [
-    "0_17",
-    "18_29",
+    "0_19",
+    "20_29",
     "30_39",
     "40_49",
     "50_59",
@@ -5346,7 +5267,7 @@ async function saveTop10RanksByPrefecture(totalPlayersByPrefecture, year) {
   };
 
   const ageGroups = [
-    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "0_19", "20_29", "30_39", "40_49", "50_59",
     "60_69", "70_79", "80_89", "90_100",
   ];
 
@@ -5626,7 +5547,7 @@ async function saveNationwideTopRanks(totalPlayersByPrefecture, year) {
     for (const category of Object.keys(nationwideRanks)) {
       // 年齢別カテゴリごとの重複防止用セットを初期化
       const ageGroups = [
-        "0_17", "18_29", "30_39", "40_49", "50_59",
+        "0_19", "20_29", "30_39", "40_49", "50_59",
         "60_69", "70_79", "80_89", "90_100",
       ];
       for (const group of ageGroups) {
@@ -5739,7 +5660,7 @@ async function saveNationwideTopRanks(totalPlayersByPrefecture, year) {
   await batch.commit();
 
   const ageGroups = [
-    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "0_19", "20_29", "30_39", "40_49", "50_59",
     "60_69", "70_79", "80_89", "90_100",
   ];
 
@@ -5895,7 +5816,7 @@ async function saveTop10RanksByPrefecturePitcher(
   ];
 
   const ageGroups = [
-    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "0_19", "20_29", "30_39", "40_49", "50_59",
     "60_69", "70_79", "80_89", "90_100",
   ];
 
@@ -6120,7 +6041,7 @@ async function saveNationwideTopRanksPitcher(totalPitchersByPrefecture, year) {
   ];
 
   const ageGroups = [
-    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "0_19", "20_29", "30_39", "40_49", "50_59",
     "60_69", "70_79", "80_89", "90_100",
   ];
 
@@ -6886,7 +6807,7 @@ async function saveMonthlyTeamTop10RanksByPrefecture(
     teamsByPrefecture, year, month,
 ) {
   const ageGroups = [
-    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "0_19", "20_29", "30_39", "40_49", "50_59",
     "60_69", "70_79", "80_89", "90_100",
   ];
 
@@ -7032,7 +6953,7 @@ async function saveTeamTop10RanksByPrefecture(totalTeamsByPrefecture, year) {
   };
 
   const ageGroups = [
-    "0_17", "18_29", "30_39", "40_49", "50_59",
+    "0_19", "20_29", "30_39", "40_49", "50_59",
     "60_69", "70_79", "80_89", "90_100",
   ];
 
@@ -8311,31 +8232,74 @@ const mvpTallyQueuePath =
 const functionsBaseUrl =
   `https://${location}-${project}.cloudfunctions.net`;
 
+// ✅ JST（UTC+9）変換ヘルパー
+const JST_OFFSET_MINUTES = 9 * 60;
+
+/**
+ * UTC日時(Date) → JST日時(Date)
+ *
+ * @param {Date} date - UTC基準の Date オブジェクト
+ * @return {Date} JST基準に変換された Date オブジェクト
+ */
+function toJst(date) {
+  return new Date(date.getTime() + JST_OFFSET_MINUTES * 60 * 1000);
+}
+
+/**
+ * JST日時(Date) → UTC日時(Date)
+ *
+ * @param {Date} jstDate - JST基準の Date オブジェクト
+ * @return {Date} UTC基準に変換された Date オブジェクト
+ */
+function fromJst(jstDate) {
+  return new Date(jstDate.getTime() - JST_OFFSET_MINUTES * 60 * 1000);
+}
+
 /**
  * 指定したユーザーID配列から FCM トークンをまとめて取得
+ * - users/{uid}.notificationsEnabled === false のユーザーは除外
  * @param {string[]} userIds
  * @return {Promise<string[]>}
  */
 async function getFcmTokensForUsers(userIds) {
-  const tokens = [];
+  // ✅ 重複トークンで同じ端末に通知が2回来るのを防ぐ
+  const tokenSet = new Set();
 
   for (const uid of userIds) {
     const userSnap = await db.collection("users").doc(uid).get();
     if (!userSnap.exists) continue;
 
     const userData = userSnap.data() || {};
-    const userTokens = userData.fcmTokens || [];
 
+    // 🔕 アプリ内設定で通知OFFのユーザーはスキップ
+    if (userData.notificationsEnabled === false) {
+      console.log("🔕 notificationsEnabled=false, skip user for FCM:", uid);
+      continue;
+    }
+
+    const userTokens = userData.fcmTokens;
+
+    // 配列形式: [token1, token2]
     if (Array.isArray(userTokens)) {
       for (const t of userTokens) {
-        if (typeof t === "string" && t) {
-          tokens.push(t);
+        if (typeof t === "string" && t.length > 0) {
+          tokenSet.add(t);
+        }
+      }
+      continue;
+    }
+
+    // マップ形式: { token: true, ... }
+    if (userTokens && typeof userTokens === "object") {
+      for (const t of Object.keys(userTokens)) {
+        if (typeof t === "string" && t.length > 0) {
+          tokenSet.add(t);
         }
       }
     }
   }
 
-  return tokens;
+  return Array.from(tokenSet);
 }
 
 /**
@@ -8348,6 +8312,26 @@ export const onMvpMonthCreated = onDocumentCreated(
       const snap = event.data;
       if (!snap) {
         console.log("No snapshot in onMvpMonthCreated");
+        return;
+      }
+
+      const mvpMonthRef = snap.ref;
+
+      // 🔒 多重実行ガード（at-least-once 対策）
+      let alreadyNotified = false;
+      await db.runTransaction(async (tx) => {
+        const doc = await tx.get(mvpMonthRef);
+        const d = doc.data() || {};
+        if (d._mvpMonthCreatedNotified) {
+          alreadyNotified = true;
+          return;
+        }
+        // まだ通知していなければフラグを立てる
+        tx.set(mvpMonthRef, {_mvpMonthCreatedNotified: true}, {merge: true});
+      });
+
+      if (alreadyNotified) {
+        console.log("onMvpMonthCreated: already notified, skip.");
         return;
       }
 
@@ -8439,27 +8423,35 @@ export const onMvpMonthCreated = onDocumentCreated(
 
       // --- Cloud Tasks で「締切前リマインド」と「集計日お知らせ」を予約 ---
       if (deadline) {
-        const now = new Date();
+        const nowUtc = new Date();
 
-        // ✅ 締切前日 19:00 にリマインド
-        const reminderTime = new Date(deadline);
-        reminderTime.setDate(reminderTime.getDate() - 1);
-        reminderTime.setHours(19, 0, 0, 0);
+        // Firestore Timestamp → Date は「UTC 時刻の瞬間」
+        const deadlineUtc = deadline;
+        const deadlineJst = toJst(deadlineUtc);
 
-        // 集計日は締切日時そのもの
-        const tallyTime = deadline;
+        // 🔔 1) 締切前日の 21:00（JST）にリマインド
+        const reminderJst = new Date(deadlineJst);
+        reminderJst.setDate(reminderJst.getDate() - 1);
+        reminderJst.setHours(21, 0, 0, 0); // ← ここが「前日21:00 JST」
+
+        const reminderUtc = fromJst(reminderJst);
+
+        // 📊 2) 集計日当日の 21:00（JST）にお知らせ（必要なら時間は調整してOK）
+        const tallyJst = new Date(deadlineJst);
+        tallyJst.setHours(21, 0, 0, 0);
+        const tallyUtc = fromJst(tallyJst);
 
         const toScheduleTime = (d) => ({
           seconds: Math.floor(d.getTime() / 1000),
         });
 
         // 1) 締切前リマインド（未投票者向け）
-        if (reminderTime > now) {
+        if (reminderUtc > nowUtc) {
           try {
             await client.createTask({
               parent: mvpReminderQueuePath,
               task: {
-                scheduleTime: toScheduleTime(reminderTime),
+                scheduleTime: toScheduleTime(reminderUtc),
                 httpRequest: {
                   httpMethod: "POST",
                   url: `${functionsBaseUrl}/mvpVoteReminderTask`,
@@ -8475,7 +8467,8 @@ export const onMvpMonthCreated = onDocumentCreated(
             console.log("📥 Enqueued MVP vote reminder task", {
               teamId,
               mvpId,
-              reminderTime: reminderTime.toISOString(),
+              reminderJst: reminderJst.toISOString(),
+              reminderUtc: reminderUtc.toISOString(),
             });
           } catch (e) {
             console.error("🚨 Failed to enqueue MVP vote reminder task", e);
@@ -8483,12 +8476,12 @@ export const onMvpMonthCreated = onDocumentCreated(
         }
 
         // 2) 集計日お知らせ（作成者向け）
-        if (tallyTime > now) {
+        if (tallyUtc > nowUtc) {
           try {
             await client.createTask({
               parent: mvpTallyQueuePath,
               task: {
-                scheduleTime: toScheduleTime(tallyTime),
+                scheduleTime: toScheduleTime(tallyUtc),
                 httpRequest: {
                   httpMethod: "POST",
                   url: `${functionsBaseUrl}/mvpTallyNoticeTask`,
@@ -8504,7 +8497,8 @@ export const onMvpMonthCreated = onDocumentCreated(
             console.log("📥 Enqueued MVP tally notice task", {
               teamId,
               mvpId,
-              tallyTime: tallyTime.toISOString(),
+              tallyJst: tallyJst.toISOString(),
+              tallyUtc: tallyUtc.toISOString(),
             });
           } catch (e) {
             console.error("🚨 Failed to enqueue MVP tally notice task", e);
@@ -8540,6 +8534,26 @@ export const onMvpTallied = onDocumentWritten(
       // isTallied が false / null / undefined → true に変わったときだけ通知
       const becameTallied = beforeTallied !== true && afterTallied === true;
       if (!becameTallied) {
+        return;
+      }
+
+      // 🔒 多重実行ガード（at-least-once 対策）
+      const mvpMonthRef = afterSnap.ref;
+      let alreadyNotified = false;
+
+      await db.runTransaction(async (tx) => {
+        const doc = await tx.get(mvpMonthRef);
+        const d = doc.data() || {};
+        if (d._mvpResultNotified) {
+          alreadyNotified = true;
+          return;
+        }
+        // まだ結果通知を送っていなければフラグを立てる
+        tx.set(mvpMonthRef, {_mvpResultNotified: true}, {merge: true});
+      });
+
+      if (alreadyNotified) {
+        console.log("onMvpTallied: already notified, skip.");
         return;
       }
 
@@ -8579,6 +8593,9 @@ export const onMvpTallied = onDocumentWritten(
       const title = `「${theme}」の結果が発表されました`;
       const body = "アプリから結果をチェックしてみましょう。";
 
+      // ✅ 端末側で「同じ結果通知」が重なったら1つに畳む（重複実行の保険）
+      const collapseId = `mvp_result_${String(teamId)}_${String(mvpMonthId)}`;
+
       await messaging.sendEachForMulticast({
         notification: {title, body},
         tokens,
@@ -8586,6 +8603,25 @@ export const onMvpTallied = onDocumentWritten(
           type: "mvpResult",
           teamId: String(teamId),
           mvpMonthId: String(mvpMonthId),
+        },
+        android: {
+          priority: "high",
+          notification: {
+            // Android: 同じtagは上書き（通知が2つ並ぶのを防ぐ）
+            tag: collapseId,
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          },
+        },
+        apns: {
+          headers: {
+            // iOS: 同じ collapse-id は上書き（通知が2つ並ぶのを防ぐ）
+            "apns-collapse-id": collapseId,
+          },
+          payload: {
+            aps: {
+              sound: "default",
+            },
+          },
         },
       });
 
@@ -8816,6 +8852,26 @@ export const onMvpYearCreated = onDocumentCreated(
         return;
       }
 
+      const mvpYearRef = snap.ref;
+
+      // 🔒 多重実行ガード（at-least-once 対策）
+      let alreadyNotified = false;
+      await db.runTransaction(async (tx) => {
+        const doc = await tx.get(mvpYearRef);
+        const d = doc.data() || {};
+        if (d._mvpYearCreatedNotified) {
+          alreadyNotified = true;
+          return;
+        }
+        // まだ通知していなければフラグを立てる
+        tx.set(mvpYearRef, {_mvpYearCreatedNotified: true}, {merge: true});
+      });
+
+      if (alreadyNotified) {
+        console.log("onMvpYearCreated: already notified, skip.");
+        return;
+      }
+
       const data = snap.data() || {};
       const teamId = event.params.teamId;
       const mvpId = event.params.mvpId;
@@ -8904,27 +8960,35 @@ export const onMvpYearCreated = onDocumentCreated(
 
       // --- Cloud Tasks で「締切前リマインド」と「集計日お知らせ」を予約 ---
       if (deadline) {
-        const now = new Date();
+        const nowUtc = new Date();
 
-        // ✅ 締切前日 19:00 にリマインドを飛ばす
-        const reminderTime = new Date(deadline);
-        reminderTime.setDate(reminderTime.getDate() - 1);
-        reminderTime.setHours(19, 0, 0, 0);
+        // Firestore Timestamp → Date は「UTC 時刻の瞬間」
+        const deadlineUtc = deadline;
+        const deadlineJst = toJst(deadlineUtc);
 
-        // 集計日は締切日時そのもの
-        const tallyTime = deadline;
+        // 🔔 1) 締切前日の 21:00（JST）にリマインド
+        const reminderJst = new Date(deadlineJst);
+        reminderJst.setDate(reminderJst.getDate() - 1);
+        reminderJst.setHours(21, 0, 0, 0); // ← 前日 21:00 JST
+
+        const reminderUtc = fromJst(reminderJst);
+
+        // 📊 2) 集計日当日の 21:00（JST）にお知らせ
+        const tallyJst = new Date(deadlineJst);
+        tallyJst.setHours(21, 0, 0, 0);
+        const tallyUtc = fromJst(tallyJst);
 
         const toScheduleTime = (d) => ({
           seconds: Math.floor(d.getTime() / 1000),
         });
 
         // 1) 締切前リマインド（未投票者向け）
-        if (reminderTime > now) {
+        if (reminderUtc > nowUtc) {
           try {
             await client.createTask({
               parent: mvpYearReminderQueuePath,
               task: {
-                scheduleTime: toScheduleTime(reminderTime),
+                scheduleTime: toScheduleTime(reminderUtc),
                 httpRequest: {
                   httpMethod: "POST",
                   url: `${functionsBaseUrl}/mvpYearVoteReminderTask`,
@@ -8940,7 +9004,8 @@ export const onMvpYearCreated = onDocumentCreated(
             console.log("📥 Enqueued Year MVP vote reminder task", {
               teamId,
               mvpId,
-              reminderTime: reminderTime.toISOString(),
+              reminderJst: reminderJst.toISOString(),
+              reminderUtc: reminderUtc.toISOString(),
             });
           } catch (e) {
             console.error(
@@ -8951,12 +9016,12 @@ export const onMvpYearCreated = onDocumentCreated(
         }
 
         // 2) 集計日お知らせ（作成者向け）
-        if (tallyTime > now) {
+        if (tallyUtc > nowUtc) {
           try {
             await client.createTask({
               parent: mvpYearTallyQueuePath,
               task: {
-                scheduleTime: toScheduleTime(tallyTime),
+                scheduleTime: toScheduleTime(tallyUtc),
                 httpRequest: {
                   httpMethod: "POST",
                   url: `${functionsBaseUrl}/mvpYearTallyNoticeTask`,
@@ -8972,7 +9037,8 @@ export const onMvpYearCreated = onDocumentCreated(
             console.log("📥 Enqueued Year MVP tally notice task", {
               teamId,
               mvpId,
-              tallyTime: tallyTime.toISOString(),
+              tallyJst: tallyJst.toISOString(),
+              tallyUtc: tallyUtc.toISOString(),
             });
           } catch (e) {
             console.error(
@@ -9014,6 +9080,26 @@ export const onMvpYearTallied = onDocumentWritten(
         return;
       }
 
+      // 🔒 多重実行ガード（at-least-once 対策）
+      const mvpYearRef = afterSnap.ref;
+      let alreadyNotified = false;
+
+      await db.runTransaction(async (tx) => {
+        const doc = await tx.get(mvpYearRef);
+        const d = doc.data() || {};
+        if (d._yearMvpResultNotified) {
+          alreadyNotified = true;
+          return;
+        }
+        // まだ結果通知を送っていなければフラグを立てる
+        tx.set(mvpYearRef, {_yearMvpResultNotified: true}, {merge: true});
+      });
+
+      if (alreadyNotified) {
+        console.log("onMvpYearTallied: already notified, skip.");
+        return;
+      }
+
       const mvpYearId = event.params.mvpYearId;
       const teamId = afterData.teamId;
 
@@ -9052,6 +9138,10 @@ export const onMvpYearTallied = onDocumentWritten(
       const title = `「${theme}」の年間MVP結果が発表されました`;
       const body = "アプリから結果をチェックしてみましょう。";
 
+      // ✅ 端末側で「同じ結果通知」が重なったら1つに畳む（重複実行の保険）
+      const collapseId =
+       `mvp_year_result_${String(teamId)}_${String(mvpYearId)}`;
+
       await messaging.sendEachForMulticast({
         notification: {title, body},
         tokens,
@@ -9059,6 +9149,25 @@ export const onMvpYearTallied = onDocumentWritten(
           type: "mvpYearResult",
           teamId: String(teamId),
           mvpYearId: String(mvpYearId),
+        },
+        android: {
+          priority: "high",
+          notification: {
+            // Android: 同じtagは上書き
+            tag: collapseId,
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          },
+        },
+        apns: {
+          headers: {
+            // iOS: 同じ collapse-id は上書き
+            "apns-collapse-id": collapseId,
+          },
+          payload: {
+            aps: {
+              sound: "default",
+            },
+          },
         },
       });
 
@@ -9102,6 +9211,23 @@ export const mvpYearVoteReminderTask = onRequest(
             mvpId: mvpIdStr,
           });
           res.status(200).send("MVP doc not found");
+          return;
+        }
+
+        // === 多重実行ガード: _mvpYearReminderSent ===
+        let alreadyReminded = false;
+        await db.runTransaction(async (tx) => {
+          const doc = await tx.get(mvpRef);
+          const d = doc.data() || {};
+          if (d._mvpYearReminderSent) {
+            alreadyReminded = true;
+            return;
+          }
+          tx.set(mvpRef, {_mvpYearReminderSent: true}, {merge: true});
+        });
+        if (alreadyReminded) {
+          console.log("mvpYearVoteReminderTask: already reminded, skip.");
+          res.status(200).send("already reminded");
           return;
         }
 
@@ -9218,6 +9344,23 @@ export const mvpYearTallyNoticeTask = onRequest(
             mvpId: mvpIdStr,
           });
           res.status(200).send("MVP doc not found");
+          return;
+        }
+
+        // === 多重実行ガード: _mvpYearTallyNoticeSent ===
+        let alreadyTallyNoticed = false;
+        await db.runTransaction(async (tx) => {
+          const doc = await tx.get(mvpRef);
+          const d = doc.data() || {};
+          if (d._mvpYearTallyNoticeSent) {
+            alreadyTallyNoticed = true;
+            return;
+          }
+          tx.set(mvpRef, {_mvpYearTallyNoticeSent: true}, {merge: true});
+        });
+        if (alreadyTallyNoticed) {
+          console.log("mvpYearTallyNoticeTask: already tally noticed, skip.");
+          res.status(200).send("already tally noticed");
           return;
         }
 
@@ -9910,6 +10053,310 @@ export const syncNumberOfTeamsStats = onSchedule(
         console.log("🎉 syncNumberOfTeamsStats completed:", {year, yearKey});
       } catch (err) {
         console.error("🚨 syncNumberOfTeamsStats failed:", err);
+      }
+    },
+);
+
+
+// 毎日サブスク確認（保険: 期限切れ→inactive）
+// 保存先: users/{uid}/subscription/{platform}
+export const checkSubscriptionExpiry = onSchedule(
+    {
+      schedule: "0 0 * * *", // 毎日 00:00（Asia/Tokyo）
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      console.log("🔄 [users] サブスク有効期限チェック開始");
+
+      const usersSnapshot = await db.collection("users").get();
+      const now = new Date();
+
+      for (const userDoc of usersSnapshot.docs) {
+        const userId = userDoc.id;
+        const subColRef = db
+            .collection("users")
+            .doc(userId)
+            .collection("subscription");
+
+        const subDocs = await subColRef.get();
+        if (subDocs.empty) continue;
+
+        for (const subDoc of subDocs.docs) {
+          const platform = subDoc.id;
+          const subData = subDoc.data() || {};
+
+          let expiryDate = null;
+          if (
+            subData.expiryDate &&
+            typeof subData.expiryDate.toDate === "function"
+          ) {
+            expiryDate = subData.expiryDate.toDate();
+          }
+
+          // expiryDate が無い場合は判断できないのでスキップ
+          if (!expiryDate) continue;
+
+          const isExpired = expiryDate.getTime() < now.getTime();
+          const status = String(subData.status || "").toLowerCase();
+
+          if (isExpired && status !== "inactive") {
+            await subColRef.doc(platform).set(
+                {
+                  status: "inactive",
+                  platform,
+                  updatedAt: Timestamp.now(),
+                },
+                {merge: true},
+            );
+            console.log(`❌ [users] 期限切れ→inactive: ${userId} (${platform})`);
+          }
+        }
+      }
+
+      console.log("✅ [users] サブスク有効期限チェック完了");
+    },
+);
+
+// 毎日チームサブスク確認（保険: 期限切れ→inactive）
+// 保存先: teams/{teamId}/subscription/{platform}
+export const checkTeamSubscriptionExpiry = onSchedule(
+    {
+      schedule: "0 1 * * *", // 毎日 01:00（Asia/Tokyo）
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      console.log("🔄 [teams] チームサブスク有効期限チェック開始");
+
+      const teamSnapshot = await db.collection("teams").get();
+      const now = new Date();
+
+      for (const teamDoc of teamSnapshot.docs) {
+        const teamId = teamDoc.id;
+        const subColRef = db
+            .collection("teams")
+            .doc(teamId)
+            .collection("subscription");
+
+        const subDocs = await subColRef.get();
+        if (subDocs.empty) continue;
+
+        for (const subDoc of subDocs.docs) {
+          const platform = subDoc.id;
+          const subData = subDoc.data() || {};
+
+          let expiryDate = null;
+          if (
+            subData.expiryDate &&
+            typeof subData.expiryDate.toDate === "function"
+          ) {
+            expiryDate = subData.expiryDate.toDate();
+          }
+
+          if (!expiryDate) continue;
+
+          const isExpired = expiryDate.getTime() < now.getTime();
+          const status = String(subData.status || "").toLowerCase();
+
+          if (isExpired && status !== "inactive") {
+            await subColRef.doc(platform).set(
+                {
+                  status: "inactive",
+                  platform,
+                  updatedAt: Timestamp.now(),
+                },
+                {merge: true},
+            );
+            console.log(`❌ [teams] 期限切れ→inactive: ${teamId} (${platform})`);
+          }
+        }
+      }
+
+      console.log("✅ [teams] チームサブスク有効期限チェック完了");
+    },
+);
+
+// ================= RevenueCat Webhook (v2) =================
+// 継続・更新・購入イベントで subscription/{platform} を更新する
+// app_user_id が users/{uid} か teams/{teamId} のどちらかに一致する想定
+export const revenuecatWebhook = onRequest(
+    {
+      region: "asia-northeast1",
+      timeoutSeconds: 60,
+    },
+    async (req, res) => {
+      try {
+      // --- Auth (Bearer token) ---
+        const auth = req.get("Authorization") || "";
+        if (auth !== `Bearer ${process.env.REVENUECAT_WEBHOOK_TOKEN}`) {
+          res.status(401).send("Unauthorized");
+          return;
+        }
+
+        // RevenueCat Webhook は POST が基本
+        if (req.method !== "POST") {
+          res.status(405).send("Method Not Allowed");
+          return;
+        }
+
+        const payload = req.body || {};
+
+        // v2 の前提: payload.event が本体
+        const event = payload.event;
+        if (!event || typeof event !== "object") {
+          res.status(400).send("Missing event (v2 payload)");
+          return;
+        }
+
+        const type = String(event.type || "");
+        const appUserId = String(event.app_user_id || "");
+
+        if (!appUserId) {
+          res.status(400).send("Missing app_user_id");
+          return;
+        }
+
+        // --- app_user_id prefix routing ---
+        // Expected formats:
+        //   user:{uid}  -> users/{uid}
+        //   team:{teamId} -> teams/{teamId}
+        let targetType = null; // "user" | "team"
+        let targetId = null;
+
+        if (appUserId.startsWith("user:")) {
+          targetType = "user";
+          targetId = appUserId.replace("user:", "");
+        } else if (appUserId.startsWith("team:")) {
+          targetType = "team";
+          targetId = appUserId.replace("team:", "");
+        }
+
+        // --- time helpers (ms / sec / ISO) ---
+        const toDateFromMsOrSec = (v) => {
+          if (v === null || v === undefined) return null;
+          if (typeof v === "number") {
+          // ms っぽいか秒っぽいかを判定
+            const TEN_SECONDS_MS = 10000000000;
+            const ms = v > TEN_SECONDS_MS ? v : v * 1000;
+            const d = new Date(ms);
+            return Number.isNaN(d.getTime()) ? null : d;
+          }
+          if (typeof v === "string") {
+            const num = Number(v);
+            if (!Number.isNaN(num)) return toDateFromMsOrSec(num);
+            const d = new Date(v);
+            return Number.isNaN(d.getTime()) ? null : d;
+          }
+          return null;
+        };
+
+        // v2 でよく出る候補を広めに吸収
+        const expiry =
+        toDateFromMsOrSec(event.expiration_at_ms) ||
+        toDateFromMsOrSec(event.expires_date_ms) ||
+        toDateFromMsOrSec(event.current_period_ends_at_ms) ||
+        toDateFromMsOrSec(event.expiration_at) ||
+        toDateFromMsOrSec(event.expires_date) ||
+        toDateFromMsOrSec(event.current_period_ends_at) ||
+        null;
+
+        const purchasedAt =
+        toDateFromMsOrSec(event.purchased_at_ms) ||
+        toDateFromMsOrSec(event.purchase_date_ms) ||
+        toDateFromMsOrSec(event.purchased_at) ||
+        toDateFromMsOrSec(event.purchase_date) ||
+        null;
+
+        const now = new Date();
+
+        // --- store -> platform (Firestore doc id) ---
+        // v2 の store は APP_STORE / PLAY_STORE / STRIPE / AMAZON / etc
+        const store = String(event.store || "");
+        const platform =
+          store === "APP_STORE" ? "iOS" :
+          store === "PLAY_STORE" ? "Android" : "other";
+
+        // --- status ---
+        // 1) expiry が取れればそれを最優先
+        // 2) expiry が取れない場合は type から「失効系」だけ inactive
+        // 3) それ以外は active に寄せず null (ただし既存 merge を想定して inactive にはしない)
+        let nextStatus = null;
+        if (expiry) {
+          nextStatus = expiry.getTime() > now.getTime() ? "active" : "inactive";
+        } else {
+          const t = type.toUpperCase();
+          if (
+            t.includes("CANCEL") ||
+          t.includes("EXPIRE") ||
+          t.includes("REFUND") ||
+          t.includes("BILLING_ISSUE")
+          ) {
+            nextStatus = "inactive";
+          }
+        }
+
+        const productId = event.product_id || null;
+        const entitlementId = event.entitlement_id || null;
+
+        const writeData = {
+          productId: productId,
+          entitlementId: entitlementId,
+          purchaseDate: purchasedAt ? Timestamp.fromDate(purchasedAt) : null,
+          expiryDate: expiry ? Timestamp.fromDate(expiry) : null,
+          // nextStatus が null の場合は status を上書きしない方が安全
+          ...(nextStatus ? {status: nextStatus} : {}),
+          platform,
+          store: store || null,
+          eventType: type || null,
+          updatedAt: Timestamp.now(),
+        };
+
+        // --- Prefix-based routing ---
+        if (targetType === "user" && targetId) {
+          await db
+              .collection("users")
+              .doc(targetId)
+              .collection("subscription")
+              .doc(platform)
+              .set(writeData, {merge: true});
+
+          console.log(
+              "✅ RevenueCat webhook(v2) applied to USER:",
+              targetId,
+              writeData,
+          );
+          res.status(200).send("ok:user");
+          return;
+        }
+
+        if (targetType === "team" && targetId) {
+          await db
+              .collection("teams")
+              .doc(targetId)
+              .collection("subscription")
+              .doc(platform)
+              .set(writeData, {merge: true});
+
+          console.log(
+              "✅ RevenueCat webhook(v2) applied to TEAM:",
+              targetId,
+              writeData,
+          );
+          res.status(200).send("ok:team");
+          return;
+        }
+
+        // Prefix not matched (safety fallback)
+        console.log(
+            "⚠️ RevenueCat webhook(v2): app_user_id prefix not recognized:",
+            appUserId,
+        );
+        res.status(200).send("ok:ignored");
+        return;
+      } catch (err) {
+        console.error("🚨 revenuecatWebhook(v2) error", err);
+        res.status(500).send("error");
       }
     },
 );

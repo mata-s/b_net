@@ -290,9 +290,11 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
                   }),
                   const SizedBox(height: 24),
                   const PlanComparisonTable(),
-                  SizedBox(height: 24),
+                  const SizedBox(height: 24),
                   const TeamFeaturesSection(),
-                  SizedBox(height: 32),
+                  const SizedBox(height: 24),
+                  const TeamSubscriptionLegalSection(),
+                  const SizedBox(height: 32),
                 ],
               ),
             ),
@@ -740,6 +742,131 @@ class PlanComparisonTable extends StatelessWidget {
                     "約162円",
                     style: cellStyle),
                   ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TeamSubscriptionLegalSection extends StatelessWidget {
+  const TeamSubscriptionLegalSection({super.key});
+
+  Future<void> _openUrl(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('リンクを開けませんでした')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const privacyPolicyUrl = 'https://baseball-net.vercel.app/privacy';
+    const termsUrl = 'https://baseball-net.vercel.app/terms';
+    const appleEulaUrl =
+        'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+
+    final textStyle = TextStyle(
+      fontSize: 11,
+      color: Colors.grey.shade700,
+      height: 1.4,
+    );
+
+    final linkStyle = textStyle.copyWith(
+      color: Colors.blue,
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '購読に関するご案内',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade800,
+            ),
+          ),
+    const SizedBox(height: 8),
+
+          // --- 審査向け：購読に関する詳細案内 ---
+          Text(
+            '■ 料金の請求について\n'
+            '・購入確定時に、Apple ID / Google アカウントに代金が請求されます。\n'
+            '・支払いは各ストア（App Store / Google Play）を通じて処理されます。',
+            style: textStyle,
+          ),
+          const SizedBox(height: 10),
+
+          Text(
+            '■ 自動更新について\n'
+            '・本プランは自動更新のサブスクリプションです。\n'
+            '・現在の期間が終了する24時間前までに解約しない限り、自動的に更新されます。\n'
+            '・更新時には、次回分の料金が同じストアアカウントに請求されます。',
+            style: textStyle,
+          ),
+          const SizedBox(height: 10),
+
+        Text(
+            '■ 解約（自動更新の停止）・プラン変更\n'
+            '・解約/プラン変更は、アプリ内ではなく App Store / Google Play のサブスクリプション管理から行えます。解約しても、現在の請求期間が終了するまでは利用できます。\n'
+            '・（iOS）設定アプリ ＞ Apple ID ＞ サブスクリプション\n'
+            '・（Android）Google Play ＞ お支払いと定期購入 ＞ 定期購入',
+            style: textStyle,
+          ),
+          const SizedBox(height: 10),
+
+          Text(
+            '■ 無料トライアルについて（提供される場合）\n'
+            '・無料トライアルが適用される場合、期間終了後に自動的に有料期間へ移行します。\n'
+            '・トライアル中に解約した場合、トライアル期間の終了と同時に利用が終了する場合があります（各ストアの仕様に準じます）。',
+            style: textStyle,
+          ),
+          const SizedBox(height: 10),
+
+          Text(
+            '■ 返金について\n'
+            '・購入後の返金可否や手続きは、App Store / Google Play のポリシーに従います。\n'
+            '・返金を希望する場合は、各ストアのサポート窓口からお手続きください。',
+            style: textStyle,
+          ),
+          const SizedBox(height: 10),
+
+          Text(
+            '■ チームプランの適用範囲\n'
+            '・チームプランはチーム代表者（購入者）が管理します。\n'
+            '・メンバーは、招待され参加しているチーム内でプレミアム機能を利用できます。\n'
+            '・チームから退出した場合、チームプランの機能は利用できなくなります。',
+            style: textStyle,
+          ),
+
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 4,
+            children: [
+              GestureDetector(
+                onTap: () => _openUrl(context, privacyPolicyUrl),
+                child: Text('プライバシーポリシー', style: linkStyle),
+              ),
+              GestureDetector(
+                onTap: () => _openUrl(context, termsUrl),
+                child: Text('利用規約', style: linkStyle),
+              ),
+              GestureDetector(
+                onTap: () => _openUrl(context, appleEulaUrl),
+                child: Text('Apple 標準利用規約 (EULA)', style: linkStyle),
               ),
             ],
           ),

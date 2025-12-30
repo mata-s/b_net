@@ -176,7 +176,7 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
               controller: _searchController,
               textInputAction: TextInputAction.search,
               onSubmitted: (value) {
-                FocusScope.of(context).unfocus(); // キーボードを閉じる
+                FocusScope.of(context).unfocus();
                 setState(() {
                   searchQuery = value;
                 });
@@ -218,15 +218,20 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ListTile(
-                  title: Text(opponentName,
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w600)),
+                  title: Text(
+                    opponentName,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   subtitle: Text(
                     isExpanded ? '閉じる' : 'もっと見る...',
                     style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.blue),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue,
+                    ),
                   ),
                   trailing: TextButton(
                     onPressed: () {
@@ -241,8 +246,10 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
                         ),
                       );
                     },
-                    child:
-                        Text('$totalGames試合', style: TextStyle(fontSize: 16)),
+                    child: Text(
+                      '$totalGames試合',
+                      style: const TextStyle(fontSize: 16),
+                    ),
                   ),
                   onTap: () {
                     setState(() {
@@ -254,75 +261,19 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
                     });
                   },
                 ),
-                if (isExpanded)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 16.0, bottom: 8),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _buildStatColumn(
-                                '勝利', '${stat['totalWins'] ?? 0}', 24),
-                            _buildStatColumn(
-                                '敗北', '${stat['totalLosses'] ?? 0}', 24),
-                            _buildStatColumn(
-                                '引き分け', '${stat['totalDraws'] ?? 0}', 36),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _buildStatColumn(
-                                '総得点', '${stat['totalScore'] ?? 0}', 36),
-                            _buildStatColumn(
-                                '総失点', '${stat['totalRunsAllowed'] ?? 0}', 36),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                if (isExpanded)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 16.0, bottom: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.orange,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '勝率 ${formatPercentage(stat['winRate'] ?? 0)}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  child: isExpanded
+                      ? Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                          child: _ExpandedDetailPanel(stat: stat),
+                        )
+                      : const SizedBox.shrink(),
+                ),
               ],
             );
-          }),
-          if (opponentStats.length > 5)
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (showAllTeams && opponentStats.isNotEmpty)
-                    _ExpandedStats(stat: opponentStats.first),
-                ],
-              ),
-            ),
+          }).toList(),
           if (opponentStats.length > 5)
             TextButton(
               onPressed: () {
@@ -346,15 +297,20 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ListTile(
-                  title: Text(locationName,
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w600)),
+                  title: Text(
+                    locationName,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   subtitle: Text(
                     isExpanded ? '閉じる' : 'もっと見る...',
                     style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.blue),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue,
+                    ),
                   ),
                   trailing: TextButton(
                     onPressed: () {
@@ -369,8 +325,10 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
                         ),
                       );
                     },
-                    child:
-                        Text('$totalGames試合', style: TextStyle(fontSize: 16)),
+                    child: Text(
+                      '$totalGames試合',
+                      style: const TextStyle(fontSize: 16),
+                    ),
                   ),
                   onTap: () {
                     setState(() {
@@ -382,64 +340,19 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
                     });
                   },
                 ),
-                if (isExpanded)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 16.0, bottom: 8),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _buildStatColumn(
-                                '勝利', '${stat['totalWins'] ?? 0}', 24),
-                            _buildStatColumn(
-                                '敗北', '${stat['totalLosses'] ?? 0}', 24),
-                            _buildStatColumn(
-                                '引き分け', '${stat['totalDraws'] ?? 0}', 36),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _buildStatColumn(
-                                '総得点', '${stat['totalScore'] ?? 0}', 36),
-                            _buildStatColumn(
-                                '総失点', '${stat['totalRunsAllowed'] ?? 0}', 36),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                if (isExpanded)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 16.0, bottom: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.orange,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '勝率 ${formatPercentage(stat['winRate'] ?? 0)}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  child: isExpanded
+                      ? Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                          child: _ExpandedDetailPanel(stat: stat),
+                        )
+                      : const SizedBox.shrink(),
+                ),
               ],
             );
-          }),
-          // Removed redundant _ExpandedStats for locations
+          }).toList(),
           if (locationStats.length > 5)
             TextButton(
               onPressed: () {
@@ -500,63 +413,122 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
             itemCount: filteredGames.length,
             itemBuilder: (context, index) {
               final game = filteredGames[index];
-              return GestureDetector(
-                onTap: () {},
-                child: Card(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 12, horizontal: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 1行目: gameType と日付
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              game['game_type'] ?? '（種類不明）',
-                              style: const TextStyle(
-                                  fontSize: 13, color: Colors.grey),
-                            ),
-                            Text(
-                              '${game['gameDate'].month}月${game['gameDate'].day}日',
-                              style: const TextStyle(
-                                  fontSize: 13, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
+              final date = game['gameDate'] as DateTime;
 
-                        // 2行目: VS相手 @球場
-                        Text(
-                          'VS ${game['opponent'] ?? '不明'} @${game['location'] ?? '場所不明'}',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Text('${game['score']?.toString() ?? '不明'} - ',
-                                style: TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.bold)),
-                            Text('${game['runs_allowed']?.toString() ?? '不明'}',
-                                style: TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        Text('試合結果: ${game['result'] ?? '不明'}',
-                            style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold)),
-                      ],
+return Padding(
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  child: Material(
+    color: Colors.transparent,
+    borderRadius: BorderRadius.circular(18),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () {
+        // TODO: 詳細へ遷移する場合はここに実装
+      },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: Theme.of(context).colorScheme.surface,
+          border: Border.all(
+            color: Theme.of(context).dividerColor.withOpacity(0.6),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(
+                Theme.of(context).brightness == Brightness.dark ? 0.18 : 0.06,
+              ),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _MiniPill(
+                  icon: Icons.local_offer_outlined,
+                  label: (game['game_type'] ?? '（種類不明）').toString(),
+                ),
+                const SizedBox(width: 8),
+                _MiniPill(
+                  icon: Icons.calendar_today_outlined,
+                  label: '${date.year}/${date.month}/${date.day}',
+                ),
+                const Spacer(),
+                Icon(Icons.chevron_right, color: Colors.grey.withOpacity(0.7)),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                const Icon(Icons.sports_baseball, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'VS ${game['opponent'] ?? '不明'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+
+            Row(
+              children: [
+                const Icon(Icons.place_outlined, size: 16, color: Colors.grey),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    (game['location'] ?? '場所不明').toString(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-              );
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            Divider(
+              height: 1,
+              color: Theme.of(context).dividerColor.withOpacity(0.6),
+            ),
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Text(
+                  '${game['score']?.toString() ?? '-'}',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('ー', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                ),
+                Text(
+                  '${game['runs_allowed']?.toString() ?? '-'}',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                ),
+                const Spacer(),
+                _ResultChip(label: (game['result'] ?? '不明').toString()),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  ),
+);
             },
           ),
         ),
@@ -652,6 +624,256 @@ String formatPercentage(num value) {
 String formatPercentageEra(num value) {
   double doubleValue = value.toDouble(); // num を double に変換
   return doubleValue.toStringAsFixed(2); // 小数点第2位までフォーマット
+}
+
+class _MiniPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _MiniPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withOpacity(0.08)
+            : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.grey),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResultChip extends StatelessWidget {
+  final String label;
+
+  const _ResultChip({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    Color bg;
+    Color fg;
+
+    final v = label.trim();
+    if (v.contains('勝')) {
+      bg = cs.primary.withOpacity(isDark ? 0.25 : 0.12);
+      fg = cs.primary;
+    } else if (v.contains('負')) {
+      bg = cs.error.withOpacity(isDark ? 0.25 : 0.12);
+      fg = cs.error;
+    } else if (v.contains('引') || v.contains('分')) {
+      bg = cs.tertiary.withOpacity(isDark ? 0.25 : 0.12);
+      fg = cs.tertiary;
+    } else {
+      bg = (isDark ? Colors.white : Colors.black).withOpacity(isDark ? 0.10 : 0.06);
+      fg = cs.onSurface.withOpacity(0.8);
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: fg.withOpacity(0.25)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          color: fg,
+        ),
+      ),
+    );
+  }
+}
+
+class _ExpandedDetailPanel extends StatelessWidget {
+  final Map<String, dynamic> stat;
+
+  const _ExpandedDetailPanel({required this.stat});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final wins = (stat['totalWins'] ?? 0).toString();
+    final losses = (stat['totalLosses'] ?? 0).toString();
+    final draws = (stat['totalDraws'] ?? 0).toString();
+    final score = (stat['totalScore'] ?? 0).toString();
+    final runsAllowed = (stat['totalRunsAllowed'] ?? 0).toString();
+    final winRate = formatPercentage(stat['winRate'] ?? 0);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isDark
+            ? Colors.white.withOpacity(0.06)
+            : Colors.black.withOpacity(0.03),
+        border: Border.all(
+          color: Theme.of(context).dividerColor.withOpacity(0.6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _MiniPill(
+                icon: Icons.emoji_events_outlined,
+                label: '勝率 $winRate',
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '勝 $wins / 負 $losses / 分 $draws',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface.withOpacity(0.8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _StatTile(
+                  label: '総得点',
+                  value: score,
+                  icon: Icons.add_chart,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StatTile(
+                  label: '総失点',
+                  value: runsAllowed,
+                  icon: Icons.remove_circle_outline,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _StatTile(
+                  label: '勝利',
+                  value: wins,
+                  icon: Icons.check_circle_outline,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StatTile(
+                  label: '敗北',
+                  value: losses,
+                  icon: Icons.highlight_off,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StatTile(
+                  label: '引分',
+                  value: draws,
+                  icon: Icons.horizontal_rule,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+
+  const _StatTile({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isDark
+            ? Colors.white.withOpacity(0.06)
+            : Colors.black.withOpacity(0.035),
+        border: Border.all(
+          color: Theme.of(context).dividerColor.withOpacity(0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: cs.onSurface.withOpacity(0.7)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface.withOpacity(0.7),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ExpandedStats extends StatelessWidget {

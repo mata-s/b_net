@@ -199,7 +199,6 @@ class _SignUpPageState extends State<SignUpPage> {
             .collection('users')
             .doc(userCredential.user!.uid)
             .set({
-          'email': _emailController.text,
           'name': _nameController.text,
           'positions': _selectedPositions,
           'profileImage': downloadUrl ?? '', // 画像がない場合は空文字を保存
@@ -211,47 +210,50 @@ class _SignUpPageState extends State<SignUpPage> {
         await _setupFcmForNewUser(userCredential.user!.uid);
 
         try {
-          // ✅ Firebase UID で RevenueCat にログイン（logOut は不要）
-          await Purchases.logIn(userCredential.user!.uid);
-          print('✅ RevenueCat: logIn 完了 (${userCredential.user!.uid})');
-        } catch (e) {
-          print('⚠️ RevenueCatログイン時のエラー: $e');
+  // ✅ Firebase UID を RevenueCat の appUserID として固定（user: プレフィックスを付ける）
+  await Purchases.logIn('user:${userCredential.user!.uid}');
+  print('✅ RevenueCat: logIn 完了 (user:${userCredential.user!.uid})');
+} catch (e) {
+  print('⚠️ RevenueCat logIn failed: $e');
         }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('アカウント作成に成功しました')),
         );
 
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(userCredential.user!.uid)
-                  .get(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Scaffold(
-                      body: Center(child: CircularProgressIndicator()));
-                }
+        if (mounted) {
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(
+      builder: (context) => FutureBuilder<DocumentSnapshot>(
+        future: FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .get(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Scaffold(
+                body: Center(child: CircularProgressIndicator()));
+          }
 
-                final data = snapshot.data!.data() as Map<String, dynamic>;
-                final positions = List<String>.from(data['positions'] ?? []);
-                final teams = List<String>.from(data['teams'] ?? []);
-                final prefecture = data['prefecture'] ?? '未設定';
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          final positions = List<String>.from(data['positions'] ?? []);
+          final teams = List<String>.from(data['teams'] ?? []);
+          final prefecture = data['prefecture'] ?? '未設定';
 
-                return HomePage(
-                  userUid: userCredential.user!.uid,
-                  isTeamAccount: false,
-                  accountId: userCredential.user!.uid,
-                  accountName: userCredential.user!.displayName ?? '匿名',
-                  userPrefecture: prefecture,
-                  userPosition: positions,
-                  userTeamId: teams.isNotEmpty ? teams.first : null,
-                );
-              },
-            ),
-          ),
-        );
+          return HomePage(
+            userUid: userCredential.user!.uid,
+            isTeamAccount: false,
+            accountId: userCredential.user!.uid,
+            accountName: userCredential.user!.displayName ?? '匿名',
+            userPrefecture: prefecture,
+            userPosition: positions,
+            userTeamId: teams.isNotEmpty ? teams.first : null,
+          );
+        },
+      ),
+    ),
+    (route) => false,
+  );
+}
       } on FirebaseAuthException catch (e) {
         String message = '';
         if (e.code == 'weak-password') {

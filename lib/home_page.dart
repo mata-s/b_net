@@ -20,6 +20,7 @@ import 'pages/private/profile_page.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
 class HomePage extends StatefulWidget {
   final String userUid;
@@ -49,12 +50,12 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
   List<Widget> _pages = [];
-  // String userPrefecture = "";
   bool hasUnreadNotices = false;
   int unreadChatCount = 0;
-  // List<String> userPosition = [];
-  // String? userTeamId;
   bool _hasActiveSubscription = false;
+
+  StreamSubscription<QuerySnapshot>? _chatRoomsSubscription;
+  StreamSubscription<QuerySnapshot>? _announcementsSubscription;
 
   @override
   void initState() {
@@ -91,25 +92,34 @@ class _HomePageState extends State<HomePage> {
     String userId = FirebaseAuth.instance.currentUser?.uid ?? '';
     if (userId.isEmpty) return;
 
-    FirebaseFirestore.instance
+    // 以前の購読があれば一度キャンセル
+    await _chatRoomsSubscription?.cancel();
+
+    _chatRoomsSubscription = FirebaseFirestore.instance
         .collection('chatRooms')
         .where('participants', arrayContains: userId)
         .snapshots()
-        .listen((chatSnapshot) {
-      int totalUnread = 0;
+        .listen(
+      (chatSnapshot) {
+        int totalUnread = 0;
 
-      for (var doc in chatSnapshot.docs) {
-        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-        int unreadCount = data['unreadCounts']?[userId] ?? 0;
-        totalUnread += unreadCount;
-      }
+        for (var doc in chatSnapshot.docs) {
+          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+          int unreadCount = data['unreadCounts']?[userId] ?? 0;
+          totalUnread += unreadCount;
+        }
 
-      if (mounted) {
-        setState(() {
-          unreadChatCount = totalUnread; // 🔴 未読数を更新
-        });
-      }
-    });
+        if (mounted) {
+          setState(() {
+            unreadChatCount = totalUnread; // 🔴 未読数を更新
+          });
+        }
+      },
+      onError: (error) {
+        // 権限エラーなどはログに出すだけにしてクラッシュさせない
+        debugPrint('chatRooms snapshots error: $error');
+      },
+    );
   }
 
   void _updateUnreadChatCount() {
@@ -123,26 +133,34 @@ class _HomePageState extends State<HomePage> {
     String userId = FirebaseAuth.instance.currentUser?.uid ?? '';
     if (userId.isEmpty) return;
 
-    FirebaseFirestore.instance
+    // 以前の購読があれば一度キャンセル
+    await _announcementsSubscription?.cancel();
+
+    _announcementsSubscription = FirebaseFirestore.instance
         .collection('announcements')
         .snapshots()
-        .listen((announcementSnapshot) async {
-      bool hasUnread = false;
+        .listen(
+      (announcementSnapshot) async {
+        bool hasUnread = false;
 
-      for (var doc in announcementSnapshot.docs) {
-        bool isRead = await _isRead(userId, doc.id);
-        if (!isRead) {
-          hasUnread = true;
-          break;
+        for (var doc in announcementSnapshot.docs) {
+          bool isRead = await _isRead(userId, doc.id);
+          if (!isRead) {
+            hasUnread = true;
+            break;
+          }
         }
-      }
 
-      if (mounted) {
-        setState(() {
-          hasUnreadNotices = hasUnread;
-        });
-      }
-    });
+        if (mounted) {
+          setState(() {
+            hasUnreadNotices = hasUnread;
+          });
+        }
+      },
+      onError: (error) {
+        debugPrint('announcements snapshots error: $error');
+      },
+    );
   }
 
   /// **ユーザーがお知らせを読んだか確認**
@@ -202,6 +220,13 @@ class _HomePageState extends State<HomePage> {
         _currentIndex = 0; // または別の有効なインデックス
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _chatRoomsSubscription?.cancel();
+    _announcementsSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -339,7 +364,7 @@ class _HomePageState extends State<HomePage> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.star),
+              leading: const Icon(Icons.workspace_premium),
               title: const Text('プレミアムプラン'),
               onTap: () {
                 Navigator.push(

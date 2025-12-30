@@ -206,8 +206,9 @@ class _TeamRankingPageState extends State<TeamRankingPage> {
             _buildRankingSection("打率", _battingAverageRanking, (player) {
               final atBats = player['atBats'] ?? 0;
               final hits = player['hits'] ?? 0;
-              final battingAverage =
-                  formatBattingAverage(player['battingAverage'] ?? 0.0);
+              final battingAverage = formatBattingAverage(
+                (player['battingAverage'] as num?)?.toDouble() ?? 0.0,
+              );
               return RichText(
                 text: TextSpan(
                   style: DefaultTextStyle.of(context).style, // ✅ 基本のスタイルを適用
@@ -233,8 +234,9 @@ class _TeamRankingPageState extends State<TeamRankingPage> {
               );
             }),
             _buildRankingSection("出塁率", _onBasePercentageRanking, (player) {
-              final onBasePercentage =
-                  formatBattingAverage(player['onBasePercentage'] ?? 0.0);
+              final onBasePercentage = formatBattingAverage(
+                (player['onBasePercentage'] as num?)?.toDouble() ?? 0.0,
+              );
               final totalBats = player['totalBats'] ?? 0;
               return RichText(
                 text: TextSpan(
@@ -264,8 +266,9 @@ class _TeamRankingPageState extends State<TeamRankingPage> {
               );
             }),
             _buildRankingSection("長打率", _sluggingPercentageRanking, (player) {
-              final sluggingPercentage =
-                  formatBattingAverage(player['sluggingPercentage'] ?? 0.0);
+              final sluggingPercentage = formatBattingAverage(
+                (player['sluggingPercentage'] as num?)?.toDouble() ?? 0.0,
+              );
               final total1hits = player['total1hits'] ?? 0;
               final total2hits = player['total2hits'] ?? 0;
               final total3hits = player['total3hits'] ?? 0;
@@ -300,9 +303,10 @@ class _TeamRankingPageState extends State<TeamRankingPage> {
               );
             }),
             _buildRankingSection("防御率", _eraRanking, (player) {
-              final era = formatPercentageEra(player['era'] ?? 0.0);
-              final totalInningsPitched =
-                  (player['totalInningsPitched'] ?? 0.0).toStringAsFixed(1);
+              final era = formatPercentageEra(player['era'] ?? 0);
+              final innings =
+                  (player['totalInningsPitched'] as num?)?.toDouble() ?? 0.0;
+              final totalInningsPitched = innings.toStringAsFixed(1);
               return RichText(
                 text: TextSpan(
                   style: DefaultTextStyle.of(context).style, // ✅ 基本のスタイルを適用
@@ -331,7 +335,9 @@ class _TeamRankingPageState extends State<TeamRankingPage> {
               );
             }),
             _buildRankingSection("勝率", _winRateRanking, (player) {
-              final winRate = formatBattingAverage(player['winRate'] ?? 0.0);
+              final winRate = formatBattingAverage(
+                (player['winRate'] as num?)?.toDouble() ?? 0.0,
+              );
               final totalAppearances = player['totalAppearances'] ?? 0;
               return RichText(
                 text: TextSpan(

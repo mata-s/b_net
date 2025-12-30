@@ -61,6 +61,7 @@ dev_dependencies:
   string_scanner: ^1.2.0
   test_api: ^0.7.2
   vm_service: ^14.2.5
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
@@ -76,3 +77,10 @@ flutter:
     - assets/Subscription_teamGold12month.png
     - assets/Subscription_teamPlatina.png
     - assets/Subscription_teamPlatina12month.png
+    - assets/icon.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon.png"
+  remove_alpha_ios: true

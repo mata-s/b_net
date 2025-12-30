@@ -67,18 +67,19 @@ class _LoginPageState extends State<LoginPage> {
 
       if (user != null) {
         try {
-          // ✅ Firebase UID で RevenueCat にログイン（logOut は不要）
-          await Purchases.logIn(user.uid);
+          // ✅ Firebase UID を RevenueCat の appUserID として固定（user: プレフィックスを付ける）
+          await Purchases.logIn('user:${user.uid}');
         } catch (e) {
+          print('⚠️ RevenueCat logIn failed: $e');
         }
 
         // 🔔 ログインユーザーの FCM トークンを即時登録・更新
         await _setupFcmForLoggedInUser(user.uid);
       }
 
-      // ✅ 画面遷移
+      // ✅ 画面遷移（スタックをすべてクリアして戻れないようにする）
       if (mounted) {
-        Navigator.of(context).pushReplacement(
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (context) => FutureBuilder<DocumentSnapshot>(
               future: FirebaseFirestore.instance
@@ -114,6 +115,7 @@ class _LoginPageState extends State<LoginPage> {
               },
             ),
           ),
+          (route) => false,
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -141,6 +143,42 @@ class _LoginPageState extends State<LoginPage> {
           const SnackBar(content: Text('ログインに失敗しました')),
         );
       }
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final email = _emailController.text.trim();
+
+    if (email.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('パスワード再設定メールを送るには、先にメールアドレスを入力してください。')),
+      );
+      return;
+    }
+
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('パスワード再設定用のメールを送信しました。迷惑メールフォルダもご確認ください。')),
+      );
+    } on FirebaseAuthException catch (e) {
+      String message = 'パスワード再設定メールの送信に失敗しました';
+      if (e.code == 'invalid-email') {
+        message = 'メールアドレスの形式が正しくありません。';
+      } else if (e.code == 'user-not-found') {
+        message = 'このメールアドレスは登録されていません。';
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('パスワード再設定メールの送信に失敗しました。時間をおいて再度お試しください。')),
+      );
     }
   }
 
@@ -213,6 +251,22 @@ class _LoginPageState extends State<LoginPage> {
                         },
                     )
                   ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              GestureDetector(
+                onTap: _resetPassword,
+                child: RichText(
+                  text: TextSpan(
+                    style: const TextStyle(color: Colors.black),
+                    children: [
+                      const TextSpan(text: 'パスワードをお忘れの方は'),
+                      TextSpan(
+                        text: 'こちら',
+                        style: const TextStyle(color: Colors.blue),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

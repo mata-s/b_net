@@ -102,23 +102,38 @@ class _TeamGradesCalendarState extends State<TeamGradesCalendar> {
   }
 
   Future<void> _loadTeamData() async {
-    QuerySnapshot snapshot = await FirebaseFirestore.instance
+    final snapshot = await FirebaseFirestore.instance
         .collection('teams')
         .doc(widget.teamId)
         .collection('team_games')
         .get();
 
-    for (var doc in snapshot.docs) {
-      DateTime gameDateUTC = (doc['game_date'] as Timestamp).toDate();
-      DateTime gameDateJST = gameDateUTC.toLocal();
-      String opponent = doc['opponent'] ?? '不明';
-      String location = doc['location'] ?? '不明';
-      String gameType = doc['game_type'] ?? '不明';
-      int score = doc['score'] ?? 0;
-      int runsAllowed = doc['runs_allowed'] ?? 0;
-      String result = doc['result'] ?? '不明';
+    // 再読み込み時に重複しないように一度クリア
+    kEvents.clear();
 
-      List<Event> events = [
+    for (final doc in snapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+
+      final ts = data['game_date'];
+      if (ts is! Timestamp) {
+        // game_date が無い/形式が違う場合はスキップ
+        continue;
+      }
+
+      final gameDateUTC = ts.toDate();
+      final gameDateJST = gameDateUTC.toLocal();
+
+      final opponent = (data['opponent'] as String?) ?? '不明';
+      final location = (data['location'] as String?) ?? '不明';
+      final gameType = (data['game_type'] as String?) ?? '不明';
+
+      // Firestore は int / double が混在するので num で受ける
+      final score = (data['score'] as num?)?.toInt() ?? 0;
+      final runsAllowed = (data['runs_allowed'] as num?)?.toInt() ?? 0;
+
+      final result = (data['result'] as String?) ?? '不明';
+
+      final events = [
         Event(doc.id, opponent, location, gameType, score, runsAllowed, result),
       ];
 
@@ -128,6 +143,8 @@ class _TeamGradesCalendarState extends State<TeamGradesCalendar> {
         kEvents[gameDateJST] = events;
       }
     }
+
+    if (!mounted) return;
 
     setState(() {
       _selectedEvents.value = _getEventsForDay(_selectedDay!);

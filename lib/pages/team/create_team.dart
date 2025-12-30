@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
-import 'package:purchases_flutter/purchases_flutter.dart';
 
 class CreateTeamAccountPage extends StatefulWidget {
   final String userUid;
@@ -353,96 +352,86 @@ class _CreateTeamAccountPageState extends State<CreateTeamAccountPage> {
   }
 
   Future<void> _createTeamAccount() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
+  if (!_formKey.currentState!.validate()) return;
 
-      try {
-        String? imageUrl;
+  setState(() {
+    _isLoading = true;
+  });
 
-        if (_profileImage != null) {
-          String fileName =
-              '${FirebaseAuth.instance.currentUser!.uid}_team_profile.jpg';
-          UploadTask uploadTask = FirebaseStorage.instance
-              .ref()
-              .child('team_images/$fileName')
-              .putFile(_profileImage!);
+  try {
+    String? imageUrl;
 
-          TaskSnapshot snapshot = await uploadTask;
-          imageUrl = await snapshot.ref.getDownloadURL();
-        }
+    if (_profileImage != null) {
+      final fileName =
+          '${FirebaseAuth.instance.currentUser!.uid}_team_profile.jpg';
 
-        DocumentReference teamRef =
-            await FirebaseFirestore.instance.collection('teams').add({
-          'teamName': _teamNameController.text,
-          'teamDescription': _teamDescriptionController.text.isNotEmpty
-              ? _teamDescriptionController.text
-              : '', // 紹介文が空の場合は空文字を設定
-          'prefecture': _selectedPrefecture ?? '',
-          'startYear': int.parse(_startYearController.text),
-          'achievements':
-              _achievements.isNotEmpty ? _achievements : [], // 実績がない場合は空のリスト
-          'profileImage': imageUrl,
-          'createdAt': Timestamp.now(),
-          'createdBy': FirebaseAuth.instance.currentUser!.uid,
-          'members': [FirebaseAuth.instance.currentUser!.uid],
-        });
+      final uploadTask = FirebaseStorage.instance
+          .ref()
+          .child('team_images/$fileName')
+          .putFile(_profileImage!);
 
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(FirebaseAuth.instance.currentUser!.uid)
-            .update({
-          'teams': FieldValue.arrayUnion([teamRef.id]),
-        });
-
-        try {
-          await Purchases.logOut();
-          await Purchases.logIn(teamRef.id);
-          print('✅ RevenueCat: チームIDでログイン完了 (${teamRef.id})');
-        } catch (e) {
-          print('⚠️ RevenueCatログインに失敗: $e');
-        }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('チームアカウントが作成されました')),
-        );
-
-        final createdTeam = {
-          'teamId': teamRef.id,
-          'teamName': _teamNameController.text,
-          'profileImage': imageUrl,
-          'prefecture': _selectedPrefecture,
-          'startYear': int.parse(_startYearController.text),
-          'achievements': _achievements,
-          'teamDescription': _teamDescriptionController.text,
-        };
-
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => TeamHomePage(
-              team: createdTeam, // ✅ ここが追加
-              isTeamAccount: true,
-              accountId: teamRef.id,
-              accountName: _teamNameController.text,
-              userUid: widget.userUid,
-              userPrefecture: widget.userPrefecture,
-              userPosition: widget.userPosition,
-              userTeamId: widget.userTeamId,
-            ),
-          ),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('エラーが発生しました: $e')),
-        );
-      } finally {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      final snapshot = await uploadTask;
+      imageUrl = await snapshot.ref.getDownloadURL();
     }
+
+    final teamRef =
+        await FirebaseFirestore.instance.collection('teams').add({
+      'teamName': _teamNameController.text,
+      'teamDescription': _teamDescriptionController.text,
+      'prefecture': _selectedPrefecture ?? '',
+      'startYear': int.parse(_startYearController.text),
+      'achievements': _achievements,
+      'profileImage': imageUrl,
+      'createdAt': Timestamp.now(),
+      'createdBy': FirebaseAuth.instance.currentUser!.uid,
+      'members': [FirebaseAuth.instance.currentUser!.uid],
+    });
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(FirebaseAuth.instance.currentUser!.uid)
+        .update({
+      'teams': FieldValue.arrayUnion([teamRef.id]),
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('チームアカウントが作成されました')),
+    );
+
+    final createdTeam = {
+      'teamId': teamRef.id,
+      'teamName': _teamNameController.text,
+      'profileImage': imageUrl,
+      'prefecture': _selectedPrefecture,
+      'startYear': int.parse(_startYearController.text),
+      'achievements': _achievements,
+      'teamDescription': _teamDescriptionController.text,
+    };
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => TeamHomePage(
+          team: createdTeam,
+          isTeamAccount: true,
+          accountId: teamRef.id,
+          accountName: _teamNameController.text,
+          userUid: widget.userUid,
+          userPrefecture: widget.userPrefecture,
+          userPosition: widget.userPosition,
+          userTeamId: widget.userTeamId,
+        ),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('エラーが発生しました: $e')),
+    );
+  } finally {
+    setState(() {
+      _isLoading = false;
+    });
   }
+}
 
   @override
   void dispose() {

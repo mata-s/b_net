@@ -87,22 +87,34 @@ void main() async {
     _handleMessageNavigation(message);
   });
 
-  // RevenueCat 初期化（←ここにあなたの公開 SDK キーを貼る！）
-  // final configuration = Platform.isAndroid
-  //   ? PurchasesConfiguration('your_android_revenuecat_sdk_key') // ← Android用
-  //   : PurchasesConfiguration('appl_fbWgJWNLbAYxpijcSkSdVjVGHtT');    // ← iOS用
+  // RevenueCat 初期化
+  // ✅ 起動時点で FirebaseAuth の状態があるなら、その UID を appUserID として configure して
+  //    1) 毎回 $RCAnonymousID で始まる挙動を減らす
+  //    2) アプリ起動直後の CustomerInfo 取得でも user:UID が使われるようにする
+  final currentUser = FirebaseAuth.instance.currentUser;
+  final initialRcAppUserId = currentUser != null ? 'user:${currentUser.uid}' : null;
 
-  // await Purchases.configure(configuration);
+  PurchasesConfiguration? configuration;
 
-  final configuration = Platform.isIOS
-      ? PurchasesConfiguration(
-          'appl_fbWgJWNLbAYxpijcSkSdVjVGHtT') // ← あなたのiOS SDKキー
-      : null;
+  if (Platform.isIOS) {
+    configuration = PurchasesConfiguration('appl_fbWgJWNLbAYxpijcSkSdVjVGHtT'); // iOS
+  } else if (Platform.isAndroid) {
+    // TODO: Android の RevenueCat SDK キーを設定
+    // configuration = PurchasesConfiguration('your_android_revenuecat_sdk_key');
+  }
 
   if (configuration != null) {
+    if (initialRcAppUserId != null) {
+      configuration.appUserID = initialRcAppUserId;
+    }
+
+    // デバッグ時にログを見たい場合
+    // await Purchases.setLogLevel(LogLevel.debug);
+
     await Purchases.configure(configuration);
+    print('✅ RevenueCat configured. initial appUserID=${initialRcAppUserId ?? "(anonymous)"}');
   } else {
-    print('⚠️ AndroidのRevenueCat SDKキーが未設定です。後で設定してください。');
+    print('⚠️ RevenueCat SDKキーが未設定です（Android など）。後で設定してください。');
   }
 
   // 日本語日付フォーマットの初期化
@@ -592,26 +604,38 @@ class _ScheduleNotificationPageState extends State<ScheduleNotificationPage> {
 Future<void> _setupMessagingForUser(String uid) async {
   final messaging = FirebaseMessaging.instance;
 
-  // iOSのみ：APNsトークンを待つ
+  // ✅ 先に通知許可（iOSはこれが先）
+  await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+  // ✅ iOSのみ：APNsトークンが取れない場合（特にシミュレーター）は無理にFCM取得しない
   if (Platform.isIOS) {
     String? apnsToken = await messaging.getAPNSToken();
     int retry = 0;
 
-    // APNs トークンが取れるまでリトライ
     while (apnsToken == null && retry < 5) {
       await Future.delayed(const Duration(seconds: 1));
       apnsToken = await messaging.getAPNSToken();
       retry++;
     }
 
-    print("🍎 APNS Token: $apnsToken");
+    print('🍎 APNS Token: $apnsToken');
+
+    if (apnsToken == null) {
+      // iOSシミュレーター等ではAPNSが取れず getToken() が例外になることがある
+      print('⚠️ APNS token not available yet. Skip FCM token setup on this device.');
+      return;
+    }
   }
 
-  // 通知許可
-  await messaging.requestPermission(alert: true, badge: true, sound: true);
+  // ✅ FCMトークン取得（例外は握りつぶしてアプリ起動を止めない）
+  String? token;
+  try {
+    token = await messaging.getToken();
+  } catch (e) {
+    print('⚠️ Failed to get FCM token for $uid: $e');
+    return;
+  }
 
-  // FCMトークン
-  final token = await messaging.getToken();
   print('🔑 FCM token for $uid: $token');
 
   if (token != null) {
@@ -645,14 +669,6 @@ Future<Widget> _getInitialPage() async {
   final user = FirebaseAuth.instance.currentUser;
   if (user != null) {
     await _setupMessagingForUser(user.uid);
-
-    // 🔐 RevenueCat に Firebase の UID でログインして、appUserID を固定する
-    try {
-      await Purchases.logIn(user.uid);
-      print('✅ RevenueCat logIn succeeded for ${user.uid}');
-    } catch (e) {
-      print('⚠️ RevenueCat logIn failed: $e');
-    }
 
     try {
       final userDoc = await FirebaseFirestore.instance
