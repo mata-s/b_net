@@ -62,6 +62,25 @@ class _TeamAnnualResultsPageState extends State<TeamAnnualResultsPage> {
     return '${rank}位';
   }
 
+  Widget _miniChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1565C0).withOpacity(0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFF1565C0).withOpacity(0.18)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF1565C0),
+        ),
+      ),
+    );
+  }
+
   String _formatNumber(dynamic value) {
     if (value == null) return '';
     if (value is num) {
@@ -97,79 +116,236 @@ class _TeamAnnualResultsPageState extends State<TeamAnnualResultsPage> {
     return _buildKeyValueRow(label, valueText);
   }
 
+  bool _isTablet(BuildContext context) {
+    final shortestSide = MediaQuery.sizeOf(context).shortestSide;
+    return shortestSide >= 600;
+  }
+
+  Widget _constrainedBody({
+    required BuildContext context,
+    required Widget child,
+  }) {
+    final isTablet = _isTablet(context);
+    final horizontalPadding = 16.0 + (isTablet ? 60.0 : 0.0);
+    final maxContentWidth = isTablet ? 720.0 : double.infinity;
+
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxContentWidth),
+          child: Padding(
+            padding:
+                EdgeInsets.fromLTRB(horizontalPadding, 12, horizontalPadding, 16),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F8FA),
       appBar: AppBar(
         title: const Text('チーム年間成績'),
+        centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF7F8FA),
       ),
       body: FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
         future: _fetchAnnualDocs(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return _constrainedBody(
+              context: context,
+              child: const Center(child: CircularProgressIndicator()),
+            );
           }
 
           if (snapshot.hasError) {
-            return Center(
-              child: Text('読み込みエラーが発生しました: ${snapshot.error}'),
+            return _constrainedBody(
+              context: context,
+              child: Center(
+                child: Text('読み込みエラーが発生しました: ${snapshot.error}'),
+              ),
             );
           }
 
           final docs = snapshot.data?.docs ?? [];
           if (docs.isEmpty) {
-            return const Center(
-              child: Text('チームの年間成績データがまだありません'),
+            return _constrainedBody(
+              context: context,
+              child: const Center(
+                child: Text('チームの年間成績データがまだありません'),
+              ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final data = doc.data();
-
-              final year = data['year'] is int
-                  ? data['year'] as int
-                  : int.tryParse(doc.id) ?? 0;
-
-              final prefecture = (data['prefecture'] ?? '') as String? ?? '';
-
-              // CF 側で teamRanking にまとめて保存している場合はそれを優先的に使う
-              final Map<String, dynamic> ranking =
-                  (data['teamRanking'] is Map)
-                      ? Map<String, dynamic>.from(
-                          data['teamRanking'] as Map,
-                        )
-                      : Map<String, dynamic>.from(data);
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ExpansionTile(
-                  title: Text(
-                    '${year}年のチーム成績',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
+          return _constrainedBody(
+            context: context,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE6E8EC)),
                   ),
-                  subtitle: Text(
-                    prefecture.isEmpty
-                        ? '都道府県未設定'
-                        : '都道府県：$prefecture',
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 18, color: Color(0xFF1565C0)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '年間のチーム成績（ランキング順位）を見返せます。',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                height: 1.25,
+                                color: Colors.black.withOpacity(0.78),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '※成績の保存機能はプレミアムプランで利用できます。',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                height: 1.25,
+                                color: Colors.black.withOpacity(0.55),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  childrenPadding:
-                      const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  children: [
-                    _buildTeamSection(
-                      year: year,
-                      prefecture: prefecture,
-                      ranking: ranking,
-                    ),
-                  ],
                 ),
-              );
-            },
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: docs.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final doc = docs[index];
+                      final data = doc.data();
+
+                      final year = data['year'] is int
+                          ? data['year'] as int
+                          : int.tryParse(doc.id) ?? 0;
+
+                      final prefecture =
+                          (data['prefecture'] ?? '') as String? ?? '';
+
+                      // CF 側で teamRanking にまとめて保存している場合はそれを優先的に使う
+                      final Map<String, dynamic> ranking = (data['teamRanking']
+                              is Map)
+                          ? Map<String, dynamic>.from(
+                              data['teamRanking'] as Map,
+                            )
+                          : Map<String, dynamic>.from(data);
+
+                      final categoryText = (ranking['category'] ?? '').toString();
+
+                      return Material(
+                        color: Colors.white,
+                        elevation: 0,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFE6E8EC)),
+                          ),
+                          child: Theme(
+                            data: Theme.of(context).copyWith(
+                              dividerColor: Colors.transparent,
+                              splashColor: Colors.transparent,
+                              highlightColor: Colors.transparent,
+                            ),
+                            child: ExpansionTile(
+                              tilePadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 6,
+                              ),
+                              childrenPadding:
+                                  const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '${year}年の成績',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
+                                  if (categoryText.isNotEmpty) _miniChip(categoryText),
+                                  if (prefecture.isNotEmpty) ...[
+                                    const SizedBox(width: 6),
+                                    _miniChip(prefecture),
+                                  ],
+                                ],
+                              ),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  prefecture.isEmpty
+                                      ? '都道府県未設定'
+                                      : '都道府県：$prefecture',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.black.withOpacity(0.6),
+                                  ),
+                                ),
+                              ),
+                              trailing: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: Color(0xFF6B7280),
+                              ),
+                              children: [
+                                _buildTeamSection(
+                                  year: year,
+                                  prefecture: prefecture,
+                                  ranking: ranking,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -184,11 +360,8 @@ class _TeamAnnualResultsPageState extends State<TeamAnnualResultsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'チーム成績',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
+        _sectionTitle('チーム成績'),
+        const SizedBox(height: 10),
         _buildKeyValueRow(
           'リーグ / カテゴリ',
           ranking['category'],

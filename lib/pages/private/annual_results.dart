@@ -130,88 +130,263 @@ final future = docRef.get().then((doc) {
     return _buildKeyValueRow(label, valueText);
   }
 
+  bool _isTablet(BuildContext context) {
+  final shortestSide = MediaQuery.sizeOf(context).shortestSide;
+  return shortestSide >= 600;
+}
+
+Widget _constrainedBody({
+  required BuildContext context,
+  required Widget child,
+}) {
+  final isTablet = _isTablet(context);
+  final horizontalPadding = 16.0 + (isTablet ? 60.0 : 0.0);
+  final maxContentWidth = isTablet ? 720.0 : double.infinity;
+
+  return SafeArea(
+    child: Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxContentWidth),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(horizontalPadding, 12, horizontalPadding, 16),
+          child: child,
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _sectionTitle(String title) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      title,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w800,
+      ),
+    ),
+  );
+}
+
+Widget _miniChip(String text) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    decoration: BoxDecoration(
+      color: const Color(0xFF1565C0).withOpacity(0.10),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: const Color(0xFF1565C0).withOpacity(0.18)),
+    ),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        color: Color(0xFF1565C0),
+      ),
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('年間成績'),
+  backgroundColor: const Color(0xFFF7F8FA),
+  appBar: AppBar(
+    title: const Text('年間成績'),
+    centerTitle: false,
+    elevation: 0,
+    scrolledUnderElevation: 0,
+     backgroundColor: const Color(0xFFF7F8FA)
+    // backgroundColor: Colors.white,
+    // surfaceTintColor: Colors.white,
+  ),
+  body: _currentUser == null
+      ? _constrainedBody(
+          context: context,
+          child: const Center(child: Text('ログインが必要です')),
+        )
+      : FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          future: _fetchAnnualDocs(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return _constrainedBody(
+                context: context,
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (snapshot.hasError) {
+              return _constrainedBody(
+                context: context,
+                child: Center(
+                  child: Text('読み込みエラーが発生しました: ${snapshot.error}'),
+                ),
+              );
+            }
+            final docs = snapshot.data?.docs ?? [];
+            if (docs.isEmpty) {
+              return _constrainedBody(
+                context: context,
+                child: const Center(child: Text('年間成績データがまだありません')),
+              );
+            }
+
+            return _constrainedBody(
+              context: context,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE6E8EC)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline, size: 18, color: Color(0xFF1565C0)),
+                        const SizedBox(width: 8),
+                        Expanded(
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        '年間の成績（ランキング順位）を見返せます。',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          height: 1.25,
+          color: Colors.black.withOpacity(0.78),
+        ),
       ),
-      body: _currentUser == null
-          ? const Center(child: Text('ログインが必要です'))
-          : FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              future: _fetchAnnualDocs(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Text('読み込みエラーが発生しました: ${snapshot.error}'),
-                  );
-                }
-                final docs = snapshot.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return const Center(
-                    child: Text('年間成績データがまだありません'),
-                  );
-                }
+      const SizedBox(height: 4),
+      Text(
+        '※成績の保存機能はプレミアムプランで利用できます。',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          height: 1.25,
+          color: Colors.black.withOpacity(0.55),
+        ),
+      ),
+    ],
+  ),
+),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: docs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                  final doc = docs[index];
+                  final data = doc.data();
+                  final year = data['year'] is int
+                      ? data['year'] as int
+                      : int.tryParse(doc.id) ?? 0;
+                  final prefecture = (data['prefecture'] ?? '') as String? ?? '';
 
-                return ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data();
-                    final year = data['year'] is int
-                        ? data['year'] as int
-                        : int.tryParse(doc.id) ?? 0;
-                    final prefecture =
-                        (data['prefecture'] ?? '') as String? ?? '';
-                    final batting = data['batting'] is Map
-                        ? Map<String, dynamic>.from(data['batting'] as Map)
-                        : <String, dynamic>{};
+                  final batting = data['batting'] is Map
+                      ? Map<String, dynamic>.from(data['batting'] as Map)
+                      : <String, dynamic>{};
 
-                    final pitcher = data['pitcher'] is Map
-                        ? Map<String, dynamic>.from(data['pitcher'] as Map)
-                        : <String, dynamic>{};
+                  final pitcher = data['pitcher'] is Map
+                      ? Map<String, dynamic>.from(data['pitcher'] as Map)
+                      : <String, dynamic>{};
 
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ExpansionTile(
-                        title: Text(
-                          '${year}年の成績',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        subtitle: Text(prefecture.isEmpty
-                            ? '都道府県未設定'
-                            : '都道府県：$prefecture'),
-                        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        children: [
-                          if (batting.isNotEmpty)
-                            _buildBattingSection(
-                              year: year,
-                              prefecture: prefecture,
-                              batting: batting,
-                            ),
-                          // 投手ポジションを持つ場合のみ表示
-                          if (widget.userPosition.contains("投手") && pitcher.isNotEmpty)
-                            const Divider(height: 32),
-                          if (widget.userPosition.contains("投手") && pitcher.isNotEmpty)
-                            _buildPitcherSection(
-                              year: year,
-                              prefecture: prefecture,
-                              pitcher: pitcher,
-                            ),
-                        ],
+                  final showPitcher =
+                      widget.userPosition.contains('投手') && pitcher.isNotEmpty;
+
+                  return Material(
+                    color: Colors.white,
+                    elevation: 0,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE6E8EC)),
                       ),
-                    );
-                  },
-                );
-              },
-            ),
-    );
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                          splashColor: Colors.transparent,
+                          highlightColor: Colors.transparent,
+                        ),
+                       child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 6,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${year}年の成績',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                              if (batting.isNotEmpty) _miniChip('打撃'),
+                              if (showPitcher) const SizedBox(width: 6),
+                              if (showPitcher) _miniChip('投手'),
+                            ],
+                          ),
+
+                          trailing: const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Color(0xFF6B7280),
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              prefecture.isEmpty ? '都道府県未設定' : '都道府県：$prefecture',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withOpacity(0.6),
+                              ),
+                            ),
+                          ),
+                          children: [
+                            if (batting.isNotEmpty)
+                              _buildBattingSection(
+                                year: year,
+                                prefecture: prefecture,
+                                batting: batting,
+                              ),
+                            if (showPitcher) const SizedBox(height: 14),
+                            if (showPitcher)
+                              const Divider(height: 1, color: Color(0xFFEDEFF2)),
+                            if (showPitcher) const SizedBox(height: 14),
+                            if (showPitcher)
+                              _buildPitcherSection(
+                                year: year,
+                                prefecture: prefecture,
+                                pitcher: pitcher,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+);
   }
 
   Widget _buildBattingSection({
@@ -223,11 +398,8 @@ final future = docRef.get().then((doc) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '打者成績',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
+        _sectionTitle('打者成績'),
+        const SizedBox(height: 10),
         _buildKeyValueRow('打率', _formatNumber(batting['battingAverage'])),
 
         FutureBuilder<Map<String, dynamic>?>(
@@ -346,11 +518,8 @@ final future = docRef.get().then((doc) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '投手成績',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
+        _sectionTitle('投手成績'),
+        const SizedBox(height: 10),
         _buildKeyValueRow('防御率', _formatNumber(pitcher['era'])),
         _buildKeyValueRow('防御率順位', _rankText(pitcher['eraRank'])),
         _buildAgeRankRow(
@@ -427,30 +596,39 @@ final future = docRef.get().then((doc) {
   }
 
   Widget _buildKeyValueRow(String label, Object? value) {
-    if (value == null || value.toString().isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 13, color: Colors.grey),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value.toString(),
-              style: const TextStyle(fontSize: 14),
-            ),
-          ),
-        ],
-      ),
-    );
+  if (value == null || value.toString().isEmpty) {
+    return const SizedBox.shrink();
   }
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 120,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Colors.black.withOpacity(0.55),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value.toString(),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildPrefecturePeopleSection({
     required String title,
@@ -515,14 +693,21 @@ final future = docRef.get().then((doc) {
   final shortLabel = _ageShortLabelFromTotalKey(key);
   final displayLabel = shortLabel.isNotEmpty ? shortLabel : label;
 
-  return Chip(
-    backgroundColor: Colors.grey.shade200,
-    label: Text(
-      '$displayLabel：${value}人',
-      style: const TextStyle(fontSize: 12),
+return Container(
+  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+  decoration: BoxDecoration(
+    color: const Color(0xFFF2F4F7),
+    borderRadius: BorderRadius.circular(999),
+    border: Border.all(color: const Color(0xFFE6E8EC)),
+  ),
+  child: Text(
+    '$displayLabel：${value}人',
+    style: const TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
     ),
-    padding: const EdgeInsets.symmetric(horizontal: 8),
-  );
+  ),
+);
 }
 
 

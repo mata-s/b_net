@@ -358,12 +358,49 @@ class _CreateTeamAccountPageState extends State<CreateTeamAccountPage> {
     _isLoading = true;
   });
 
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? widget.userUid;
+
+    // ✅ まず users/{uid}.ownerTeamId を見て「すでにオーナーか」を高速チェック
+    final userSnap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+
+    final userData = userSnap.data() ?? {};
+    final ownerTeamId = (userData['ownerTeamId'] as String?)?.trim();
+
+    if (ownerTeamId != null && ownerTeamId.isNotEmpty) {
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('すでに「プランのお支払い」もしくは「チームの代表」として登録されているため、新しいチームは作成できません')),
+      );
+      return;
+    }
+
+    // ✅ 念のための整合チェック（過去データ/移行漏れ対策）: owner は同時に1チームだけ
+    final ownedTeamSnap = await FirebaseFirestore.instance
+        .collection('teams')
+        .where('subscriptionOwner.uid', isEqualTo: uid)
+        .limit(1)
+        .get();
+
+    if (ownedTeamSnap.docs.isNotEmpty) {
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('すでに「プランのお支払い」もしくは「チームの代表」として登録されているため、新しいチームは作成できません')),
+      );
+      return;
+    }
+
   try {
     String? imageUrl;
 
     if (_profileImage != null) {
-      final fileName =
-          '${FirebaseAuth.instance.currentUser!.uid}_team_profile.jpg';
+      final fileName = '${uid}_team_profile.jpg';
 
       final uploadTask = FirebaseStorage.instance
           .ref()
@@ -383,15 +420,23 @@ class _CreateTeamAccountPageState extends State<CreateTeamAccountPage> {
       'achievements': _achievements,
       'profileImage': imageUrl,
       'createdAt': Timestamp.now(),
-      'createdBy': FirebaseAuth.instance.currentUser!.uid,
-      'members': [FirebaseAuth.instance.currentUser!.uid],
+      'createdBy': uid,
+      'members': [uid],
+
+      // ✅ Webhook で uid → teamId を逆引きするために保持（owner は1チームだけ）
+      'subscriptionOwner': {
+        'uid': uid,
+        'updatedAt': Timestamp.now(),
+      },
     });
 
     await FirebaseFirestore.instance
         .collection('users')
-        .doc(FirebaseAuth.instance.currentUser!.uid)
+        .doc(uid)
         .update({
       'teams': FieldValue.arrayUnion([teamRef.id]),
+      // ✅ owner 1チーム運用の参照（後で使うなら便利）
+      'ownerTeamId': teamRef.id,
     });
 
     ScaffoldMessenger.of(context).showSnackBar(

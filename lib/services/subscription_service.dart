@@ -16,97 +16,71 @@ class SubscriptionService {
   }
 
   /// 🔹 RevenueCatで購入した情報を Firestore に保存（個人用）
-  Future<void> savePersonalSubscriptionToFirestore(
-      String userId, CustomerInfo info, String purchasedProductId) async {
-    // 購入した productId に応じて見るエンタイトルメントを切り替える
-    final bool isAnnualPlan =
-        purchasedProductId.contains('12month') ||
-        purchasedProductId.contains('annual');
-    final String entitlementKey =
-        isAnnualPlan ? 'B-Net Annual' : 'B-Net Monthly';
+Future<void> savePersonalSubscriptionToFirestore(
+  String userId,
+  CustomerInfo info,
+  String purchasedProductId,
+) async {
+  const String entitlementKey = 'personal_premium'; // ← RCのEntitlement Identifier
 
-    // デバッグ用ログ：現在のentitlementsの一覧を出す
-    print('🧾 all entitlements: ${info.entitlements.all.keys.toList()}');
-    print('🧾 active entitlements: ${info.entitlements.active.keys.toList()}');
-    print('🧾 期待している entitlementKey: $entitlementKey');
+  print('🧾 all entitlements: ${info.entitlements.all.keys.toList()}');
+  print('🧾 active entitlements: ${info.entitlements.active.keys.toList()}');
+  print('🧾 期待している entitlementKey: $entitlementKey');
 
-    EntitlementInfo? entitlement = info.entitlements.all[entitlementKey];
+  // 基本は active を見る（all だとinactiveも混ざる）
+  EntitlementInfo? entitlement = info.entitlements.active[entitlementKey];
 
-    // 指定したキーで見つからない場合は、アクティブなエンタイトルメントにフォールバック
-    if (entitlement == null) {
-      if (info.entitlements.active.isNotEmpty) {
-        entitlement = info.entitlements.active.values.first;
-        print(
-            '⚠️ Personal entitlement($entitlementKey) が見つからないため、アクティブなentitlement(${entitlement.identifier})を使用します');
-      } else {
-        print(
-            '❌ Personal entitlement($entitlementKey) が見つからず、アクティブなentitlementも存在しません');
-        return;
-      }
-    }
+  if (entitlement == null) {
+    print('❌ Personal entitlement($entitlementKey) がactiveに存在しません');
+    return;
+  }
 
-    final String? rawPurchaseDate = entitlement.latestPurchaseDate;
-    final purchaseDate = rawPurchaseDate != null
-        ? DateTime.parse(rawPurchaseDate)
-        : DateTime.now();
+  final purchaseDate = DateTime.tryParse(entitlement.latestPurchaseDate) ?? DateTime.now();
+  final expiryDate = DateTime.tryParse(entitlement.expirationDate ?? '') ??
+      purchaseDate.add(const Duration(days: 30));
 
-    int fallbackDays;
-    if (isAnnualPlan) {
-      fallbackDays = 365;
-    } else {
-      fallbackDays = 30; // 月額またはデフォルト
-    }
+  final platform = Platform.isIOS ? 'iOS' : 'Android';
 
-    final String? rawExpiryDate = entitlement.expirationDate;
-    final expiryDate = rawExpiryDate != null
-        ? DateTime.parse(rawExpiryDate)
-        : purchaseDate.add(Duration(days: fallbackDays));
+  await FirebaseFirestore.instance
+      .collection('users')
+      .doc(userId)
+      .collection('subscription')
+      .doc(platform)
+      .set({
+    'productId': purchasedProductId,
+    'purchaseDate': Timestamp.fromDate(purchaseDate),
+    'expiryDate': Timestamp.fromDate(expiryDate),
+    'status': entitlement.isActive ? 'active' : 'inactive',
+    'platform': platform,
+    'entitlementId': entitlement.identifier, // ← 保存しておくとデバッグ強い
+  });
 
-    final platform = Platform.isIOS ? 'iOS' : 'Android';
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('subscription')
-          .doc(platform)
-          .set({
-        'productId': purchasedProductId,
-        'purchaseDate': Timestamp.fromDate(purchaseDate),
-        'expiryDate': Timestamp.fromDate(expiryDate),
-        'status': entitlement.isActive ? 'active' : 'inactive',
-        'platform': platform,
-      });
-
-      print(
-          "✅ Firestore に個人サブスク保存: $purchasedProductId (entitlement: ${entitlement.identifier})");
-    } catch (e) {
-      print('❌ Firestore への個人サブスク保存に失敗: $e');
-    }
+  print("✅ Firestore に個人サブスク保存: $purchasedProductId (entitlement: ${entitlement.identifier})");
   }
 
   /// 🔹 Firestore からサブスクが有効か確認（個人用）
   Future<bool> isUserSubscribed(String userId) async {
-    final subRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('subscription');
+  final subRef = FirebaseFirestore.instance
+      .collection('users')
+      .doc(userId)
+      .collection('subscription');
 
-    final subSnapshot = await subRef.get();
+  final subSnapshot = await subRef.get();
 
-    for (final doc in subSnapshot.docs) {
-      final data = doc.data();
-      final status = data['status'];
-      final expiryTimestamp = data['expiryDate'];
+  for (final doc in subSnapshot.docs) {
+    final data = doc.data();
 
-      if (status == 'active' && expiryTimestamp is Timestamp) {
-        final expiryDate = expiryTimestamp.toDate();
-        if (expiryDate.isAfter(DateTime.now())) {
-          return true;
-        }
-      }
-    }
+    final status = data['status'];
+final expiryTimestamp = data['expiryDate'];
 
-    return false;
+if (status == 'active' && expiryTimestamp is Timestamp) {
+  final expiryDate = expiryTimestamp.toDate();
+  if (expiryDate.isAfter(DateTime.now())) {
+    return true;
   }
+}
+  }
+
+  return false;
+}
 }

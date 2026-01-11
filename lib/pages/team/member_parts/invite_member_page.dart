@@ -17,9 +17,33 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
   DocumentSnapshot? _selectedUser; // 選択されたユーザー
   bool _hasSearched = false; // 検索が実行されたかどうかを判断するフラグ
 
-  // 名前でユーザーを検索
+  String _normalizeName(String input) {
+    // 半角/全角スペースを除去して比較しやすくする
+    return input.replaceAll(RegExp(r'[ \u3000]'), '');
+  }
+
+  bool _hasAnySpace(String input) {
+    return RegExp(r'[ \u3000]').hasMatch(input);
+  }
+
+  String _prefixForFirestore(String rawQuery) {
+    final q = rawQuery.trim();
+    if (q.isEmpty) return q;
+
+    // スペースが含まれているなら、そのまま前方一致検索に使う
+    if (_hasAnySpace(q)) return q;
+
+    // スペースなし検索は「姓+名」を繋げて入力されがちなので、
+    // そのままだと Firestore の前方一致で拾えない（例: 又吉真春 vs 又吉 真春）。
+    // 候補を取りにいくために先頭2文字だけで絞り、あとは端末側で厳密にフィルタする。
+    final int take = q.length >= 2 ? 2 : 1;
+    return q.substring(0, take);
+  }
+
+  // 名前でユーザーを検索（スペース有無も吸収して候補を拾い、端末側で厳密フィルタ）
   Future<void> _searchUsersByName() async {
-    if (_nameController.text.isEmpty) {
+    final rawQuery = _nameController.text.trim();
+    if (rawQuery.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('名前を入力してください')),
       );
@@ -30,17 +54,31 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
       _isLoading = true;
       _searchResults.clear();
       _hasSearched = true; // 検索が実行されたことを設定
+      _selectedUser = null; // 検索し直したら選択は解除
     });
 
     try {
-      QuerySnapshot userSnapshot = await FirebaseFirestore.instance
+      final normalizedQuery = _normalizeName(rawQuery);
+      final prefix = _prefixForFirestore(rawQuery);
+
+      // Firestore 側は前方一致で候補を取る（取りすぎ防止で limit）
+      final userSnapshot = await FirebaseFirestore.instance
           .collection('users')
-          .where('name', isGreaterThanOrEqualTo: _nameController.text)
-          .where('name', isLessThanOrEqualTo: '${_nameController.text}\uf8ff')
+          .where('name', isGreaterThanOrEqualTo: prefix)
+          .where('name', isLessThanOrEqualTo: '$prefix\uf8ff')
+          .limit(50)
           .get();
 
+      // 端末側で「スペース除去後の名前」が入力を含むかでフィルタ
+      final filtered = userSnapshot.docs.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        final name = (data['name'] ?? '').toString();
+        final normalizedName = _normalizeName(name);
+        return normalizedName.contains(normalizedQuery);
+      }).toList();
+
       setState(() {
-        _searchResults = userSnapshot.docs;
+        _searchResults = filtered;
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -182,6 +220,11 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
           children: [
             TextFormField(
               controller: _nameController,
+              textInputAction: TextInputAction.search,
+              onFieldSubmitted: (_) {
+                FocusScope.of(context).unfocus();
+                _searchUsersByName();
+              },
               decoration: const InputDecoration(labelText: '名前'),
             ),
             const SizedBox(height: 16),

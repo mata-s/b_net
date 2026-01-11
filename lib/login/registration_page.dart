@@ -282,33 +282,108 @@ class _SignUpPageState extends State<SignUpPage> {
   void _showCupertinoPrefecturePicker(BuildContext context) {
     FocusScope.of(context).requestFocus(FocusNode());
 
+    final bool isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+
     // 少し遅らせてからモーダルを開く
     Future.delayed(const Duration(milliseconds: 100), () {
+      int tempIndex =
+          _prefectures.indexOf(_selectedPrefecture ?? _prefectures[0]);
+
+      if (isTablet) {
+        // ✅ iPad: ボトムシートではなく中央ダイアログで表示（見やすい）
+        showDialog(
+          context: context,
+          barrierDismissible: true,
+          builder: (BuildContext dialogContext) {
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: SizedBox(
+                width: 520,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('キャンセル',
+                                style: TextStyle(fontSize: 16)),
+                          ),
+                          const Text(
+                            '都道府県を選択',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _selectedPrefecture = _prefectures[tempIndex];
+                              });
+                              Navigator.pop(dialogContext);
+                            },
+                            child: const Text('決定',
+                                style: TextStyle(
+                                    fontSize: 16, color: Colors.blue)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    SizedBox(
+                      height: 320,
+                      child: CupertinoPicker(
+                        backgroundColor: Colors.white,
+                        itemExtent: 44.0,
+                        scrollController:
+                            FixedExtentScrollController(initialItem: tempIndex),
+                        onSelectedItemChanged: (int index) {
+                          tempIndex = index;
+                        },
+                        children: _prefectures.map((p) {
+                          return Center(
+                            child:
+                                Text(p, style: const TextStyle(fontSize: 22)),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+        return;
+      }
+
+      // ✅ SP: いままで通りボトムシート
       showModalBottomSheet(
         context: context,
         backgroundColor: Colors.white,
         builder: (BuildContext context) {
-          int tempIndex =
-              _prefectures.indexOf(_selectedPrefecture ?? _prefectures[0]);
-
-          return Container(
+          return SizedBox(
             height: 300,
             child: Column(
               children: [
                 Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(context),
-                        child:
-                            const Text('キャンセル', style: TextStyle(fontSize: 16)),
+                        child: const Text('キャンセル', style: TextStyle(fontSize: 16)),
                       ),
                       const Text('都道府県を選択',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 16)),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       TextButton(
                         onPressed: () {
                           setState(() {
@@ -353,13 +428,27 @@ class _SignUpPageState extends State<SignUpPage> {
       appBar: AppBar(
         title: const Text('アカウント作成'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isTablet = constraints.maxWidth >= 600;
+          final horizontalPadding = isTablet ? 24.0 : 16.0;
+
+          return Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                // iPad などで横に広がりすぎないように制限
+                maxWidth: isTablet ? 560 : double.infinity,
+              ),
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: 16.0,
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
                 // ログインページへの遷移ボタン
                 TextButton(
                   onPressed: () {
@@ -377,7 +466,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     alignment: Alignment.bottomRight,
                     children: [
                       CircleAvatar(
-                        radius: 50,
+                        radius: isTablet ? 64 : 50,
                         backgroundImage: _profileImage != null
                             ? FileImage(_profileImage!)
                             : const AssetImage('assets/default_avatar.png')
@@ -403,36 +492,79 @@ class _SignUpPageState extends State<SignUpPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // 名前フィールド
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: '名前'),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return '名前を入力してください';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                GestureDetector(
-                  onTap: () {
-                    _showCupertinoPrefecturePicker(context);
-                  },
-                  child: AbsorbPointer(
-                    child: TextFormField(
-                      decoration: InputDecoration(
-                        labelText: '都道府県', // ラベル
-                        border: const UnderlineInputBorder(), // 下線のみ
-                        suffixIcon: const Icon(Icons.arrow_drop_down,
-                            color: Colors.black54), // 🔹 右に下矢印アイコン
+                // 名前フィールド + 都道府県（iPadは2カラム、SPは縦並び）
+                if (isTablet)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _nameController,
+                          decoration: const InputDecoration(labelText: '名前'),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return '名前を入力してください';
+                            }
+                            return null;
+                          },
+                        ),
                       ),
-                      controller: TextEditingController(
-                        text: _selectedPrefecture ?? '選択してください',
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            _showCupertinoPrefecturePicker(context);
+                          },
+                          child: AbsorbPointer(
+                            child: TextFormField(
+                              decoration: const InputDecoration(
+                                labelText: '都道府県',
+                                border: UnderlineInputBorder(),
+                                suffixIcon: Icon(
+                                  Icons.arrow_drop_down,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                              controller: TextEditingController(
+                                text: _selectedPrefecture ?? '選択してください',
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                else ...[
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(labelText: '名前'),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '名前を入力してください';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  GestureDetector(
+                    onTap: () {
+                      _showCupertinoPrefecturePicker(context);
+                    },
+                    child: AbsorbPointer(
+                      child: TextFormField(
+                        decoration: const InputDecoration(
+                          labelText: '都道府県',
+                          border: UnderlineInputBorder(),
+                          suffixIcon:
+                              Icon(Icons.arrow_drop_down, color: Colors.black54),
+                        ),
+                        controller: TextEditingController(
+                          text: _selectedPrefecture ?? '選択してください',
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 16),
                 // 生年月日選択（任意）
                 Row(
@@ -520,6 +652,7 @@ class _SignUpPageState extends State<SignUpPage> {
                   obscureText: !_passwordVisible,
                   decoration: InputDecoration(
                     labelText: 'パスワード',
+                    helperText: '6文字以上',
                     suffixIcon: IconButton(
                       icon: Icon(_passwordVisible
                           ? Icons.visibility
@@ -532,8 +665,12 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                   ),
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    final v = (value ?? '').trim();
+                    if (v.isEmpty) {
                       return 'パスワードを入力してください';
+                    }
+                    if (v.length < 6) {
+                      return 'パスワードは6文字以上にしてください';
                     }
                     return null;
                   },
@@ -545,10 +682,15 @@ class _SignUpPageState extends State<SignUpPage> {
                         onPressed: _signUp,
                         child: const Text('アカウント作成'),
                       ),
-              ],
+                      const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }

@@ -15,11 +15,45 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   bool _isLoading = true;
   CustomerInfo? _customerInfo;
 
+  Future<void> _bootstrap() async {
+    // 起動直後（再起動含む）は RevenueCat が anonymous のままになりやすいので
+    // Firebase のログイン状態に合わせて必ず user:{uid} を確定させてから読み込みを行う。
+    await _ensureUserRevenueCatLogin();
+    await _loadPackages();
+    await _loadCustomerInfo();
+  }
+
+  Future<void> _ensureUserRevenueCatLogin() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final targetId = 'user:${user.uid}';
+
+    try {
+      final currentId = await Purchases.appUserID;
+      // print('👤 RevenueCat current appUserId(before): $currentId');
+
+      if (currentId != targetId) {
+        // 直前に anonymous や team: になっている可能性があるため、確実に user:{uid} に寄せる
+        try {
+          await Purchases.logOut();
+        } catch (_) {
+          // ignore
+        }
+        await Purchases.logIn(targetId);
+        // ignore: unused_local_variable
+        final after = await Purchases.appUserID;
+        // print('👤 RevenueCat current appUserId(after) : $after');
+      }
+    } catch (e) {
+      print('❌ RevenueCat logIn エラー: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadPackages();
-    _loadCustomerInfo();
+    _bootstrap();
   }
 
   Future<void> _loadPackages() async {
@@ -41,11 +75,37 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
   Future<void> _loadCustomerInfo() async {
     try {
+      // 現在の RevenueCat appUserID を先に確認（anonymous か user/team か）
+      // ignore: unused_local_variable
+      final currentId = await Purchases.appUserID;
+      // print('👤 current appUserId: $currentId');
+
       final info = await Purchases.getCustomerInfo();
 
-    print('🧾 entitlements.all: ${info.entitlements.all.keys}');
-    print('🟢 entitlements.active: ${info.entitlements.active.keys}');
-    print('👤 appUserId: ${info.originalAppUserId}');
+      // print('🧾 entitlements.all: ${info.entitlements.all.keys}');
+      // print('🟢 entitlements.active: ${info.entitlements.active.keys}');
+
+      // 🔎 デバッグ：Google Play の base plan / offer だと productIdentifier が base だけ返ることがある
+      // print('🧾 activeSubscriptions: ${info.activeSubscriptions}');
+      // print('🧾 allPurchasedProductIdentifiers: ${info.allPurchasedProductIdentifiers}');
+      // print('🧾 latestExpirationDate: ${info.latestExpirationDate}');
+
+      // purchases_flutter v8系では CustomerInfo.appUserId が無いので、現在の appUserID は Purchases から取得する
+//       final currentAppUserId = await Purchases.appUserID;
+//       print('👤 current appUserId(from Purchases): $currentAppUserId');
+//       print('👤 originalAppUserId: ${info.originalAppUserId}');
+//       final activeEnt = info.entitlements.active['personal_premium'];
+// if (activeEnt != null) {
+//   print('🔎 active entitlement key: personal_premium');
+//   print('🔎 active productIdentifier: ${activeEnt.productIdentifier}');
+//   print('🔎 active expirationDate: ${activeEnt.expirationDate}');
+//   print('🔎 active willRenew: ${activeEnt.willRenew}');
+//   print('🔎 active periodType: ${activeEnt.periodType}');
+//   print('🔎 active latestPurchaseDate: ${activeEnt.latestPurchaseDate}');
+//   print('🔎 active store: ${activeEnt.store}');
+// } else {
+//   print('🔎 active entitlement personal_premium: null');
+// }
 
       if (!mounted) return;
       setState(() {
@@ -59,6 +119,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   Future<void> _buy(Package package) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    await _ensureUserRevenueCatLogin();
 
     try {
       // 💳 購入処理（この時点でCustomerInfoは最新ではない可能性あり）
@@ -70,7 +131,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       // 今回購入した Store Product のID（1ヶ月 / 12ヶ月 など）
       final purchasedProductId = package.storeProduct.identifier;
 
-      print('🧾 購入した productId: $purchasedProductId');
+      // print('🧾 購入した productId: $purchasedProductId');
 
       // 🔥 Firestore に保存（ユーザーが選んだ productId で）
       await SubscriptionService().savePersonalSubscriptionToFirestore(
@@ -110,10 +171,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   Future<void> _restorePurchase() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    await _ensureUserRevenueCatLogin();
 
     try {
       final restoredInfo = await Purchases.restorePurchases();
-      final entitlement = restoredInfo.entitlements.all['B-Net'];
+      final entitlement = restoredInfo.entitlements.all['personal_premium'];
       final purchasedProductId = entitlement?.productIdentifier ?? 'unknown';
 
       if (entitlement != null) {
@@ -156,74 +218,173 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
+      // backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
-        title: const Text("個人プラン"),
+        // backgroundColor: Colors.grey.shade100,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          "個人プラン",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
           TextButton(
             onPressed: _restorePurchase,
-            child: Text("復元", style: TextStyle(color: Colors.black)),
+            child: const Text("復元", style: TextStyle(color: Colors.black)),
           ),
           TextButton(
             onPressed: _openSubscriptionSettings,
-            child: Text("設定", style: TextStyle(color: Colors.black)),
+            child: const Text("設定", style: TextStyle(color: Colors.black)),
           ),
         ],
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              padding: EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      "あなたの野球を、もう一段楽しく。",
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
+              padding: EdgeInsets.symmetric(
+                horizontal: isTablet ? 40 : 16,
+                vertical: 16,
+              ),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: isTablet ? 720 : double.infinity,
+                  ),
+                  child: Column(
+                    children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 14,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
-                      textAlign: TextAlign.left,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text(
+                                  "あなたの野球を、もう一段楽しく。",
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.2,
+                                  ),
+                                ),
+                                SizedBox(height: 6),
+                                Text(
+                                  "記録・分析・目標・ランキングなど、成長が見える。\n野球がもっと面白くなる機能が解放されます。",
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.45,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   ..._packages.map((package) {
                     final id = package.storeProduct.identifier;
-                    final isMonthly = id.contains('1month');
+                    
+                    // iOS: com.sk.bNet.app.personal1month / personal12month
+                    // Android: com.sk.bnet.app.personal:personal-monthly / personal-yearly
+                    bool _isMonthlyProduct(String productId) {
+                      final p = productId.toLowerCase();
+                      return p.contains('1month') || p.contains('monthly');
+                    }
+                    
+                    bool _isYearlyProduct(String productId) {
+                      final p = productId.toLowerCase();
+                      return p.contains('12month') || p.contains('yearly') || p.contains('annual');
+                    }
+                    
+                    final isMonthly = _isMonthlyProduct(id);
+                    final isYearly = _isYearlyProduct(id);
+
+                    // 画像（判定できない場合は年額側に寄せる）
                     final imagePath = isMonthly
                         ? 'assets/Subscription_personal1month.png'
                         : 'assets/Subscription_personal12month.png';
 
-                    // プランごとに見るエンタイトルメントを切り替える
-                    final bool isAnnualPlan =
-                        id.contains('12month') || id.contains('annual');
-                    final String entitlementKey =
-                        isAnnualPlan ? 'B-Net Annual' : 'B-Net Monthly';
+                    // 表示文言（判定できない場合は「プラン」表記）
+                    final planTitle = isMonthly
+                        ? '月額プラン'
+                        : (isYearly ? '年額プラン' : 'プラン');
 
-                    final entitlement =
-                        _customerInfo?.entitlements.active[entitlementKey];
+                    final planDescription = isMonthly
+                        ? '初回1ヶ月無料！\n2ヶ月目から自動更新されます。\nいつでもキャンセル可能。'
+                        : (isYearly
+                            ? '1年間まとめて支払い。\n月額よりお得な価格設定です。'
+                            : 'プラン内容をご確認ください。');
+                    
+                  const String entitlementKey = 'personal_premium';
+                  final entitlement = _customerInfo?.entitlements.active[entitlementKey];
 
-                    // このプランに対応するエンタイトルメントが有効なら「登録中」
-                    final isSubscribed = entitlement != null;
+                  // ✅ 有効な商品ID（iOSは productId、Androidは base product だけ返るケースあり）
+                  final String? activeProductId = entitlement?.productIdentifier;
 
-                    // トライアルかどうか
-                    final isTrial =
-                        (entitlement?.periodType ?? PeriodType.normal) ==
-                            PeriodType.trial;
+                  // ✅ CustomerInfo.activeSubscriptions が一番確実（Androidは base:plan が入ることが多い）
+                  final activeSubs = _customerInfo?.activeSubscriptions ?? <String>[];
 
+                  bool _matchesActive(String packageId) {
+                    if (activeSubs.isNotEmpty) {
+                      // 1) そのまま一致
+                      if (activeSubs.contains(packageId)) return true;
+                      // 2) base:plan 形式のどちらかが prefix になっている場合も拾う
+                      return activeSubs.any((s) =>
+                          s == packageId ||
+                          s.startsWith('$packageId:') ||
+                          packageId.startsWith('$s:'));
+                    }
 
-                    // 月額プランで、トライアル中のときだけ「初月無料」バッジ
-                    final badge = (isMonthly && isTrial) ? '初月無料' : null;
+                    // fallback: entitlement.productIdentifier だけで判断（Androidは base だけ返ることがある）
+                    if (activeProductId == null || activeProductId.isEmpty) return false;
+                    if (activeProductId == packageId) return true;
+                    // packageId が "base:plan" で、activeProductId が "base" の場合
+                    if (packageId.startsWith('$activeProductId:')) return true;
+                    // 逆（念のため）
+                    if (activeProductId.startsWith('$packageId:')) return true;
+                    return false;
+                  }
+
+                  // ✅ 月/年カードごとに「このpackageが登録中か」を判定
+                  final bool isSubscribed = _matchesActive(id);
+
+                  final bool isTrial = isSubscribed &&
+                      (entitlement?.periodType ?? PeriodType.normal) == PeriodType.trial;
+                      
+                    // 月額プランで、トライアル中のときだけ「初月無料」バッヂ
+                    final String? badge = (isMonthly && isTrial) ? '初月無料' : null;
+                    
+                    // デバッグ：このカードが何か/有効 product は何か
+                  // print('🧾 [card] id=$id, activeProductId=$activeProductId, activeSubs=${(_customerInfo?.activeSubscriptions ?? const [])}, isSubscribed=$isSubscribed, isTrial=$isTrial');
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 24),
                       child: SubscriptionPlanCard(
                         imagePath: imagePath,
-                        title: isMonthly ? '月額プラン' : '年額プラン',
-                        description: isMonthly
-                            ? '初回1ヶ月無料！\n2ヶ月目から自動更新されます。\nいつでもキャンセル可能。'
-                            : '1年間まとめて支払い。\n月額よりお得な価格設定です。',
+                        title: planTitle,
+                        description: planDescription,
                         badge: badge,
                         priceText: isSubscribed ? '登録中' : '購入',
                         onPressed: isSubscribed ? null : () => _buy(package),
@@ -237,7 +398,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                     privacyPolicyUrl: 'https://baseball-net.vercel.app/privacy',
                     termsUrl: 'https://baseball-net.vercel.app/terms',
                   ),
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
     );

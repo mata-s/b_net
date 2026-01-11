@@ -331,8 +331,20 @@ class _NationalPitchingState extends State<NationalPitching> {
   List<DataRow> _buildPlayerRows() {
     return _players.map((player) {
       final isUser = player['id'] == widget.uid;
+      final String playerPref = (player['prefecture']?.toString() ?? '').trim();
+      final String userPref = widget.prefecture.trim();
+      final bool isSamePrefecture = !isUser && userPref.isNotEmpty && playerPref == userPref;
 
       return DataRow(
+        color: MaterialStateProperty.resolveWith<Color?>((states) {
+          if (isUser) {
+            return const Color(0xFF1565C0).withOpacity(0.08);
+          }
+          if (isSamePrefecture) {
+            return const Color(0xFF1565C0).withOpacity(0.04);
+          }
+          return null;
+        }),
         cells: _buildDataCells(player, isUser: isUser),
       );
     }).toList();

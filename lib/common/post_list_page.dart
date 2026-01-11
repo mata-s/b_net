@@ -9,12 +9,15 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 class PostListPage extends StatefulWidget {
   final String userUid;
   final String userName;
+  final String? userTeamId;
 
   const PostListPage({
     super.key,
     required this.userUid,
     required this.userName,
-  });
+    String? userTeamId,
+    String? teamId,
+  }) : userTeamId = teamId ?? userTeamId;
 
   @override
   _PostListPageState createState() => _PostListPageState();
@@ -23,6 +26,16 @@ class PostListPage extends StatefulWidget {
 class _PostListPageState extends State<PostListPage> {
   String _selectedPrefecture = ''; // 検索用都道府県
   final TextEditingController _searchController = TextEditingController();
+
+  String _normalizePrefecture(String value) {
+    return value
+        .trim()
+        .replaceAll(RegExp(r'[\s\u3000]+'), '') // half/full width spaces
+        .replaceAll('都', '')
+        .replaceAll('道', '')
+        .replaceAll('府', '')
+        .replaceAll('県', '');
+  }
 
   /// **投稿を削除**
   Future<void> _deletePost(String postId) async {
@@ -167,13 +180,20 @@ class _PostListPageState extends State<PostListPage> {
             padding: const EdgeInsets.all(8.0),
             child: TextFormField(
               controller: _searchController,
+              textInputAction: TextInputAction.search,
+              keyboardType: TextInputType.text,
+              onFieldSubmitted: (value) {
+                setState(() {
+                  _selectedPrefecture = _normalizePrefecture(value);
+                });
+              },
               decoration: InputDecoration(
                 labelText: '都道府県で絞る',
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.search),
                   onPressed: () {
                     setState(() {
-                      _selectedPrefecture = _searchController.text.trim();
+                      _selectedPrefecture = _normalizePrefecture(_searchController.text);
                     });
                   },
                 ),
@@ -194,8 +214,9 @@ class _PostListPageState extends State<PostListPage> {
                 final posts = snapshot.data!.docs.where((doc) {
                   var post = doc.data() as Map<String, dynamic>;
                   if (_selectedPrefecture.isEmpty) return true;
-                  return (post['prefecture'] ?? '')
-                      .contains(_selectedPrefecture);
+                  final postPref = _normalizePrefecture((post['prefecture'] ?? '').toString());
+                  final queryPref = _selectedPrefecture;
+                  return postPref.contains(queryPref);
                 }).toList();
 
                 return ListView.builder(
@@ -471,6 +492,7 @@ class _PostListPageState extends State<PostListPage> {
               builder: (context) => PostPage(
                 userUid: widget.userUid,
                 userName: widget.userName,
+                teamId: widget.userTeamId ?? '',
               ),
             ),
           );

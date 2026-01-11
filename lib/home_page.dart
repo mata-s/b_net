@@ -53,18 +53,100 @@ class _HomePageState extends State<HomePage> {
   bool hasUnreadNotices = false;
   int unreadChatCount = 0;
   bool _hasActiveSubscription = false;
+  bool _hasOngoingGoal = false;
 
   StreamSubscription<QuerySnapshot>? _chatRoomsSubscription;
   StreamSubscription<QuerySnapshot>? _announcementsSubscription;
+  StreamSubscription<QuerySnapshot>? _goalsSubscription;
 
   @override
   void initState() {
-  super.initState();
-  _checkUnreadNotices();
-  _fetchUnreadMessageCount();
-  _checkSubscriptionStatus().then((_) {
-    _initializePages();
-  });
+    super.initState();
+    _checkUnreadNotices();
+    _fetchUnreadMessageCount();
+    _listenOngoingGoals();
+    _checkSubscriptionStatus().then((_) {
+      _initializePages();
+    });
+  }
+  /// 目標（month / year）が「進行中」かどうかをリアルタイムで監視
+  void _listenOngoingGoals() {
+    final uid = widget.userUid;
+    if (uid.isEmpty) return;
+
+    // 以前の購読があれば一度キャンセル
+    _goalsSubscription?.cancel();
+
+    _goalsSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('goals')
+        .snapshots()
+        .listen(
+      (snapshot) {
+        final now = DateTime.now();
+        final monthKey = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+        final yearKey = now.year;
+
+        bool hasOngoing = false;
+
+        for (final doc in snapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+
+          // month は "YYYY-MM" / "YYYY-M" の両方を許容して "YYYY-MM" に正規化
+          String? month;
+          final dynamic monthRaw = data['month'];
+          if (monthRaw is String) {
+            final raw = monthRaw.trim();
+            if (raw.isNotEmpty) {
+              final parts = raw.split('-');
+              if (parts.length == 2) {
+                final y = int.tryParse(parts[0]);
+                final m = int.tryParse(parts[1]);
+                if (y != null && m != null && m >= 1 && m <= 12) {
+                  month = '${y.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}';
+                } else {
+                  // 想定外フォーマットはそのまま（比較には使わない）
+                  month = raw;
+                }
+              } else {
+                month = raw;
+              }
+            }
+          }
+
+          // year は int / String の両方を許容
+          final dynamic yearRaw = data['year'];
+          final int? year = (yearRaw is int)
+              ? yearRaw
+              : (yearRaw is String ? int.tryParse(yearRaw.trim()) : null);
+
+          final bool isThisMonth = (month != null && month == monthKey);
+          final bool isThisYear = (year != null && year == yearKey);
+          if (!isThisMonth && !isThisYear) continue;
+
+          // endDate が未来なら「進行中」
+          final dynamic endDateRaw = data['endDate'];
+          if (endDateRaw is Timestamp) {
+            final endDate = endDateRaw.toDate();
+            if (endDate.isAfter(now)) {
+              hasOngoing = true;
+              break;
+            }
+          }
+        }
+
+        if (!mounted) return;
+        if (_hasOngoingGoal != hasOngoing) {
+          setState(() {
+            _hasOngoingGoal = hasOngoing;
+          });
+        }
+      },
+      onError: (error) {
+        debugPrint('goals snapshots error: $error');
+      },
+    );
   }
 
     /// 個人サブスクが「active」かどうかチェック
@@ -194,7 +276,7 @@ class _HomePageState extends State<HomePage> {
               ? DirectoCalendar(
                   userUid: widget.userUid, teamId: widget.userTeamId ?? '')
               : PrivateCalendarTab(userUid: widget.userUid, positions: widget.userPosition, hasActiveSubscription: _hasActiveSubscription,),
-      PostListPage(userUid: widget.userUid, userName: widget.accountName),
+      PostListPage(userUid: widget.userUid, userName: widget.accountName, teamId: widget.userTeamId ?? ''),
       RankingPage(
         uid: widget.userUid,
         prefecture: widget.userPrefecture,
@@ -226,11 +308,16 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _chatRoomsSubscription?.cancel();
     _announcementsSubscription?.cancel();
+    _goalsSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDirectorOrManager =
+    widget.userPosition.contains('監督') ||
+    widget.userPosition.contains('マネージャー');
+     final hasTeam = (widget.userTeamId != null && widget.userTeamId!.trim().isNotEmpty);
     return Scaffold(
       appBar: AppBar(
         title: Image.asset(
@@ -250,132 +337,325 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: <Widget>[
-            const DrawerHeader(
-              decoration: BoxDecoration(
-                color: Colors.blue,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // ===== Header =====
+              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(widget.userUid)
+                    .snapshots(),
+                builder: (context, snap) {
+                  final data = snap.data?.data();
+
+                  final name = (data?['name'] as String?)?.trim().isNotEmpty == true
+                      ? (data!['name'] as String)
+                      : widget.accountName;
+
+                  final prefecture = (data?['prefecture'] as String?)
+                          ?.trim()
+                          .isNotEmpty ==
+                      true
+                      ? (data!['prefecture'] as String)
+                      : widget.userPrefecture;
+
+                  final positionsRaw = data?['position'];
+                  final List<String> positions = (positionsRaw is List)
+                      ? positionsRaw
+                          .whereType<String>()
+                          .map((e) => e.trim())
+                          .where((e) => e.isNotEmpty)
+                          .toList()
+                      : widget.userPosition;
+
+                  // Firestore の実フィールドは profileImage を使う（photoUrl ではない）
+                  final photoUrl = (data?['profileImage'] as String?)?.trim();
+
+                  // ignore: unused_local_variable
+                  final initial = (name.isNotEmpty ? name.substring(0, 1) : 'B')
+                      .toUpperCase();
+
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF1565C0), Color(0xFF42A5F5)],
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        CircleAvatar(
+                          radius: 26,
+                          backgroundColor: Colors.white,
+                          child: ClipOval(
+                            child: (photoUrl != null && photoUrl.isNotEmpty)
+                                ? Image.network(
+                                    photoUrl,
+                                    width: 52,
+                                    height: 52,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Image.asset(
+                                        'assets/default_avatar.png',
+                                        width: 52,
+                                        height: 52,
+                                        fit: BoxFit.cover,
+                                      );
+                                    },
+                                  )
+                                : Image.asset(
+                                    'assets/default_avatar.png',
+                                    width: 52,
+                                    height: 52,
+                                    fit: BoxFit.cover,
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _hasActiveSubscription
+                                          ? Colors.white.withOpacity(0.2)
+                                          : Colors.black.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.35),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      _hasActiveSubscription ? 'プレミアム' : 'ベーシック',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                prefecture,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: positions
+                                    .take(3)
+                                    .map(
+                                      (p) => Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.18),
+                                          borderRadius: BorderRadius.circular(999),
+                                        ),
+                                        child: Text(
+                                          p,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
-              child: Text(
-                'メニュー',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
+
+              // ===== Menu =====
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  children: [
+                    _DrawerSectionTitle(title: '成績・振り返り'),
+                    _RichDrawerTile(
+                      icon: Icons.flag,
+                      title: '目標',
+                      leadingIconColor:
+                          _hasOngoingGoal ? Colors.orange : null,
+                      badgeText: _hasOngoingGoal ? '進行中' : null,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => MissionPage(
+                              userUid: widget.userUid,
+                              hasActiveSubscription: _hasActiveSubscription,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    _RichDrawerTile(
+                      icon: Icons.star,
+                      title: '成績',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => AnnualResultsPage(
+                              userPosition: widget.userPosition,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 6),
+                    const Divider(height: 1),
+                    const SizedBox(height: 6),
+
+                    _DrawerSectionTitle(title: 'アカウント'),
+                    _RichDrawerTile(
+                      icon: Icons.person,
+                      title: 'プロフィール',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ProfilePage(userUid: widget.userUid),
+                          ),
+                        );
+                      },
+                    ),
+                    _RichDrawerTile(
+                      icon: Icons.swap_horiz,
+                      title: 'チームに切り替える',
+                      leadingIconColor: hasTeam ? const Color(0xFF2E7D32) : null,
+                      onTap: () {
+                        if (!hasTeam) return;
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => TeamAccountSwitchPage(
+                              userUid: widget.userUid,
+                              accountName: widget.accountName,
+                              userPrefecture: widget.userPrefecture,
+                              userPosition: widget.userPosition,
+                              userTeamId: widget.userTeamId,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    _RichDrawerTile(
+                      icon: Icons.group_add,
+                      title: 'チームを作る',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => CreateTeamAccountPage(
+                              userUid: widget.userUid,
+                              accountName: widget.accountName,
+                              userPrefecture: widget.userPrefecture,
+                              userPosition: widget.userPosition,
+                              userTeamId: widget.userTeamId,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 6),
+                    const Divider(height: 1),
+                    const SizedBox(height: 6),
+
+                    _DrawerSectionTitle(title: '情報・設定'),
+                    if (!isDirectorOrManager)
+                    _RichDrawerTile(
+                      icon: Icons.workspace_premium,
+                      title: 'プレミアムプラン',
+                      leadingIconColor: _hasActiveSubscription ? const Color(0xFFFFB300) : null,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => SubscriptionScreen()),
+                        );
+                      },
+                    ),
+                    _RichDrawerTile(
+                      icon: Icons.campaign,
+                      title: 'お知らせ',
+                      leadingIconColor: hasUnreadNotices ? Colors.red : null,
+                      titleSuffix: hasUnreadNotices ? const _UnreadDot() : null,
+                      trailingWidget: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => NoticesPage()),
+                        ).then((_) => _checkUnreadNotices());
+                      },
+                    ),
+                    _RichDrawerTile(
+                      icon: Icons.settings,
+                      title: '設定',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => SettingsPage()),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                  ],
                 ),
               ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.flag),
-              title: const Text('目標'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => MissionPage(userUid: widget.userUid, hasActiveSubscription: _hasActiveSubscription),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.person),
-              title: const Text('プロフィール'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ProfilePage(userUid: widget.userUid),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.swap_horiz),
-              title: const Text('チームアカウントに切り替える'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => TeamAccountSwitchPage(
-                            userUid: widget.userUid,
-                            accountName: widget.accountName,
-                            userPrefecture: widget.userPrefecture,
-                            userPosition: widget.userPosition,
-                            userTeamId: widget.userTeamId,
-                          )),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.group_add),
-              title: const Text('チームアカウントを作る'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => CreateTeamAccountPage(
-                            userUid: widget.userUid,
-                            accountName: widget.accountName,
-                            userPrefecture: widget.userPrefecture,
-                            userPosition: widget.userPosition,
-                            userTeamId: widget.userTeamId,
-                          )),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.star),
-              title: const Text('成績'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => AnnualResultsPage(userPosition: widget.userPosition,),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.campaign),
-              title: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('お知らせ'),
-                  if (hasUnreadNotices)
-                    const Icon(Icons.circle,
-                        color: Colors.red, size: 10), // 🔴 未読マーク
-                ],
-              ),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => NoticesPage()),
-                ).then((_) => _checkUnreadNotices()); // 🔄 お知らせページを閉じたら未読チェック
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('設定'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => SettingsPage()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.workspace_premium),
-              title: const Text('プレミアムプラン'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SubscriptionScreen(),
-                  ),
-                );
-              },
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       body: _pages.isNotEmpty
@@ -452,6 +732,125 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _DrawerSectionTitle extends StatelessWidget {
+  final String title;
+  const _DrawerSectionTitle({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: Colors.grey[700],
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+}
+
+class _UnreadDot extends StatelessWidget {
+  const _UnreadDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 6,
+      height: 6,
+      decoration: BoxDecoration(
+        color: Colors.red,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
+class _RichDrawerTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+  final String? badgeText;
+  final Widget? trailingWidget;
+  final Color? leadingIconColor;
+  final Widget? titleSuffix;
+
+  const _RichDrawerTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.subtitle,
+    this.badgeText,
+    this.trailingWidget,
+    this.leadingIconColor,
+    this.titleSuffix,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(
+        icon,
+        color: leadingIconColor ?? Colors.blue,
+        size: 26,
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            fit: FlexFit.loose,
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          if (titleSuffix != null) ...[
+            const SizedBox(width: 6),
+            titleSuffix!,
+          ],
+          if (badgeText != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1565C0).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: const Color(0xFF1565C0).withOpacity(0.18),
+                ),
+              ),
+              child: Text(
+                badgeText!,
+                style: const TextStyle(
+                  color: Color(0xFF1565C0),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+      subtitle: (subtitle == null)
+          ? null
+          : Text(
+              subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+      trailing: trailingWidget ?? const Icon(Icons.chevron_right),
+      onTap: onTap,
+      dense: false,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
     );
   }
 }

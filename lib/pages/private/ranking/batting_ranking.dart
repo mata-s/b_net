@@ -693,7 +693,6 @@ class _BattingRankingState extends State<BattingRanking> {
         _userData = userData;
       });
 
-      // print('最終的なプレイヤーデータ: $_players'); // 最終的なプレイヤーデータ確認
       // print('最終的なユーザー自身のデータ: $_userData'); // 最終的なユーザーデータ確認
     } catch (e) {
       print('Firestoreからのデータ取得中にエラーが発生しました: $e');
@@ -805,9 +804,19 @@ class _BattingRankingState extends State<BattingRanking> {
         final rankKey = 'battingAverageRank$ageSuffix';
         int playerRank = int.tryParse(player[rankKey]?.toString() ?? '') ?? -1;
         if (playerRank != -1 && playerRank <= 10) {
-          result.add(DataRow(
-              cells: _buildDataCells(player,
-                  isUser: player['id'] == widget.uid))); // ユーザー自身のデータを太字で表示
+          final isUser = player['id'] == widget.uid;
+          result.add(
+          DataRow(
+            color: MaterialStateProperty.resolveWith<Color?>(
+              (states) {
+                if (isUser) {
+                  return const Color(0xFF1565C0).withOpacity(0.08);
+                }
+              return null;
+            },
+          ),
+          cells: _buildDataCells(player, isUser: isUser),
+        )); // ユーザー自身のデータを太字で表示
         }
       }
     } else if (_selectedRankingType == '本塁打ランキング' ||
@@ -820,11 +829,20 @@ class _BattingRankingState extends State<BattingRanking> {
         if (player['rank'] != null &&
             player['rank'] != '' &&
             (int.tryParse(player['rank'].toString()) ?? 0) <= 10) {
-          result.add(
-            DataRow(
-                cells: _buildDataCells(player,
-                    isUser: player['id'] == widget.uid)),
-          );
+              final isUser = player['id'] == widget.uid;
+              result.add(
+                DataRow(
+                  color: MaterialStateProperty.resolveWith<Color?>(
+                    (states) {
+                      if (isUser) {
+                        return const Color(0xFF1565C0).withOpacity(0.08);
+                      }
+                      return null;
+                    },
+                  ),
+                  cells: _buildDataCells(player, isUser: isUser),
+                ),
+              );
         }
       }
     }
@@ -1396,9 +1414,20 @@ class _BattingRankingState extends State<BattingRanking> {
         int playerRank =
             int.tryParse(player['battingAverageRank'].toString()) ?? -1;
         if (playerRank <= 10) {
-          result.add(DataRow(
-              cells: _buildDataCells(player,
-                  isUser: player['id'] == widget.uid))); // ユーザー自身のデータを太字で表示
+          final isUser = player['id'] == widget.uid;
+          result.add(
+            DataRow(
+              color: MaterialStateProperty.resolveWith<Color?>(
+                (states) {
+                  if (isUser) {
+                    return const Color(0xFF1565C0).withOpacity(0.08);
+                  }
+                  return null;
+                },
+              ),
+              cells: _buildDataCells(player, isUser: isUser),
+            ),
+          ); // ユーザー自身のデータを太字で表示
         }
       }
     }
@@ -1465,7 +1494,16 @@ bool _isUserInSelectedAgeGroup() {
         userRank > 0 ? userRank : _extractRankForCurrentMetric(_userData!);
 
     if (centerRank <= 0) {
-      return [DataRow(cells: _buildDataCells(_userData!, isUser: true))];
+      return [
+        DataRow(
+          color: MaterialStateProperty.resolveWith<Color?>(
+            (states) {
+              return const Color(0xFF1565C0).withOpacity(0.08);
+            },
+          ),
+          cells: _buildDataCells(_userData!, isUser: true),
+        )
+      ];
     }
 
     final List<DataRow> result = [];
@@ -1481,11 +1519,33 @@ bool _isUserInSelectedAgeGroup() {
           .compareTo(_extractRankForCurrentMetric(a)));
 
     for (final p in upper.take(2).toList().reversed) {
-      result.add(DataRow(cells: _buildDataCells(p)));
+      final isUser = p['id'] == widget.uid;
+      result.add(
+        DataRow(
+          color: MaterialStateProperty.resolveWith<Color?>(
+            (states) {
+              if (isUser) {
+                return const Color(0xFF1565C0).withOpacity(0.08);
+              }
+              return null;
+            },
+          ),
+          cells: _buildDataCells(p, isUser: isUser),
+        ),
+      );
     }
 
     // 自分
-    result.add(DataRow(cells: _buildDataCells(_userData!, isUser: true)));
+    result.add(
+      DataRow(
+        color: MaterialStateProperty.resolveWith<Color?>(
+          (states) {
+            return const Color(0xFF1565C0).withOpacity(0.08);
+          },
+        ),
+        cells: _buildDataCells(_userData!, isUser: true),
+      ),
+    );
 
     // 下位（自分より悪い）: 昇順で2件
     final lower = sourceList
@@ -1498,7 +1558,20 @@ bool _isUserInSelectedAgeGroup() {
           .compareTo(_extractRankForCurrentMetric(b)));
 
     for (final p in lower.take(2)) {
-      result.add(DataRow(cells: _buildDataCells(p)));
+      final isUser = p['id'] == widget.uid;
+      result.add(
+        DataRow(
+          color: MaterialStateProperty.resolveWith<Color?>(
+            (states) {
+              if (isUser) {
+                return const Color(0xFF1565C0).withOpacity(0.08);
+              }
+              return null;
+            },
+          ),
+          cells: _buildDataCells(p, isUser: isUser),
+        ),
+      );
     }
 
     return result;

@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
-import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:gal/gal.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -65,6 +65,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+
   @override
   void initState() {
     super.initState();
@@ -123,9 +124,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 ? profileImageFromFirestore
                 : (currentUser.photoURL ?? '');
       });
-
-      print(
-          '🔥 _loadCurrentUserProfile: uid=${currentUser.uid}, name=$_userName, data=$data');
     } catch (e) {
       print('⚠️ _loadCurrentUserProfile でエラー: $e');
       setState(() {
@@ -189,9 +187,6 @@ class _ChatScreenState extends State<ChatScreen> {
         _userName = resolvedName;
         _userProfileImageUrl = resolvedProfileImageUrl;
       });
-
-      print(
-          '✨ _resolveSenderInfo: uid=${currentUser.uid}, name=$resolvedName');
 
       return {
         'name': resolvedName,
@@ -665,8 +660,14 @@ class _ChatScreenState extends State<ChatScreen> {
       String? reaction,
       String messageId) {
     return Padding(
-      padding: const EdgeInsets.symmetric(
-          vertical: 5, horizontal: 10), // 🔹 吹き出し全体のパディング追加
+        padding: EdgeInsets.fromLTRB(
+    10,
+    5,
+    10,
+    (reaction != null && reaction.isNotEmpty) ? 22 : 5,
+  ),
+      // padding: const EdgeInsets.symmetric(
+      //     vertical: 5, horizontal: 10),
       child: Row(
         mainAxisAlignment:
             isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -702,182 +703,202 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           const SizedBox(width: 8), // 吹き出しとアイコン/時間の間の余白
 
-          // 💬 メッセージの吹き出し
+          // 💬 メッセージの吹き出し（リアクションは外に出す）
           Flexible(
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: isMe ? Colors.green[200] : Colors.white,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.7),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (imageUrls.isNotEmpty)
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: imageUrls.map((url) {
-                        return GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    FullScreenImagePage(imageUrl: url),
-                              ),
-                            );
-                          },
-                          child: Image.network(url,
-                              width: 150, height: 150, fit: BoxFit.cover),
-                        );
-                      }).toList(),
-                    ),
-                  if (videoUrl != null && videoUrl.isNotEmpty)
-                    GestureDetector(
-                      onTap: () {
-                        // 動画再生処理
-                      },
-                      child: const Icon(Icons.play_circle_filled, size: 50),
-                    ),
-                   if (messageText.isNotEmpty)
-  GestureDetector(
-    onLongPress: () async {
-      // 長押しでメニューを表示（コピー / リアクション / キャンセル）
-      final result = await showModalBottomSheet<String>(
-        context: context,
-        builder: (BuildContext context) {
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                ListTile(
-                  leading: const Icon(Icons.copy),
-                  title: const Text('コピー'),
-                  onTap: () {
-                    Navigator.pop(context, 'copy');
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.emoji_emotions),
-                  title: const Text('リアクション'),
-                  onTap: () {
-                    Navigator.pop(context, 'reaction');
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.close),
-                  title: const Text('キャンセル'),
-                  onTap: () {
-                    Navigator.pop(context, 'cancel');
-                  },
-                ),
-              ],
-            ),
-          );
-        },
-      );
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isMe ? Colors.green[200] : Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.7,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (imageUrls.isNotEmpty)
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: imageUrls.map((url) {
+                            return GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        FullScreenImagePage(imageUrl: url),
+                                  ),
+                                );
+                              },
+                              child: Image.network(url,
+                                  width: 150, height: 150, fit: BoxFit.cover),
+                            );
+                          }).toList(),
+                        ),
+                      if (videoUrl != null && videoUrl.isNotEmpty)
+                        GestureDetector(
+                          onTap: () {
+                            // 動画再生処理
+                          },
+                          child: const Icon(Icons.play_circle_filled, size: 50),
+                        ),
+                      if (messageText.isNotEmpty)
+                        GestureDetector(
+                          onLongPress: () async {
+                            // 長押しでメニューを表示（コピー / リアクション / キャンセル）
+                            final result =
+                                await showModalBottomSheet<String>(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return SafeArea(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      ListTile(
+                                        leading: const Icon(Icons.copy),
+                                        title: const Text('コピー'),
+                                        onTap: () {
+                                          Navigator.pop(context, 'copy');
+                                        },
+                                      ),
+                                      ListTile(
+                                        leading: const Icon(Icons.emoji_emotions),
+                                        title: const Text('リアクション'),
+                                        onTap: () {
+                                          Navigator.pop(context, 'reaction');
+                                        },
+                                      ),
+                                      ListTile(
+                                        leading: const Icon(Icons.close),
+                                        title: const Text('キャンセル'),
+                                        onTap: () {
+                                          Navigator.pop(context, 'cancel');
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            );
 
-      if (result == 'copy') {
-        // コピー処理
-        await Clipboard.setData(
-          ClipboardData(text: messageText),
-        );
-        ScaffoldMessenger.of(this.context).showSnackBar(
-          const SnackBar(
-            content: Text('メッセージをコピーしました'),
-          ),
-        );
-      } else if (result == 'reaction') {
-        // リアクション選択用のボトムシート
-        final emoji = await showModalBottomSheet<String>(
-          context: context,
-          builder: (BuildContext context) {
-            return SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 12.0, horizontal: 16.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildReactionEmojiButton(context, '👍'),
-                        _buildReactionEmojiButton(context, '❤️'),
-                        _buildReactionEmojiButton(context, '😂'),
-                        _buildReactionEmojiButton(context, '😮'),
-                        _buildReactionEmojiButton(context, '👏'),
-                        _buildReactionEmojiButton(context, '🙇'),
-                      ],
+                            if (result == 'copy') {
+                              // コピー処理
+                              await Clipboard.setData(
+                                ClipboardData(text: messageText),
+                              );
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('メッセージをコピーしました'),
+                                ),
+                              );
+                            } else if (result == 'reaction') {
+                              // リアクション選択用のボトムシート
+                              final emoji =
+                                  await showModalBottomSheet<String>(
+                                context: context,
+                                builder: (BuildContext context) {
+                                  return SafeArea(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12.0,
+                                              horizontal: 16.0),
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceEvenly,
+                                            children: [
+                                              _buildReactionEmojiButton(
+                                                  context, '👍'),
+                                              _buildReactionEmojiButton(
+                                                  context, '❤️'),
+                                              _buildReactionEmojiButton(
+                                                  context, '😂'),
+                                              _buildReactionEmojiButton(
+                                                  context, '😮'),
+                                              _buildReactionEmojiButton(
+                                                  context, '👏'),
+                                              _buildReactionEmojiButton(
+                                                  context, '🙇'),
+                                            ],
+                                          ),
+                                        ),
+                                        const Divider(height: 1),
+                                        ListTile(
+                                          leading:
+                                              const Icon(Icons.remove_circle),
+                                          title: const Text('リアクションを削除'),
+                                          onTap: () {
+                                            Navigator.pop(context, '');
+                                          },
+                                        ),
+                                        ListTile(
+                                          leading: const Icon(Icons.close),
+                                          title: const Text('キャンセル'),
+                                          onTap: () {
+                                            Navigator.pop(context, null);
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              );
+
+                              if (emoji != null) {
+                                // Firestore に reaction フィールドを保存（空文字なら削除扱い）
+                                final messageRef = _firestore
+                                    .collection('chatRooms')
+                                    .doc(widget.roomId)
+                                    .collection('messages')
+                                    .doc(messageId);
+
+                                if (emoji.isEmpty) {
+                                  await messageRef
+                                      .update({'reaction': FieldValue.delete()});
+                                } else {
+                                  await messageRef.update({'reaction': emoji});
+                                }
+                              }
+                            }
+                          },
+                          child: Text(
+                            messageText,
+                            style: const TextStyle(fontSize: 16),
+                            softWrap: true,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // ✅ リアクションは吹き出しの「外（下）」に表示（吹き出しの高さは増やさない）
+                if (reaction != null && reaction.isNotEmpty)
+                  Positioned(
+                    right: isMe ? 6 : null,
+                    left: isMe ? null : 6,
+                    bottom: -18,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.95),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        reaction,
+                        style: const TextStyle(fontSize: 14),
+                      ),
                     ),
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.remove_circle),
-                    title: const Text('リアクションを削除'),
-                    onTap: () {
-                      Navigator.pop(context, ''); // 空文字で削除
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.close),
-                    title: const Text('キャンセル'),
-                    onTap: () {
-                      Navigator.pop(context, null);
-                    },
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-
-        if (emoji != null) {
-          // Firestore に reaction フィールドを保存（空文字なら削除扱い）
-          final messageRef = _firestore
-              .collection('chatRooms')
-              .doc(widget.roomId)
-              .collection('messages')
-              .doc(messageId);
-
-          if (emoji.isEmpty) {
-            await messageRef.update({'reaction': FieldValue.delete()});
-          } else {
-            await messageRef.update({'reaction': emoji});
-          }
-        }
-      }
-    },
-    child: Text(
-      messageText,
-      style: const TextStyle(fontSize: 16),
-      softWrap: true,
-    ),
-  ),
-  if (reaction != null && reaction.isNotEmpty)
-  Padding(
-    padding: const EdgeInsets.only(top: 4.0),
-    child: Align(
-      alignment: Alignment.centerRight,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade300),
-        ),
-        child: Text(
-          reaction,
-          style: const TextStyle(fontSize: 14),
-        ),
-      ),
-    ),
-  ),
-                ],
-              ),
+              ],
             ),
           ),
 
@@ -899,6 +920,17 @@ class _ChatScreenState extends State<ChatScreen> {
     DateTime dateTime = timestamp.toDate();
     return "${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}";
   }
+}
+
+String _extensionFromUrl(String url) {
+  final uri = Uri.tryParse(url);
+  final path = (uri?.path ?? url).toLowerCase(); // ← ?以降を無視できる
+  if (path.endsWith('.png')) return 'png';
+  if (path.endsWith('.webp')) return 'webp';
+  if (path.endsWith('.heic')) return 'heic';
+  if (path.endsWith('.jpeg')) return 'jpeg';
+  if (path.endsWith('.jpg')) return 'jpg';
+  return 'jpg';
 }
 
 // 画像全画面表示ページ
@@ -923,21 +955,15 @@ class FullScreenImagePage extends StatelessWidget {
                 if (response.statusCode == 200) {
                   final Uint8List bytes = Uint8List.fromList(response.bodyBytes);
 
-                  final result = await ImageGallerySaver.saveImage(
+                   final ext = _extensionFromUrl(imageUrl);
+                  
+                  await Gal.putImageBytes(
                     bytes,
-                    quality: 80,
-                    name: 'bnet_${DateTime.now().millisecondsSinceEpoch}',
+                    name: 'bnet_${DateTime.now().millisecondsSinceEpoch}.$ext',
                   );
-
-                  final isSuccess = (result['isSuccess'] == true) ||
-                      (result['isSuccessful'] == true);
-
+                  
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        isSuccess ? '画像を保存しました' : '画像の保存に失敗しました',
-                      ),
-                    ),
+                    const SnackBar(content: Text('画像を保存しました')),
                   );
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(

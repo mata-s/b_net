@@ -355,8 +355,18 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
   List<DataRow> _buildTeamRows() {
     return _teams.map((team) {
       final isTeam = team['id'] == widget.teamId;
+      final isSamePrefecture =
+          (team['prefecture']?.toString() ?? '') == widget.teamPrefecture;
+
+      // 自身のチームを最優先で薄い青背景。次に「自分の都道府県」の行をさらに薄い青で強調。
+      final rowColor = isTeam
+          ? const Color(0xFF1565C0).withOpacity(0.08)
+          : (isSamePrefecture
+              ? const Color(0xFF1565C0).withOpacity(0.04)
+              : null);
 
       return DataRow(
+        color: MaterialStateProperty.resolveWith<Color?>((states) => rowColor),
         cells: _buildDataCells(team, isTeam: isTeam),
       );
     }).toList();

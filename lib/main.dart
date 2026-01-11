@@ -1,6 +1,7 @@
 import 'package:b_net/common/chat_screen.dart';
 import 'package:b_net/home_page.dart';
 import 'package:b_net/login/registration_page.dart';
+import 'package:b_net/pages/splash_page.dart';
 import 'package:b_net/pages/team/event_detail_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; 
@@ -15,12 +16,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'login/login_page.dart';
 import 'common/chat_room_list_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/data/latest.dart' as tzdata;
-
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 RemoteMessage? initialPushMessage;
@@ -38,29 +33,6 @@ void main() async {
 
   // Firebase 初期化
   await Firebase.initializeApp();
-
-  // タイムゾーン初期化（ローカル通知のスケジュール用）
-  tzdata.initializeTimeZones();
-  tz.setLocalLocation(tz.getLocation('Asia/Tokyo'));
-
-  // ローカル通知の初期化
-  const AndroidInitializationSettings androidInitSettings =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-  const DarwinInitializationSettings iosInitSettings =
-      DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
-  const InitializationSettings initSettings = InitializationSettings(
-    android: androidInitSettings,
-    iOS: iosInitSettings,
-  );
-  await flutterLocalNotificationsPlugin.initialize(initSettings);
-
-  // 月初＆3月のローカル通知をスケジュール
-  await _scheduleMonthlyGoalNotification();
-  await _scheduleMarchGoalNotification();
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
@@ -87,21 +59,19 @@ void main() async {
     _handleMessageNavigation(message);
   });
 
-  // RevenueCat 初期化
-  // ✅ 起動時点で FirebaseAuth の状態があるなら、その UID を appUserID として configure して
-  //    1) 毎回 $RCAnonymousID で始まる挙動を減らす
-  //    2) アプリ起動直後の CustomerInfo 取得でも user:UID が使われるようにする
   final currentUser = FirebaseAuth.instance.currentUser;
   final initialRcAppUserId = currentUser != null ? 'user:${currentUser.uid}' : null;
 
+  const rcIosApiKey = 'appl_fbWgJWNLbAYxpijcSkSdVjVGHtT';
+  const rcAndroidApiKey = 'goog_blusfYbDUamqpKTBHVkzbKCfcNH';
+  
   PurchasesConfiguration? configuration;
 
   if (Platform.isIOS) {
-    configuration = PurchasesConfiguration('appl_fbWgJWNLbAYxpijcSkSdVjVGHtT'); // iOS
-  } else if (Platform.isAndroid) {
-    // TODO: Android の RevenueCat SDK キーを設定
-    // configuration = PurchasesConfiguration('your_android_revenuecat_sdk_key');
-  }
+  configuration = PurchasesConfiguration(rcIosApiKey);
+} else if (Platform.isAndroid) {
+  configuration = PurchasesConfiguration(rcAndroidApiKey);
+}
 
   if (configuration != null) {
     if (initialRcAppUserId != null) {
@@ -123,95 +93,6 @@ void main() async {
   runApp(const MyApp());
 }
 
-/// 毎月1日の朝9時に「今月の目標」を促すローカル通知をスケジュール
-Future<void> _scheduleMonthlyGoalNotification() async {
-  final now = tz.TZDateTime.now(tz.local);
-
-  int year = now.year;
-  int month = now.month;
-
-  // すでに今月1日の9:00を過ぎていたら、来月1日をターゲットにする
-  final thisMonthFirst9 = tz.TZDateTime(tz.local, year, month, 1, 9);
-  if (now.isAfter(thisMonthFirst9)) {
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-  }
-
-  final scheduledDate = tz.TZDateTime(tz.local, year, month, 1, 9);
-
-  const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-    'goal_reminder_monthly',
-    '月初の目標リマインダー',
-    channelDescription: '毎月の始まりに目標を決めるリマインダー',
-    importance: Importance.defaultImportance,
-    priority: Priority.defaultPriority,
-  );
-
-  const DarwinNotificationDetails iosDetails = DarwinNotificationDetails();
-
-  const NotificationDetails notificationDetails = NotificationDetails(
-    android: androidDetails,
-    iOS: iosDetails,
-  );
-
-  await flutterLocalNotificationsPlugin.zonedSchedule(
-    100, // 通知ID（他と被らなければOK）
-    '今月の目標を決めてみよう',
-    'この1ヶ月で達成したいことを決めてみませんか？',
-    scheduledDate,
-    notificationDetails,
-    androidAllowWhileIdle: true,
-    uiLocalNotificationDateInterpretation:
-        UILocalNotificationDateInterpretation.wallClockTime,
-    matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,
-  );
-}
-
-/// 毎年3月1日の朝9時に「今年の目標」を促すローカル通知をスケジュール
-Future<void> _scheduleMarchGoalNotification() async {
-  final now = tz.TZDateTime.now(tz.local);
-
-  int year = now.year;
-
-  // 今年の3月1日 9:00
-  var marchDate = tz.TZDateTime(tz.local, year, 3, 1, 9);
-
-  // すでに今年の3月1日 9:00 を過ぎている場合は来年3月にする
-  if (now.isAfter(marchDate)) {
-    year += 1;
-    marchDate = tz.TZDateTime(tz.local, year, 3, 1, 9);
-  }
-
-  const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-    'goal_reminder_march',
-    '3月の年間目標リマインダー',
-    channelDescription: '3月に今年の目標を考えるためのリマインダー',
-    importance: Importance.defaultImportance,
-    priority: Priority.defaultPriority,
-  );
-
-  const DarwinNotificationDetails iosDetails = DarwinNotificationDetails();
-
-  const NotificationDetails notificationDetails = NotificationDetails(
-    android: androidDetails,
-    iOS: iosDetails,
-  );
-
-  await flutterLocalNotificationsPlugin.zonedSchedule(
-    101, // 通知ID（他の通知と被らないID）
-    '今年の目標を決めてみよう',
-    '今年の目標を考えてみませんか？',
-    marchDate,
-    notificationDetails,
-    androidAllowWhileIdle: true,
-    uiLocalNotificationDateInterpretation:
-        UILocalNotificationDateInterpretation.wallClockTime,
-    matchDateTimeComponents: DateTimeComponents.dateAndTime,
-  );
-}
 
 void enableFirestoreCache() {
   FirebaseFirestore.instance.settings = const Settings(
@@ -248,37 +129,9 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: FutureBuilder<Widget>(
-        future: _getInitialPage(),
-        builder: (context, snapshot) {
-          // ローディング中
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
-
-          // エラー発生時
-          if (snapshot.hasError) {
-            return Scaffold(
-              body: Center(
-                child: Text('エラーが発生しました: ${snapshot.error}'),
-              ),
-            );
-          }
-
-          // データがある場合
-          if (snapshot.hasData && snapshot.data != null) {
-            return snapshot.data!;
-          }
-
-          // データが null の場合のフォールバック（念のため）
-          return const Scaffold(
-            body: Center(
-              child: Text('初期画面を読み込めませんでした'),
-            ),
-          );
-        },
+      home: SplashPage (
+        resolveNextPage: () async => const _InitialPageGate(),
+        duration: const Duration(milliseconds: 3000),
       ),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -290,6 +143,46 @@ class _MyAppState extends State<MyApp> {
         Locale('ja', ''),
       ],
       locale: const Locale('ja', ''),
+    );
+  }
+}
+
+class _InitialPageGate extends StatelessWidget {
+  const _InitialPageGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Widget>(
+      future: _getInitialPage(),
+      builder: (context, snapshot) {
+        // ローディング中
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        // エラー発生時
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Text('エラーが発生しました: ${snapshot.error}'),
+            ),
+          );
+        }
+
+        // データがある場合
+        if (snapshot.hasData && snapshot.data != null) {
+          return snapshot.data!;
+        }
+
+        // データが null の場合のフォールバック（念のため）
+        return const Scaffold(
+          body: Center(
+            child: Text('初期画面を読み込めませんでした'),
+          ),
+        );
+      },
     );
   }
 }
@@ -489,9 +382,6 @@ Future<void> _handleMessageNavigation(RemoteMessage message) async {
   );
 }
 
-/// スケジュール通知から遷移してきたときに開く簡易ページ
-/// スケジュール通知から遷移してきたときに開くページ
-/// Firestore からイベントを取得して、その後 EventDetailPage に遷移する
 class ScheduleNotificationPage extends StatefulWidget {
   final String teamId;
   final String scheduleId;
@@ -627,7 +517,6 @@ Future<void> _setupMessagingForUser(String uid) async {
     }
   }
 
-  // ✅ FCMトークン取得（例外は握りつぶしてアプリ起動を止めない）
   String? token;
   try {
     token = await messaging.getToken();

@@ -19,9 +19,15 @@ class TeamSubscriptionGuard extends StatefulWidget {
   State<TeamSubscriptionGuard> createState() => _TeamSubscriptionGuardState();
 }
 
-class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard> {
+class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
+    with SingleTickerProviderStateMixin {
   late final PageController _pageController;
   int _currentPage = 0;
+
+  // スワイプヒント（最初だけ軽く動く）
+  late final AnimationController _hintController;
+  late final Animation<double> _hintOffset;
+  bool _hintAnimating = true;
 
   // 「有料プランでできること」リスト
   final List<_FeaturePage> _pages = const [
@@ -74,10 +80,41 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard> {
     super.initState();
     _currentPage = widget.initialPage;
     _pageController = PageController(initialPage: widget.initialPage);
+
+    _hintController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 360),
+    );
+
+    _hintOffset = Tween<double>(begin: 0, end: 8).animate(
+      CurvedAnimation(parent: _hintController, curve: Curves.easeInOut),
+    );
+
+    // 画面表示直後だけ、矢印を軽く動かして「左右スワイプ」を伝える
+    _hintController.repeat(reverse: true);
+    Future.delayed(const Duration(milliseconds: 1000), () async {
+      if (!mounted) return;
+
+      // 終わり方を滑らかに：0位置へスッと戻してから止める
+      try {
+        await _hintController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeInOut,
+        );
+      } catch (_) {
+        // dispose 済み等で animateTo が投げる可能性があるので握りつぶす
+      }
+
+      if (!mounted) return;
+      _hintController.stop();
+      setState(() => _hintAnimating = false);
+    });
   }
 
   @override
   void dispose() {
+    _hintController.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -117,62 +154,125 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard> {
                   ],
                 ),
 
-                const SizedBox(height: 8),
+                const SizedBox(height: 20),
 
-                const Text(
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                child: Text(
                   'チーム全員で、強くなる楽しさを。',
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
                   textAlign: TextAlign.center,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.clip,
+                ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  '有料プランで使える全機能を紹介します。',
-                  style: TextStyle(fontSize: 14, color: Colors.black54),
-                  textAlign: TextAlign.center,
-                ),
 
                 const SizedBox(height: 24),
 
-                // カード部分（PageView）
+                // カード + ドットをまとめた領域
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final cardAreaHeight = 320.0;
+
+                    return SizedBox(
+                      height: cardAreaHeight,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '有料プランでできること',
+                             style: TextStyle(fontSize: 14, color: Colors.black54),
+                             textAlign: TextAlign.center,
+                          ),
+                          // カード
+                          SizedBox(
+                            height: cardAreaHeight - 36, // ← ドット分だけ引く
+                            child: PageView.builder(
+                              controller: _pageController,
+                              itemCount: _pages.length,
+                              onPageChanged: (index) {
+                                setState(() => _currentPage = index);
+                              },
+                              itemBuilder: (context, index) {
+                                final page = _pages[index];
+                                return _FeatureCard(page: page);
+                              },
+                            ),
+                          ),
+
+                          // ドット（カードに近づける）
+                          const SizedBox(height: 2),
+                          SizedBox(
+                            height: 10,
+                            child: Center(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: List.generate(_pages.length, (index) {
+                                  final isActive = index == _currentPage;
+                                  return AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                                    width: isActive ? 10 : 6,
+                                    height: isActive ? 10 : 6,
+                                    decoration: BoxDecoration(
+                                      color: isActive
+                                          ? Colors.blueAccent
+                                          : Colors.grey[300],
+                                      shape: BoxShape.circle,
+                                    ),
+                                  );
+                                }),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+
+                // スワイプヒント（最初だけ軽く動く）
                 SizedBox(
-                  height: 320,
-                  child: PageView.builder(
-                    controller: _pageController,
-                    itemCount: _pages.length,
-                    onPageChanged: (index) {
-                      setState(() => _currentPage = index);
-                    },
-                    itemBuilder: (context, index) {
-                      final page = _pages[index];
-                      return _FeatureCard(page: page);
+                  height: 16,
+                  child: AnimatedBuilder(
+                    animation: _hintController,
+                    builder: (context, _) {
+                      final v = _hintAnimating ? _hintOffset.value : 0.0;
+                      final leftDx = -v; // 左は左へ
+                      final rightDx = v; // 右は右へ
+
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Transform.translate(
+                            offset: Offset(leftDx, 0),
+                            child: const Icon(
+                              Icons.chevron_left_rounded,
+                              size: 22,
+                              color: Color(0xFF6B7280),
+                            ),
+                          ),
+                          const SizedBox(width: 25),
+                          Transform.translate(
+                            offset: Offset(rightDx, 0),
+                            child: const Icon(
+                              Icons.chevron_right_rounded,
+                              size: 22,
+                              color: Color(0xFF6B7280),
+                            ),
+                          ),
+                        ],
+                      );
                     },
                   ),
                 ),
 
-                const SizedBox(height: 16),
-
-                // ドットインジケータ
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(_pages.length, (index) {
-                    final isActive = index == _currentPage;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: isActive ? 10 : 6,
-                      height: isActive ? 10 : 6,
-                      decoration: BoxDecoration(
-                        color: isActive ? Colors.blueAccent : Colors.grey[300],
-                        shape: BoxShape.circle,
-                      ),
-                    );
-                  }),
-                ),
-
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
 
                 // チームプランの料金・内容
                 const _TeamPricingSection(),

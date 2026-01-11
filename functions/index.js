@@ -7821,31 +7821,13 @@ onDocumentCreated("chatRooms/{roomId}/messages/{messageId}", async (event) => {
       return;
     }
 
-    const tokens = [];
-
-    // 各ユーザーの FCM トークンを取得
-    for (const uid of targetUserIds) {
-      const userSnap = await db.collection("users").doc(uid).get();
-      if (!userSnap.exists) continue;
-
-      const userData = userSnap.data() || {};
-      const fcmTokens = userData.fcmTokens;
-
-      if (Array.isArray(fcmTokens)) {
-        // 配列形式の場合
-        tokens.push(...fcmTokens.filter((t) => typeof t === "string" && t));
-      } else if (fcmTokens && typeof fcmTokens === "object") {
-        // {token: true} のようなマップ形式の場合
-        tokens.push(
-            ...Object.keys(fcmTokens).filter(
-                (t) => typeof t === "string" && t,
-            ),
-        );
-      }
-    }
+    // ✅ 通知設定（notificationsEnabled=false）ユーザーを除外してトークン取得
+    const tokens = await getFcmTokensForUsers(targetUserIds);
 
     if (!tokens.length) {
-      console.log("⚠️ No FCM tokens found for target users.");
+      console.log(
+          "No FCM tokens found for target users (or notifications disabled).",
+      );
       return;
     }
 
@@ -7940,26 +7922,8 @@ export const onTeamScheduleCreated = onDocumentCreated(
         return;
       }
 
-      // 各メンバーの FCM トークンを集める
-      const tokenSet = new Set();
-
-      for (const memberId of memberIds) {
-        const userSnap = await db.collection("users").doc(memberId).get();
-        if (!userSnap.exists) continue;
-
-        const userData = userSnap.data() || {};
-        const fcmTokens = Array.isArray(userData.fcmTokens) ?
-        userData.fcmTokens :
-        [];
-
-        for (const t of fcmTokens) {
-          if (t && typeof t === "string") {
-            tokenSet.add(t);
-          }
-        }
-      }
-
-      const tokens = Array.from(tokenSet);
+      // ✅ 通知設定（notificationsEnabled=false）ユーザーを除外してトークン取得
+      const tokens = await getFcmTokensForUsers(memberIds);
 
       if (tokens.length === 0) {
         console.log(
@@ -8085,25 +8049,8 @@ export const onTeamScheduleReactionUpdated = onDocumentWritten(
         return;
       }
 
-      const tokenSet = new Set();
-
-      for (const memberId of memberIds) {
-        const userSnap = await db.collection("users").doc(memberId).get();
-        if (!userSnap.exists) continue;
-
-        const userData = userSnap.data() || {};
-        const fcmTokens = Array.isArray(userData.fcmTokens) ?
-          userData.fcmTokens :
-          [];
-
-        for (const t of fcmTokens) {
-          if (t && typeof t === "string") {
-            tokenSet.add(t);
-          }
-        }
-      }
-
-      const tokens = Array.from(tokenSet);
+      // ✅ 通知設定（notificationsEnabled=false）ユーザーを除外してトークン取得
+      const tokens = await getFcmTokensForUsers(memberIds);
 
       if (tokens.length === 0) {
         console.log(
@@ -10062,7 +10009,7 @@ export const syncNumberOfTeamsStats = onSchedule(
 // 保存先: users/{uid}/subscription/{platform}
 export const checkSubscriptionExpiry = onSchedule(
     {
-      schedule: "0 0 * * *", // 毎日 00:00（Asia/Tokyo）
+      schedule: "0 3 * * *", //
       timeZone: "Asia/Tokyo",
       timeoutSeconds: 1800,
     },
@@ -10122,7 +10069,7 @@ export const checkSubscriptionExpiry = onSchedule(
 // 保存先: teams/{teamId}/subscription/{platform}
 export const checkTeamSubscriptionExpiry = onSchedule(
     {
-      schedule: "0 1 * * *", // 毎日 01:00（Asia/Tokyo）
+      schedule: "0 4 * * *",
       timeZone: "Asia/Tokyo",
       timeoutSeconds: 1800,
     },
@@ -10187,7 +10134,115 @@ export const revenuecatWebhook = onRequest(
     },
     async (req, res) => {
       try {
-      // --- Auth (Bearer token) ---
+        // --- Debug helpers (to pinpoint 400 causes) ---
+        const reqId =
+          String(req.get("X-Cloud-Trace-Context") || "").split("/")[0] ||
+          String(req.get("X-Request-Id") || "") ||
+          `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+        const safeJson = (v) => {
+          try {
+            return JSON.stringify(v);
+          } catch (_) {
+            return "[unserializable]";
+          }
+        };
+
+        const sanitizeHeaders = (headers) => {
+          const h = headers || {};
+          const out = {};
+          for (const [k, v] of Object.entries(h)) {
+            const key = String(k || "").toLowerCase();
+            if (key === "authorization" || key === "cookie") {
+              out[key] = v ? "[redacted]" : "";
+              continue;
+            }
+            const sv = Array.isArray(v) ? v.join(",") :
+            (v === null || v === undefined ? "" : String(v));
+            out[key] = sv.length > 300 ? `${sv.slice(0, 300)}…(truncated)` : sv;
+          }
+          return out;
+        };
+
+        const normalizePayload = () => {
+          const raw = req.body;
+          if (typeof raw === "string") {
+            try {
+              return {parsed: JSON.parse(raw), rawType: "string(json)"};
+            } catch (_) {
+              return {parsed: null, rawType: "string(non-json)",
+                rawSnippet: raw.slice(0, 500)};
+            }
+          }
+          if (raw && typeof raw === "object" && Buffer.isBuffer(raw)) {
+            const s = raw.toString("utf8");
+            try {
+              return {parsed: JSON.parse(s), rawType: "buffer(json)"};
+            } catch (_) {
+              return {parsed: null, rawType: "buffer(non-json)",
+                rawSnippet: s.slice(0, 500)};
+            }
+          }
+          if (raw && typeof raw === "object") {
+            return {parsed: raw, rawType: "object"};
+          }
+          return {parsed: null, rawType: typeof raw};
+        };
+
+        const log400 = (reason, extra = {}) => {
+          const {parsed, rawType, rawSnippet} = normalizePayload();
+          const payloadKeys = parsed && typeof parsed === "object" ?
+          Object.keys(parsed) : null;
+          const eventKeys =
+            parsed && parsed.event && typeof parsed.event === "object" ?
+            Object.keys(parsed.event) : null;
+
+          console.log("🚨 revenuecatWebhook(v2) 400", {
+            reqId,
+            reason,
+            method: String(req.method || ""),
+            url: String(req.originalUrl || req.url || ""),
+            ip: String(req.ip || req.get("x-forwarded-for") || ""),
+            contentType: String(req.get("content-type") || ""),
+            ua: String(req.get("user-agent") || ""),
+            rawType,
+            rawSnippet: rawSnippet || null,
+            payloadKeys,
+            eventKeys,
+            app_user_id: (
+              parsed && parsed.event && parsed.event.app_user_id
+            ) ?
+             parsed.event.app_user_id :
+              (parsed && parsed.app_user_id ? parsed.app_user_id : null),
+            type: (
+              parsed && parsed.event && parsed.event.type) ?
+              parsed.event.type :
+               (parsed && parsed.type ? parsed.type : null),
+            store: (
+              parsed && parsed.event && parsed.event.store
+            ) ?
+            parsed.event.store :
+            (parsed && parsed.store ? parsed.store : null),
+            product_id: (
+              parsed && parsed.event && parsed.event.product_id
+            ) ?
+            parsed.event.product_id : (parsed && parsed.product_id ?
+              parsed.product_id : null),
+            entitlement_id: (
+              parsed && parsed.event && parsed.event.entitlement_id
+            ) ?
+            parsed.event.entitlement_id :
+            (parsed && parsed.entitlement_id ? parsed.entitlement_id : null),
+            headers: sanitizeHeaders(req.headers),
+            extra,
+          });
+
+          res.status(400).send(
+              safeJson({ok: false, reason, reqId}),
+          );
+        };
+
+        // --- Auth (Bearer token) ---
         const auth = req.get("Authorization") || "";
         if (auth !== `Bearer ${process.env.REVENUECAT_WEBHOOK_TOKEN}`) {
           res.status(401).send("Unauthorized");
@@ -10200,36 +10255,106 @@ export const revenuecatWebhook = onRequest(
           return;
         }
 
-        const payload = req.body || {};
+        // Normalize payload (handle cases where req.body is string/buffer)
+        const normalized = normalizePayload();
+        const payload = normalized.parsed || {};
 
         // v2 の前提: payload.event が本体
         const event = payload.event;
         if (!event || typeof event !== "object") {
-          res.status(400).send("Missing event (v2 payload)");
+          log400(
+              "Missing event (v2 payload)",
+              {normalizedRawType: normalized.rawType},
+          );
           return;
         }
 
         const type = String(event.type || "");
-        const appUserId = String(event.app_user_id || "");
+
+        // v2 webhook ではイベント種別によって app_user_id が来ないことがある（例: TRANSFER）
+        // その場合は transferred_to / transferred_from から拾えるなら拾い、
+        // どうしても取れない場合は 400 ではなく 200 で握りつぶす（RevenueCat 側のリトライを防ぐ）。
+        let appUserId = String(event.app_user_id || "");
 
         if (!appUserId) {
-          res.status(400).send("Missing app_user_id");
-          return;
+          const toFirstString = (v) => {
+            if (!v) return "";
+            if (typeof v === "string") return v;
+            if (Array.isArray(v)) {
+              const s = v.find((x) => typeof x === "string" && x.trim().length);
+              return s ? String(s) : "";
+            }
+            if (typeof v === "object") {
+              // たまに {app_user_id: "..."} の形で入る可能性も吸収
+              if (
+                typeof v.app_user_id === "string" && v.app_user_id.trim().length
+              ) {
+                return String(v.app_user_id);
+              }
+              if (
+                typeof v.appUserId === "string" && v.appUserId.trim().length
+              ) {
+                return String(v.appUserId);
+              }
+            }
+            return "";
+          };
+
+          const candidateFromTo = toFirstString(event.transferred_to);
+          const candidateFromFrom = toFirstString(event.transferred_from);
+
+          appUserId = candidateFromTo || candidateFromFrom || "";
+
+          if (!appUserId) {
+            console.log(
+                "ℹ️ RevenueCat webhook(v2): missing app_user_id (ignored)",
+                {
+                  reqId,
+                  type,
+                  store: String(event.store || ""),
+                  eventId: String(event.id || ""),
+                  eventKeys: event ? Object.keys(event) : null,
+                });
+            res.status(200).send("ok:ignored(missing-app-user-id)");
+            return;
+          }
+
+          console.log(
+              "ℹ️ RevenueCat webhook: app_user_id derived from transfer fields",
+              {
+                reqId,
+                type,
+                derivedAppUserId: appUserId,
+                store: String(event.store || ""),
+                eventId: String(event.id || ""),
+              });
         }
 
-        // --- app_user_id prefix routing ---
-        // Expected formats:
-        //   user:{uid}  -> users/{uid}
-        //   team:{teamId} -> teams/{teamId}
+        // --- app_user_id routing ---
+        // We unify RevenueCat app_user_id to: user:{uid}
         let targetType = null; // "user" | "team"
-        let targetId = null;
+        let uid = null;
+        let legacyTeamId = null;
 
         if (appUserId.startsWith("user:")) {
           targetType = "user";
-          targetId = appUserId.replace("user:", "");
+          uid = appUserId.replace("user:", "");
         } else if (appUserId.startsWith("team:")) {
+          // legacy / backwards compatibility
           targetType = "team";
-          targetId = appUserId.replace("team:", "");
+          legacyTeamId = appUserId.replace("team:", "");
+          console.log(
+              " legacy team: app_user_id received", appUserId,
+          );
+        }
+
+        if (!targetType) {
+          console.log(
+              "⚠️ RevenueCat webhook(v2): app_user_id prefix not recognized:",
+              appUserId,
+          );
+          res.status(200).send("ok:ignored");
+          return;
         }
 
         // --- time helpers (ms / sec / ISO) ---
@@ -10312,46 +10437,169 @@ export const revenuecatWebhook = onRequest(
           updatedAt: Timestamp.now(),
         };
 
-        // --- Prefix-based routing ---
-        if (targetType === "user" && targetId) {
-          await db
+        // --- Writes ---
+        if (targetType === "user" && uid) {
+          const looksLikeTeamPlan = (() => {
+            const pid = String(productId || "");
+            const eid = String(entitlementId || "");
+            if (pid.startsWith("com.sk.bNet.team")) return true;
+            // entitlement examples: "B-Net Team Gold Monthly" etc.
+            if (eid.toLowerCase().includes("team")) return true;
+            // fallback: event type sometimes includes TEAM
+            if (String(type || "").toLowerCase().includes("team")) return true;
+            return false;
+          })();
+
+          if (looksLikeTeamPlan) {
+            const q = await db
+                .collection("teams")
+                .where("subscriptionOwner.uid", "==", uid)
+                .limit(2)
+                .get();
+
+            if (q.empty) {
+              console.log("no team found for subscriptionOwner.uid:", uid);
+              res.status(200).send("ok:user(team-no-team)");
+              return;
+            }
+
+            if (q.size > 1) {
+              console.log(
+                  "⚠️ found for subscriptionOwner.uid (expected 1).",
+                  {uid, teamIds: q.docs.map((d) => d.id)},
+              );
+            }
+
+            const teamId = q.docs[0].id;
+
+            await db
+                .collection("teams")
+                .doc(teamId)
+                .collection("subscription")
+                .doc(platform)
+                .set(
+                    {
+                      ...writeData,
+                    },
+                    {merge: true},
+                );
+
+            // keep a lightweight owner stamp on the team doc
+            await db
+                .collection("teams")
+                .doc(teamId)
+                .set(
+                    {
+                      subscriptionOwner: {
+                        uid,
+                        platform,
+                        updatedAt: Timestamp.now(),
+                      },
+                    },
+                    {merge: true},
+                );
+
+            console.log(
+                "RevenueCat webhook(v2) applied to TEAM (via USER team-plan):",
+                teamId,
+                {platform, productId, entitlementId, status: writeData.status ||
+                  null, store},
+            );
+
+            res.status(200).send("ok:user->team");
+            return;
+          }
+
+          // 2) PERSONAL plan: write to users/{uid}/subscription/{platform}
+          // NOTE:
+          // - 同一platform(iOS/Android)のドキュメントに `productId/status` を上書き保存しているため、
+          //   RevenueCat が「別productの inactive イベント」を送ると、
+          //   既に有効な購読(active)が inactive で上書きされてしまうことがある。
+          // - そこで、既存が active のときに「別productの inactive」で上書きしないガードを入れる。
+
+          const userSubRef = db
               .collection("users")
-              .doc(targetId)
+              .doc(uid)
               .collection("subscription")
-              .doc(platform)
-              .set(writeData, {merge: true});
+              .doc(platform);
+
+          // 既存購読を確認（active を守る）
+          if (writeData.status === "inactive") {
+            const prevSnap = await userSubRef.get();
+            if (prevSnap.exists) {
+              const prev = prevSnap.data() || {};
+              const prevStatus =
+              String(prev.status === null || prev.status === undefined ? "" :
+                prev.status).toLowerCase();
+              const prevProductId =
+              String(prev.productId === null ||
+                prev.productId === undefined ? "" :prev.productId);
+              const incomingProductId =
+              String(productId === null || productId === undefined ? "" :
+                 productId);
+
+              // 既存が active かつ、今回の inactive が「別product」に対するものなら上書きしない
+              if (
+                prevStatus === "active" &&
+                prevProductId &&
+                incomingProductId &&
+                prevProductId !== incomingProductId
+              ) {
+                console.log(
+                    "ℹ️ skip inactive overwrite (different product).",
+                    {
+                      uid,
+                      platform,
+                      prevProductId,
+                      incomingProductId,
+                      prevStatus,
+                      incomingStatus: writeData.status,
+                      store,
+                      type,
+                    },
+                );
+
+                // ここでは DB の active 状態を守って終了（必要なら別途ログ/履歴保存に拡張可能）
+                res.status(200).send("ok:user(skip-inactive-overwrite)");
+                return;
+              }
+            }
+          }
+
+          await userSubRef.set(writeData, {merge: true});
 
           console.log(
               "✅ RevenueCat webhook(v2) applied to USER:",
-              targetId,
-              writeData,
+              uid,
+              {platform, productId, entitlementId, status: writeData.status ||
+                null, store},
           );
+
           res.status(200).send("ok:user");
           return;
         }
 
-        if (targetType === "team" && targetId) {
+        // Legacy routing: team:{teamId}
+        if (targetType === "team" && legacyTeamId) {
           await db
               .collection("teams")
-              .doc(targetId)
+              .doc(legacyTeamId)
               .collection("subscription")
               .doc(platform)
               .set(writeData, {merge: true});
 
           console.log(
-              "✅ RevenueCat webhook(v2) applied to TEAM:",
-              targetId,
-              writeData,
+              "✅ RevenueCat webhook(v2) applied to TEAM (legacy):",
+              legacyTeamId,
+              {platform, productId, entitlementId,
+                status: writeData.status || null, store},
           );
-          res.status(200).send("ok:team");
+
+          res.status(200).send("ok:team(legacy)");
           return;
         }
 
-        // Prefix not matched (safety fallback)
-        console.log(
-            "⚠️ RevenueCat webhook(v2): app_user_id prefix not recognized:",
-            appUserId,
-        );
+        // Safety fallback
         res.status(200).send("ok:ignored");
         return;
       } catch (err) {

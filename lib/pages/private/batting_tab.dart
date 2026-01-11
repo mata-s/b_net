@@ -95,6 +95,10 @@ class BattingTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    final bool isTablet = shortestSide >= 600;
+    final double horizontalPadding = 16.0 + (isTablet ? 60.0 : 0.0);
+    final double maxContentWidth = isTablet ? 720.0 : double.infinity;
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 240, 251, 252),
       body: FutureBuilder<List<Map<String, dynamic>>>(
@@ -115,10 +119,17 @@ class BattingTab extends StatelessWidget {
 
           return SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+                vertical: 16.0,
+              ),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxContentWidth),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                   if ((streaks['currentHitStreak'] ?? 0) >= 2 ||
                       (streaks['currentOnBaseStreak'] ?? 0) >= 2 ||
                       (streaks['currentNoStrikeoutStreak'] ?? 0) >= 2 ||
@@ -674,7 +685,9 @@ class BattingTab extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 20),
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
           );

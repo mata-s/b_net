@@ -777,14 +777,25 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
       for (var team in _teams) {
         // rankが10以下で、かつ圏外でないことを確認
         final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-          ? '_age_${_selectedAgeGroup}'
-          : '';
+            ? '_age_${_selectedAgeGroup}'
+            : '';
         final rankKey = 'winRateRank$ageSuffix';
         int teamRank = int.tryParse(team[rankKey]?.toString() ?? '') ?? -1;
+        final isMyTeam = team['id'] == widget.teamId;
         if (teamRank != -1 && teamRank <= 10) {
-          result.add(DataRow(
-              cells: _buildDataCells(team,
-                  isTeam: team['id'] == widget.teamId))); // ユーザー自身のデータを太字で表示
+          result.add(
+            DataRow(
+              color: MaterialStateProperty.resolveWith<Color?>(
+                (states) {
+                  if (isMyTeam) {
+                    return const Color(0xFF1565C0).withOpacity(0.08);
+                  }
+                  return null;
+                },
+              ),
+              cells: _buildDataCells(team, isTeam: isMyTeam),
+            ),
+          );
         }
       }
     } else if (_selectedRankingType == '打率ランキング' ||
@@ -796,10 +807,19 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
         if (team['rank'] != null &&
             team['rank'] != '' &&
             (int.tryParse(team['rank'].toString()) ?? 0) <= 10) {
+          final isMyTeam = team['id'] == widget.teamId;
           result.add(
             DataRow(
-                cells:
-                    _buildDataCells(team, isTeam: team['id'] == widget.teamId)),
+              color: MaterialStateProperty.resolveWith<Color?>(
+                (states) {
+                  if (isMyTeam) {
+                    return const Color(0xFF1565C0).withOpacity(0.08);
+                  }
+                  return null;
+                },
+              ),
+              cells: _buildDataCells(team, isTeam: isMyTeam),
+            ),
           );
         }
       }
@@ -1126,7 +1146,14 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
                   columnSpacing: 10,
                   columns: _buildDataColumns(),
                   rows: [
-                    DataRow(cells: _buildDataCells(_teamData!, isTeam: true)),
+                    DataRow(
+                      color: MaterialStateProperty.resolveWith<Color?>(
+                        (states) {
+                          return const Color(0xFF1565C0).withOpacity(0.08);
+                        },
+                      ),
+                      cells: _buildDataCells(_teamData!, isTeam: true),
+                    ),
                   ],
                 ),
               ),
@@ -1477,11 +1504,31 @@ bool _isTeamInSelectedAgeGroup() {
           .compareTo(_extractRankForCurrentMetric(a)));
 
     for (final p in upper.take(2).toList().reversed) {
-      result.add(DataRow(cells: _buildDataCells(p)));
+      final isMyTeam = p['id'] == widget.teamId;
+      result.add(
+        DataRow(
+          color: MaterialStateProperty.resolveWith<Color?>(
+            (states) {
+              if (isMyTeam) {
+                return const Color(0xFF1565C0).withOpacity(0.08);
+              }
+              return null;
+            },
+          ),
+          cells: _buildDataCells(p, isTeam: isMyTeam),
+        ),
+      );
     }
 
     // 自分
-    result.add(DataRow(cells: _buildDataCells(_teamData!, isTeam: true)));
+    result.add(
+      DataRow(
+        color: MaterialStateProperty.all(
+          const Color(0xFF1565C0).withOpacity(0.08),
+        ),
+        cells: _buildDataCells(_teamData!, isTeam: true),
+      ),
+    );
 
     // 下位（自分より悪い）: 昇順で2件
     final lower = sourceList
@@ -1494,7 +1541,20 @@ bool _isTeamInSelectedAgeGroup() {
           .compareTo(_extractRankForCurrentMetric(b)));
 
     for (final p in lower.take(2)) {
-      result.add(DataRow(cells: _buildDataCells(p)));
+      final isMyTeam = p['id'] == widget.teamId;
+      result.add(
+        DataRow(
+          color: MaterialStateProperty.resolveWith<Color?>(
+            (states) {
+              if (isMyTeam) {
+                return const Color(0xFF1565C0).withOpacity(0.08);
+              }
+              return null;
+            },
+          ),
+          cells: _buildDataCells(p, isTeam: isMyTeam),
+        ),
+      );
     }
 
     return result;

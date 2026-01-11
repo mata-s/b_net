@@ -1,8 +1,11 @@
 import 'package:b_net/services/team_subscription_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class TeamSubscriptionScreen extends StatefulWidget {
   final String teamId;
@@ -17,31 +20,163 @@ class TeamSubscriptionScreen extends StatefulWidget {
 class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
   List<Package> _packages = [];
   bool _isLoading = true;
+  // ignore: unused_field
   CustomerInfo? _customerInfo;
+  String? _subscriptionOwnerUid;
+  String? _teamOwnerUid;
+  bool _loadingOwner = true;
+  List<_TeamMember> _teamMembers = [];
+  Map<String, dynamic>? _teamSub;
+  bool _loadingTeamSub = true;
+
+//デバックしたい時に true
+  static const bool _billingDebugLog =  false;
+
+   void _log(String message) {
+    if (_billingDebugLog) {
+      debugPrint(message);
+    }
+  }
+
+  String get _platformKey {
+    final p = defaultTargetPlatform;
+    return p == TargetPlatform.iOS ? 'iOS' : 'Android';
+  }
+
+  String _planNameFromProductId(String productId) {
+    final id = productId.trim();
+
+    switch (id) {
+      // --- Gold (Monthly) ---
+      case 'com.sk.bNet.teamGold':
+      case 'com.sk.bnet.team:gold-monthly':
+        return 'ゴールドプラン';
+
+      // --- Gold (Yearly) ---
+      case 'com.sk.bNet.teamGold12month':
+      case 'com.sk.bnet.team:gold-yearly':
+        return 'ゴールドプラン';
+
+      // --- Platina (Monthly) ---
+      case 'com.sk.bNet.teamPlatina':
+      case 'com.sk.bnet.team:platina-monthly':
+        return 'プラチナプラン';
+
+      // --- Platina (Yearly) ---
+      case 'com.sk.bNet.teamPlatina12month':
+      case 'com.sk.bnet.team:platina-yearly':
+        return 'プラチナプラン';
+
+      default:
+        return '不明なプラン';
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _loadTeamOwnerInfo();
+    _loadTeamMembers();
+    _loadTeamSubscription();
     _loadPackages();
     _loadCustomerInfo();
+  }
+  Future<void> _loadTeamSubscription() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(widget.teamId)
+          .collection('subscription')
+          .doc(_platformKey)
+          .get();
+
+      if (!mounted) return;
+      setState(() {
+        _teamSub = doc.data();
+        _loadingTeamSub = false;
+      });
+    } catch (e) {
+      print('❌ チーム購読(teams側)の取得に失敗: $e');
+      if (!mounted) return;
+      setState(() {
+        _teamSub = null;
+        _loadingTeamSub = false;
+      });
+    }
   }
 
   Future<void> _loadPackages() async {
     try {
+      _log('🧾 [_loadPackages] start');
+
       final offerings = await Purchases.getOfferings();
-      final packages = List<Package>.from(
-        offerings.all['B-Net Team']?.availablePackages ?? [],
+      _log('🧾 offerings.current: ${offerings.current?.identifier}');
+      _log('🧾 offerings.all keys: ${offerings.all.keys.toList()}');
+
+      for (final entry in offerings.all.entries) {
+        final off = entry.value;
+        final ids = off.availablePackages
+            .map((p) => p.storeProduct.identifier)
+            .toList();
+        _log('🧾 offering=${off.identifier} packages=$ids');
+      }
+
+      // Prefer the specific offering key, but fall back safely.
+      final Offering? target =
+          offerings.all['B-Net Team'] ?? offerings.current ??
+          (offerings.all.isNotEmpty ? offerings.all.values.first : null);
+
+      if (target == null) {
+        _log('❌ offerings has no target offering (current/all empty)');
+        if (!mounted) return;
+        setState(() {
+          _packages = [];
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // Deduplicate (some offerings can accidentally include the same product twice)
+      final uniqueById = <String, Package>{};
+      for (final p in target.availablePackages) {
+        uniqueById[p.storeProduct.identifier] = p;
+      }
+      final packages = uniqueById.values.toList();
+
+      // Sort in a predictable order: Gold monthly/yearly, Platina monthly/yearly
+      int rank(Package p) {
+        final id = p.storeProduct.identifier.trim().toLowerCase();
+        final isPlatina = id.contains('platina');
+        final isGold = id.contains('gold');
+        final isYearly = id.contains('12month') || id.contains('yearly');
+        final base = isGold
+            ? 0
+            : (isPlatina ? 2 : 4); // unknowns go last
+        final period = isYearly ? 1 : 0;
+        return base + period;
+      }
+
+      packages.sort((a, b) => rank(a).compareTo(rank(b)));
+
+      _log(
+        '🧾 [picked] offering=${target.identifier} packages: ${packages.map((p) => p.storeProduct.identifier).toList()}',
       );
+      for (final p in packages) {
+        final sp = p.storeProduct;
+        _log(
+          '🧾 [pkg] type=${p.packageType} id=${sp.identifier} title=${sp.title} price=${sp.priceString} currency=${sp.currencyCode}',
+        );
+      }
 
-      print(
-          "📦 チームパッケージ: ${packages.map((p) => p.storeProduct.identifier).toList()}");
-
+      if (!mounted) return;
       setState(() {
         _packages = packages;
         _isLoading = false;
       });
-    } catch (e) {
-      print('❌ パッケージ取得エラー: $e');
+    } catch (e, st) {
+      _log('❌ パッケージ取得エラー: $e');
+      _log('❌ stack: $st');
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
@@ -49,12 +184,8 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
   Future<void> _loadCustomerInfo() async {
     try {
       final info = await Purchases.getCustomerInfo();
-
-          // 🐛 デバッグ: entitlements と appUserId を確認
-    print('🧾 [Team] entitlements.all: ${info.entitlements.all.keys}');
-    print('🟢 [Team] entitlements.active: ${info.entitlements.active.keys}');
-    print('👤 [Team] appUserId: ${info.originalAppUserId}');
-
+      // ignore: unused_local_variable
+      final currentAppUserId = await Purchases.appUserID;
 
       setState(() {
         _customerInfo = info;
@@ -64,24 +195,262 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
     }
   }
 
+  Future<void> _loadTeamOwnerInfo() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) {
+        setState(() {
+          _subscriptionOwnerUid = null;
+          _teamOwnerUid = null;
+          _loadingOwner = false;
+        });
+        return;
+      }
+
+      final teamDoc = await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(widget.teamId)
+          .get();
+
+      final data = teamDoc.data() ?? {};
+
+      // 代表者UID（フィールド名が違う可能性があるので候補を複数見る）
+      final teamOwnerUid = (data['ownerUid'] ?? data['createdBy'] ?? data['adminUid'])?.toString();
+
+      // 支払い担当UID（Map: subscriptionOwner.uid を参照。未設定なら代表者をデフォルトに）
+      String? subscriptionOwnerUid;
+      final subOwner = data['subscriptionOwner'];
+      if (subOwner is Map) {
+        final v = subOwner['uid'];
+        if (v != null) subscriptionOwnerUid = v.toString();
+      }
+      subscriptionOwnerUid ??= teamOwnerUid;
+
+      setState(() {
+        _teamOwnerUid = teamOwnerUid;
+        _subscriptionOwnerUid = subscriptionOwnerUid;
+        _loadingOwner = false;
+      });
+    } catch (e) {
+      print('❌ チーム支払い担当の取得に失敗: $e');
+      setState(() {
+        _loadingOwner = false;
+      });
+    }
+  }
+
+  bool get _isSubscriptionOwner {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    return _subscriptionOwnerUid != null && uid == _subscriptionOwnerUid;
+  }
+
+  bool get _isTeamOwner {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    return _teamOwnerUid != null && uid == _teamOwnerUid;
+  }
+
+  String get _subscriptionOwnerName {
+    if (_subscriptionOwnerUid == null) return '未設定';
+    final m = _teamMembers.where((e) => e.uid == _subscriptionOwnerUid).toList();
+    if (m.isEmpty) return '未設定';
+    return m.first.name;
+  }
+
+  Future<void> _showChangeSubscriptionOwnerDialog() async {
+    // 権限：チーム代表者のみ変更可能
+    if (!_isTeamOwner) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ 支払い担当の変更はチーム代表者のみ可能です')),
+      );
+      return;
+    }
+
+    // メンバー一覧が空なら取得
+    if (_teamMembers.isEmpty) {
+      await _loadTeamMembers();
+    }
+
+    final selectedUid = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text('支払い担当を選択'),
+          children: [
+            if (_teamMembers.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('メンバーが見つかりません'),
+              ),
+            ..._teamMembers.map((m) {
+              final isCurrent = m.uid == _subscriptionOwnerUid;
+              return SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, m.uid),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        m.name,
+                        style: TextStyle(
+                          fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                    if (isCurrent)
+                      const Text(
+                        '現在',
+                        style: TextStyle(fontSize: 12, color: Colors.black54),
+                      ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        );
+      },
+    );
+
+    if (selectedUid == null) return;
+
+     // ✅ すでに他チームで「課金担当(subscriptionOwner)」になっているユーザーは選べない
+    try {
+      final alreadyOwnerQuery = await FirebaseFirestore.instance
+          .collection('teams')
+          .where('subscriptionOwner.uid', isEqualTo: selectedUid)
+          .get();
+
+      final otherTeamOwner = alreadyOwnerQuery.docs.any((d) => d.id != widget.teamId);
+
+      if (otherTeamOwner) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ このユーザーはすでに別チームの支払い担当です。別のメンバーを選択してください。'),
+          ),
+        );
+        return;
+      }
+      } catch (e) {
+      // チェックに失敗した場合は安全に止める（誤って設定変更しない）
+      print('❌ 支払い担当の重複チェックに失敗: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ 支払い担当の確認に失敗しました。時間をおいて再度お試しください。')),
+      );
+      return;
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(widget.teamId)
+          .update({
+        'subscriptionOwner': {
+          'uid': selectedUid,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ 支払い担当を更新しました')),
+      );
+
+      await _loadTeamOwnerInfo();
+      await _loadTeamMembers();
+    } catch (e) {
+      print('❌ 支払い担当の更新に失敗: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ 支払い担当の更新に失敗しました')),
+      );
+    }
+  }
+
+  Future<void> _loadTeamMembers() async {
+    try {
+      final teamDoc = await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(widget.teamId)
+          .get();
+
+      final data = teamDoc.data() ?? {};
+      final memberUids = List<String>.from(data['members'] ?? []);
+
+      if (memberUids.isEmpty) {
+        if (!mounted) return;
+        setState(() => _teamMembers = []);
+        return;
+      }
+
+      // whereIn は最大10件。超える可能性がある場合は分割。
+      final List<_TeamMember> members = [];
+      const int chunkSize = 10;
+
+      for (int i = 0; i < memberUids.length; i += chunkSize) {
+        final chunk = memberUids.sublist(
+          i,
+          (i + chunkSize > memberUids.length) ? memberUids.length : i + chunkSize,
+        );
+
+        final userSnaps = await FirebaseFirestore.instance
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+
+        for (final doc in userSnaps.docs) {
+          final u = doc.data();
+          final name = (u['displayName'] ?? u['name'] ?? '名前未設定').toString();
+          members.add(_TeamMember(uid: doc.id, name: name));
+        }
+      }
+
+      // members の順序を teamDoc の members 配列順に揃える
+      members.sort((a, b) {
+        final ia = memberUids.indexOf(a.uid);
+        final ib = memberUids.indexOf(b.uid);
+        return ia.compareTo(ib);
+      });
+
+      if (!mounted) return;
+      setState(() => _teamMembers = members);
+    } catch (e) {
+      print('❌ チームメンバーの取得に失敗: $e');
+      if (!mounted) return;
+      setState(() => _teamMembers = []);
+    }
+  }
+
   Future<void> _buy(Package package) async {
     try {
+      // 🔒 安全派：支払い担当は「明示変更」。購入だけでは自動で切り替えない。
+      // ここでは「支払い担当UIDと一致するユーザーだけ購入可能」にする。
+      if (_loadingOwner) {
+        await _loadTeamOwnerInfo();
+      }
+
+      if (!_isSubscriptionOwner) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ このチームの支払い担当ではありません。チーム代表者に「支払い担当」を変更してもらってください。'),
+          ),
+        );
+        return;
+      }
+
       // 💳 購入処理（この時点ではCustomerInfoが最新でない場合もある）
       await Purchases.purchasePackage(package);
 
       // 🔄 最新のCustomerInfoを取得
       final updatedInfo = await Purchases.getCustomerInfo();
-
-
-// 🐛 購入直後の entitlements の状態を確認
-print('🧾 [Team BUY] entitlements.all: ${updatedInfo.entitlements.all.keys}');
-print('🟢 [Team BUY] entitlements.active: ${updatedInfo.entitlements.active.keys}');
-print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
+      // ignore: unused_local_variable
+      final currentAppUserId = await Purchases.appUserID;
 
       // 今回購入した Store Product のID（ゴールド / プラチナ、月額 / 年額 など）
       final purchasedProductId = package.storeProduct.identifier;
-
-      print('🧾 チームプランで購入した productId: $purchasedProductId');
 
       // 🔥 Firestore に保存（ユーザーが選んだ productId で）
       await TeamSubscriptionService().saveTeamSubscriptionToFirestore(
@@ -91,6 +460,7 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
       );
 
       await _loadCustomerInfo();
+      await _loadTeamSubscription();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -131,6 +501,7 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
 
       if (hasTeamEntitlement) {
         await _loadCustomerInfo();
+        await _loadTeamSubscription();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("✅ チームの購入を復元しました")),
         );
@@ -154,7 +525,7 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
-      print('❌ 開けませんでした: $url');
+      ('❌ 開けませんでした: $url');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('アカウント設定ページを開けませんでした')),
       );
@@ -165,7 +536,7 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("チームプレミアムプラン"),
+        title: Text("チームプラン"),
         actions: [
           TextButton(
             onPressed: _restore,
@@ -178,102 +549,205 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
         ],
       ),
       body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 20),
-                    child: Column(
+          ? const Center(child: CircularProgressIndicator())
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final isIpad = constraints.maxWidth >= 600;
+                final horizontalPadding = isIpad ? 20.0 : 16.0;
+                final maxContentWidth = isIpad ? 720.0 : double.infinity;
+
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: maxContentWidth),
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: horizontalPadding,
+                        vertical: 16,
+                      ),
+                      child: Column(
+                        children: [
+                  // --- ヒーロー（説明） ---
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.grey.shade200),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 14,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          "あなたのチームを、もう一段強く。",
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text(
+                                "チームを、もう一段強く。",
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.15,
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                "プランを選んで、使える機能をチーム全員で最大化しよう。\n分析・ランキング・MVP・スケジュール管理まで、勝ちに近づく仕組みをまとめて強化。",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.black87,
+                                  height: 1.45,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        SizedBox(height: 8),
-                        Text(
-                          "プランを選んで、使える機能をチーム全員で最大化しよう。",
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.black54,
-                          ),
-                        ),
-                        SizedBox(height: 16),
                       ],
                     ),
                   ),
+                  // --- 支払い担当表示 & 変更 ---
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: _loadingOwner
+                        ? const Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                              SizedBox(width: 10),
+                              Text('支払い担当を確認中…'),
+                            ],
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '支払い担当',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _subscriptionOwnerUid == null
+                                    ? '未設定（代表者が設定してください）'
+                                    : (_isSubscriptionOwner
+                                        ? 'あなた（$_subscriptionOwnerName）'
+                                        : _subscriptionOwnerName),
+                                style: const TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '支払い担当はチーム代表者が変更できます。',
+                                style: const TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                              ),
+                              const SizedBox(height: 8),
+                              if (!_loadingTeamSub)
+                                Text(
+                                  (_teamSub != null && (_teamSub?['status'] ?? '') == 'active')
+                                      ? '現在のチームプラン：${_planNameFromProductId((_teamSub?['productId'] ?? '').toString())}'
+                                      : '現在のチームプラン：未登録',
+                                  style: const TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                ),
+                              if (_loadingTeamSub)
+                                const Text(
+                                  '現在のチームプラン：確認中…',
+                                  style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                ),
+                              const SizedBox(height: 10),
+                              if (!_isSubscriptionOwner)
+                                const Text(
+                                  '※ 購入は「支払い担当」に設定されたユーザーのみ可能です。',
+                                  style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                ),
+                              if (_isTeamOwner) ...[
+                                const SizedBox(height: 10),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton.icon(
+                                    onPressed: _showChangeSubscriptionOwnerDialog,
+                                    icon: const Icon(Icons.manage_accounts, size: 18),
+                                    label: const Text('支払い担当を変更'),
+                                  ),
+                                ),
+                              ] else ...[
+                                const SizedBox(height: 10),
+                                const Text(
+                                  '※ 支払い担当の変更はチーム代表者のみ可能です。',
+                                  style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                ),
+                              ],
+                            ],
+                          ),
+                  ),
                   ..._packages.map((package) {
-                    final id = package.storeProduct.identifier;
-                    final isMonthly =
-                        id.contains('1month') || !id.contains('12month');
-                    final isPlatina = id.contains('Platina');
+                    final id = package.storeProduct.identifier.trim();
+                    final idLower = id.toLowerCase();
 
+                    final isPlatina = idLower.contains('platina');
+                    final isGold = idLower.contains('gold');
+                    // used for selecting card images/styles
+                    final _ = isGold;
+
+                    // iOS: 12month / 1month, Android: yearly / monthly
+                    final isYearly = idLower.contains('12month') || idLower.contains('yearly');
+                    final isMonthly = !isYearly;
+
+                    // If neither matches (unexpected product id), fall back to gold style.
                     final imagePath = isPlatina
                         ? (isMonthly
                             ? 'assets/Subscription_teamPlatina.png'
                             : 'assets/Subscription_teamPlatina12month.png')
-                        : (isMonthly
-                            ? 'assets/Subscription_teamGold.png'
-                            : 'assets/Subscription_teamGold12month.png');
-                    final title = isPlatina
-                        ? (isMonthly ? 'プラチナプラン（月額）' : 'プラチナプラン（年額）')
-                        : (isMonthly ? 'ゴールドプラン（月額）' : 'ゴールドプラン（年額）');
+                        : (isGold
+                            ? (isMonthly
+                                ? 'assets/Subscription_teamGold.png'
+                                : 'assets/Subscription_teamGold12month.png')
+                            : (isMonthly
+                                ? 'assets/Subscription_teamGold.png'
+                                : 'assets/Subscription_teamGold12month.png'));
+                    final baseName = _planNameFromProductId(id);
+                    final title = isMonthly
+                        ? '$baseName（月額）'
+                        : '$baseName（年額）';
                     final description = isPlatina
                         ? (isMonthly
-                            ? '初月無料！プラチナ限定特典付き。\n月額課金でいつでも解約可能。'
+                            ? 'プラチナ限定特典付き。\n月額課金でいつでも解約可能。'
                             : '1年間まとめて支払い。\n月額よりもお得な価格設定です。')
                         : (isMonthly
-                            ? '初月無料！2ヶ月目から月額課金。\nいつでもキャンセル可能。'
+                            ? '月額課金でいつでもキャンセル可能。'
                             : '1年間まとめて支払い。\n月額よりもお得な価格設定です。');
 
-                    // チーム用エンタイトルメントをプラン（ゴールド / プラチナ）と月額 / 年額で切り替える
-                    final bool isAnnualPlan =
-                        id.contains('12month') || id.contains('Annual');
+                    // ✅ teams/{teamId}/subscription/{platform} を正として「登録中」を判定
+                    final teamStatus = (_teamSub?['status'] ?? '').toString();
+                    final teamProductIdRaw = (_teamSub?['productId'] ?? '').toString();
+                    // ignore: unused_local_variable
+                    final teamExpiry = _teamSub?['expiryDate'];
 
-                    late final String entitlementKey;
-                    if (isPlatina) {
-                      // プラチナプラン
-                      entitlementKey = isAnnualPlan
-                          ? 'B-Net Team Platina Annual'
-                          : 'B-Net Team Platina Monthly';
-                    } else {
-                      // ゴールドプラン
-                      entitlementKey = isAnnualPlan
-                          ? 'B-Net Team Gold Annual'
-                          : 'B-Net Team Gold Monthly';
-                    }
+                    final isTeamActive = teamStatus == 'active';
+                    final teamProductId = teamProductIdRaw.trim().toLowerCase();
+                    final cardProductId = id.trim().toLowerCase();
+                    final isSubscribed = isTeamActive && teamProductId.isNotEmpty && teamProductId == cardProductId;
 
-                    print('🎫 [Team] 使用する entitlementKey: $entitlementKey');
-
-                    final entitlement =
-                        _customerInfo?.entitlements.active[entitlementKey];
-
-                    // このプランに対応するエンタイトルメントが有効なら「登録中」
-                    final isSubscribed = entitlement != null;
-
-                    // 🐛 トライアルかどうか判定
-                    final isTrial =
-                        (entitlement?.periodType ?? PeriodType.normal) ==
-                            PeriodType.trial;
-
-                    // ✅ バッジ表示条件
-                    final hasFreeTrial = package.storeProduct.introductoryPrice != null;
-                    final badge = isMonthly && (isTrial || hasFreeTrial) ? '初月無料' : null;
-
-                    final isNeverPurchased = entitlement == null;
-
-                    // 🔍 デバッグ出力
-                    print('🔍 intro price: ${package.storeProduct.introductoryPrice}');
-                    print('📦 プラン: $id');
-                    print('✅ 現在登録中: $isSubscribed');
-                    print('🧪 トライアル中？: $isTrial');
-                    print('🆕 未購入？ → $isNeverPurchased');
-                    print('🏷 バッジ表示: ${badge ?? "なし"}');
+                    _log(
+                      '🧾 [team-card] id=$id teamProductId=$teamProductIdRaw status=$teamStatus isSubscribed=$isSubscribed',
+                    );
+                    // ignore: unused_local_variable
+                    final isNeverPurchased = !(isTeamActive) || teamProductId.isEmpty;
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 24),
@@ -281,10 +755,12 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
                         imagePath: imagePath,
                         title: title,
                         description: description,
-                        badge: badge,
-                        disabled: isSubscribed,
-                        onPressed: isSubscribed ? null : () => _buy(package),
-                        priceText: isSubscribed ? '登録中' : '購入',
+                        badge: null,
+                        disabled: isSubscribed || !_isSubscriptionOwner,
+                        onPressed: (isSubscribed || !_isSubscriptionOwner) ? null : () => _buy(package),
+                        priceText: isSubscribed
+                            ? '登録中'
+                            : (_isSubscriptionOwner ? '購入' : '購入不可'),
                       ),
                     );
                   }),
@@ -294,9 +770,13 @@ print('👤 [Team BUY] appUserId: ${updatedInfo.originalAppUserId}');
                   const TeamFeaturesSection(),
                   const SizedBox(height: 24),
                   const TeamSubscriptionLegalSection(),
-                  const SizedBox(height: 32),
-                ],
-              ),
+                          const SizedBox(height: 32),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
     );
   }
@@ -361,7 +841,7 @@ class SubscriptionPlanCard extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: disabled ? null : onPressed,
-                child: Text(disabled ? '登録中' : priceText ?? '購入'),
+                child: Text(priceText ?? (disabled ? '登録中' : '購入')),
               ),
             ),
           ],
@@ -827,13 +1307,6 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          Text(
-            '■ 無料トライアルについて（提供される場合）\n'
-            '・無料トライアルが適用される場合、期間終了後に自動的に有料期間へ移行します。\n'
-            '・トライアル中に解約した場合、トライアル期間の終了と同時に利用が終了する場合があります（各ストアの仕様に準じます）。',
-            style: textStyle,
-          ),
-          const SizedBox(height: 10),
 
           Text(
             '■ 返金について\n'
@@ -845,7 +1318,7 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
 
           Text(
             '■ チームプランの適用範囲\n'
-            '・チームプランはチーム代表者（購入者）が管理します。\n'
+            '・チームプランはチーム代表者が管理し、支払い担当（支払いを行うメンバー）を変更できます。\n'
             '・メンバーは、招待され参加しているチーム内でプレミアム機能を利用できます。\n'
             '・チームから退出した場合、チームプランの機能は利用できなくなります。',
             style: textStyle,
@@ -874,4 +1347,12 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
       ),
     );
   }
+}
+
+// --- チームメンバーモデル ---
+class _TeamMember {
+  final String uid;
+  final String name;
+
+  const _TeamMember({required this.uid, required this.name});
 }

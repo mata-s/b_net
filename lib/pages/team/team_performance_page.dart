@@ -95,6 +95,10 @@ class TeamPerformancePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double shortestSide = MediaQuery.of(context).size.shortestSide;
+    final bool isTablet = shortestSide >= 600;
+    final double horizontalPadding = 16.0 + (isTablet ? 60.0 : 0.0);
+    final double maxContentWidth = isTablet ? 720.0 : double.infinity;
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 240, 251, 252),
       body: FutureBuilder<List<Map<String, dynamic>>>(
@@ -137,8 +141,14 @@ class TeamPerformancePage extends StatelessWidget {
           }
           return SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+                vertical: 16.0,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxContentWidth),
+                  child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (currentWinStreak >= 2)
@@ -849,6 +859,8 @@ class TeamPerformancePage extends StatelessWidget {
                   ],
                   const SizedBox(height: 20),
                 ],
+                  ),
+                ),
               ),
             ),
           );

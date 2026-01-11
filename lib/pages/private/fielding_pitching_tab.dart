@@ -104,6 +104,10 @@ class FieldingPitchingTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    final bool isTablet = shortestSide >= 600;
+    final double horizontalPadding = 16.0 + (isTablet ? 60.0 : 0.0);
+    final double maxContentWidth = isTablet ? 720.0 : double.infinity;
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 240, 251, 252),
       body: FutureBuilder<Map<String, dynamic>>(
@@ -125,91 +129,129 @@ class FieldingPitchingTab extends StatelessWidget {
           DateTime gameDate = (stats['gameDate'] as Timestamp).toDate();
           bool isPitcher = stats['isPitcher'];
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '初めて記録した日: ${DateFormat('yyyy/MM/dd').format(gameDate)}',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 20),
-                if (isPitcher) // もし投手なら
-                  Card(
-                    color: Colors.white,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                '${stats['totalGames']} 試合',
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                '登板:',
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                '${stats['totalAppearances']}',
-                                style: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              const Text(
-                                '投球回:',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                '${stats['totalInningsPitched'].toStringAsFixed(1)}',
-                                style: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: Colors.orange),
-                                      color: Colors.orange,
-                                    ),
-                                    child: const Text(
-                                      '率',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+                vertical: 16.0,
+              ),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxContentWidth),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '初めて記録した日: ${DateFormat('yyyy/MM/dd').format(gameDate)}',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 20),
+                      if (isPitcher) // もし投手なら
+                        Card(
+                          color: Colors.white,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      '${stats['totalGames']} 試合',
+                                      style: const TextStyle(
+                                        fontSize: 20,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                  ),
-                                  Text.rich(
-                                    TextSpan(
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      '登板:',
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${stats['totalAppearances']}',
+                                      style: const TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      '投球回:',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${stats['totalInningsPitched'].toStringAsFixed(1)}',
+                                      style: const TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
                                       children: [
-                                        TextSpan(
-                                          text:
-                                              '${formatPercentageEra(stats['era'])}',
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: Colors.orange),
+                                            color: Colors.orange,
+                                          ),
+                                          child: const Text(
+                                            '率',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        Text.rich(
+                                          TextSpan(
+                                            children: [
+                                              TextSpan(
+                                                text:
+                                                    '${formatPercentageEra(stats['era'])}',
+                                                style: const TextStyle(
+                                                  fontSize: 22,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: Colors.orange),
+                                            color: Colors.orange,
+                                          ),
+                                          child: const Text(
+                                            '自',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          '${stats['totalEarnedRuns']}',
                                           style: const TextStyle(
                                             fontSize: 22,
                                             fontWeight: FontWeight.bold,
@@ -217,213 +259,186 @@ class FieldingPitchingTab extends StatelessWidget {
                                         ),
                                       ],
                                     ),
-                                  ),
-                                ],
-                              ),
-                              Row(
-                                children: [
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: Colors.orange),
-                                      color: Colors.orange,
+                                    Row(
+                                      children: [
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: Colors.orange),
+                                            color: Colors.orange,
+                                          ),
+                                          child: const Text(
+                                            '奪',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          '${stats['totalPStrikeouts']}',
+                                          style: const TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    child: const Text(
-                                      '自',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    '${stats['totalEarnedRuns']}',
-                                    style: const TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              Row(
-                                children: [
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: Colors.orange),
-                                      color: Colors.orange,
-                                    ),
-                                    child: const Text(
-                                      '奪',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    '${stats['totalPStrikeouts']}',
-                                    style: const TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 20),
-                if (isPitcher)
-                  Card(
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    color: Colors.white,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              buildStatColumn(
-                                  '被安打', '${stats['totalHitsAllowed']}', 60),
-                              buildStatColumn('被本塁打',
-                                  '${stats['totalHomeRunsAllowed']}', 60),
-                              buildStatColumn(
-                                  '与四球', '${stats['totalWalks']}', 60),
-                              buildStatColumn(
-                                  '与死球', '${stats['totalHitByPitch']}', 60),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              buildStatColumn(
-                                  '失点', '${stats['totalRunsAllowed']}', 60),
-                              buildStatColumn(
-                                  '打者', '${stats['totalBattersFaced']}', 60),
-                              buildStatColumn(
-                                  '先発', '${stats['totalStarts']}', 60),
-                              buildStatColumn(
-                                  '中継ぎ', '${stats['totalReliefs']}', 60),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              buildStatColumn(
-                                  '抑え', '${stats['totalClosures']}', 60),
-                              buildStatColumn(
-                                  '完投', '${stats['totalCompleteGames']}', 60),
-                              buildStatColumn(
-                                  '完封', '${stats['totalShutouts']}', 60),
-                              buildStatColumn(
-                                  'ホールド', '${stats['totalHolds']}', 60),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              buildStatColumn(
-                                  'セーブ', '${stats['totalSaves']}', 60),
-                              SizedBox(width: 30),
-                              buildStatColumn(
-                                  '救援勝利', '${stats['totalReliefWins']}', 60),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              buildStatColumn(
-                                  '勝利', '${stats['totalWins']}', 60),
-                              buildStatColumn(
-                                  '敗北', '${stats['totalLosses']}', 60),
-                              buildStatColumn('勝率',
-                                  '${formatPercentage(stats['winRate'])}', 60),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 20),
-                if (isPitcher)
-                  const Text(
-                    '守備',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                Card(
-                  color: Colors.white,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0), // 引数を修正
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              '${stats['totalGames']} 試合',
-                              style: const TextStyle(
-                                  fontSize: 20, fontWeight: FontWeight.bold),
+                                  ],
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
+                      const SizedBox(height: 20),
+                      if (isPitcher)
+                        Card(
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                          color: Colors.white,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    buildStatColumn(
+                                        '被安打', '${stats['totalHitsAllowed']}', 60),
+                                    buildStatColumn('被本塁打',
+                                        '${stats['totalHomeRunsAllowed']}', 60),
+                                    buildStatColumn(
+                                        '与四球', '${stats['totalWalks']}', 60),
+                                    buildStatColumn(
+                                        '与死球', '${stats['totalHitByPitch']}', 60),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    buildStatColumn(
+                                        '失点', '${stats['totalRunsAllowed']}', 60),
+                                    buildStatColumn(
+                                        '打者', '${stats['totalBattersFaced']}', 60),
+                                    buildStatColumn(
+                                        '先発', '${stats['totalStarts']}', 60),
+                                    buildStatColumn(
+                                        '中継ぎ', '${stats['totalReliefs']}', 60),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    buildStatColumn(
+                                        '抑え', '${stats['totalClosures']}', 60),
+                                    buildStatColumn(
+                                        '完投', '${stats['totalCompleteGames']}', 60),
+                                    buildStatColumn(
+                                        '完封', '${stats['totalShutouts']}', 60),
+                                    buildStatColumn(
+                                        'ホールド', '${stats['totalHolds']}', 60),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    buildStatColumn(
+                                        'セーブ', '${stats['totalSaves']}', 60),
+                                    SizedBox(width: 30),
+                                    buildStatColumn(
+                                        '救援勝利', '${stats['totalReliefWins']}', 60),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    buildStatColumn(
+                                        '勝利', '${stats['totalWins']}', 60),
+                                    buildStatColumn(
+                                        '敗北', '${stats['totalLosses']}', 60),
+                                    buildStatColumn('勝率',
+                                        '${formatPercentage(stats['winRate'])}', 60),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 20),
+                      if (isPitcher)
                         const Text(
-                          '守備率',
-                          style: TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.w500),
+                          '守備',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                         ),
-                        Text(
-                          '${formatPercentage(stats['fieldingPercentage'])}',
-                          style: const TextStyle(
-                              fontSize: 24, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            buildStatColumn(
-                                '刺殺', '${stats['totalPutouts']}', 60),
-                            buildStatColumn(
-                                '捕殺', '${stats['totalAssists']}', 60),
-                            buildStatColumn(
-                                '失策', '${stats['totalErrors']}', 60),
-                          ],
-                        ),
-                        if (stats['isCatcher'] == true) ...[
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Card(
+                        color: Colors.white,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0), // 引数を修正
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              buildStatColumn('盗塁企図',
-                                  '${stats['totalStolenBaseAttempts']}', 60),
-                              buildStatColumn(
-                                  '盗塁刺', '${stats['totalCaughtStealing']}', 60),
-                              buildStatColumn(
-                                  '阻止率',
-                                  '${formatPercentage(stats['catcherStealingRate'])}',
-                                  60),
+                              Row(
+                                children: [
+                                  Text(
+                                    '${stats['totalGames']} 試合',
+                                    style: const TextStyle(
+                                        fontSize: 20, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                              const Text(
+                                '守備率',
+                                style: TextStyle(
+                                    fontSize: 20, fontWeight: FontWeight.w500),
+                              ),
+                              Text(
+                                '${formatPercentage(stats['fieldingPercentage'])}',
+                                style: const TextStyle(
+                                    fontSize: 24, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 20),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  buildStatColumn(
+                                      '刺殺', '${stats['totalPutouts']}', 60),
+                                  buildStatColumn(
+                                      '捕殺', '${stats['totalAssists']}', 60),
+                                  buildStatColumn(
+                                      '失策', '${stats['totalErrors']}', 60),
+                                ],
+                              ),
+                              if (stats['isCatcher'] == true) ...[
+                                const SizedBox(height: 20),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    buildStatColumn('盗塁企図',
+                                        '${stats['totalStolenBaseAttempts']}', 60),
+                                    buildStatColumn(
+                                        '盗塁刺', '${stats['totalCaughtStealing']}', 60),
+                                    buildStatColumn(
+                                        '阻止率',
+                                        '${formatPercentage(stats['catcherStealingRate'])}',
+                                        60),
+                                  ],
+                                ),
+                              ],
                             ],
                           ),
-                        ],
-                      ],
-                    ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           );
         },

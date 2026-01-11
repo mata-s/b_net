@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 class PostPage extends StatefulWidget {
   final String userUid;
   final String userName;
+  final String? teamId; // 🔹 呼び出し元から受け取るチームID（任意）
   final String? postId; // 🔹 編集時は投稿IDを受け取る
   final Map<String, dynamic>? existingData; // 🔹 既存の投稿データを受け取る
 
@@ -12,6 +13,7 @@ class PostPage extends StatefulWidget {
     super.key,
     required this.userUid,
     required this.userName,
+    this.teamId,
     this.postId,
     this.existingData,
   });
@@ -46,7 +48,11 @@ class _PostPageState extends State<PostPage> {
       _prefectureController.text = widget.existingData!['prefecture'] ?? '';
       _teamNameController.text = widget.existingData!['teamName'] ?? '';
       _postController.text = widget.existingData!['content'] ?? '';
-      _selectedTeamId = widget.existingData!['teamId'];
+      _selectedTeamId = widget.existingData!['teamId'] ?? widget.teamId;
+    }
+    // 🔹 新規投稿で呼び出し元から teamId が渡された場合
+    if (widget.existingData == null && widget.teamId != null) {
+      _selectedTeamId = widget.teamId;
     }
   }
 
@@ -80,6 +86,21 @@ class _PostPageState extends State<PostPage> {
 
         setState(() {
           _teamMap = teamMap;
+
+          // ① 呼び出し元 or 編集データで teamId が指定されているなら、その teamId に一致するチーム名を選ぶ
+          if (_teamMap.isNotEmpty && _selectedTeamId != null) {
+            final matchedEntry = _teamMap.entries
+                .where((e) => e.value == _selectedTeamId)
+                .cast<MapEntry<String, String>?>()
+                .toList();
+
+            if (matchedEntry.isNotEmpty) {
+              _selectedTeamName = matchedEntry.first!.key;
+              _teamNameController.text = _selectedTeamName!;
+            }
+          }
+
+          // ② teamId が未指定なら、先頭のチームをデフォルト選択
           if (_teamMap.isNotEmpty && _selectedTeamId == null) {
             _selectedTeamName = _teamMap.keys.first;
             _teamNameController.text = _selectedTeamName!;

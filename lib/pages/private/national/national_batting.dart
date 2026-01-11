@@ -329,8 +329,23 @@ class _NationalBattingState extends State<NationalBatting> {
   List<DataRow> _buildPlayerRows() {
     return _players.map((player) {
       final isUser = player['id'] == widget.uid;
+      final String playerPrefecture = (player['prefecture'] ?? '').toString();
+      final bool isMyPrefecture = widget.prefecture.trim().isNotEmpty &&
+          playerPrefecture.trim().isNotEmpty &&
+          playerPrefecture.trim() == widget.prefecture.trim();
 
       return DataRow(
+        color: MaterialStateProperty.resolveWith<Color?>(
+          (states) {
+            if (isUser) {
+              return const Color(0xFF1565C0).withOpacity(0.08);
+            }
+            if (isMyPrefecture) {
+              return const Color(0xFF1565C0).withOpacity(0.04);
+            }
+            return null;
+          },
+        ),
         cells: _buildDataCells(player, isUser: isUser),
       );
     }).toList();

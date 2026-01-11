@@ -633,57 +633,111 @@ else if (_selectedRankingType == '勝率ランキング') {
   if (_selectedRankingType == '防御率ランキング') {
     final rankKey = 'eraRank$ageSuffix';
     for (var player in _players) {
-        final rk = player.containsKey('rank') ? 'rank' : rankKey;
-        final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
+      final rk = player.containsKey('rank') ? 'rank' : rankKey;
+      final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
       if (playerRank != -1 && playerRank <= 10) {
-        result.add(DataRow(
-          cells: _buildDataCells(player, isUser: player['id'] == widget.uid),
-        ));
+        final isUser = player['id'] == widget.uid;
+        result.add(
+          DataRow(
+            color: MaterialStateProperty.resolveWith<Color?>(
+              (states) {
+                if (isUser) {
+                  return const Color(0xFF1565C0).withOpacity(0.08);
+                }
+                return null;
+              },
+            ),
+            cells: _buildDataCells(player, isUser: isUser),
+          ),
+        );
       }
     }
   } else if (_selectedRankingType == '奪三振ランキング') {
     final rankKey = 'totalPStrikeoutsRank$ageSuffix';
     for (var player in _players) {
-        final rk = player.containsKey('rank') ? 'rank' : rankKey;
-        final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
+      final rk = player.containsKey('rank') ? 'rank' : rankKey;
+      final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
       if (playerRank != -1 && playerRank <= 10) {
-        result.add(DataRow(
-          cells: _buildDataCells(player, isUser: player['id'] == widget.uid),
-        ));
+        final isUser = player['id'] == widget.uid;
+        result.add(
+          DataRow(
+            color: MaterialStateProperty.resolveWith<Color?>(
+              (states) {
+                if (isUser) {
+                  return const Color(0xFF1565C0).withOpacity(0.08);
+                }
+                return null;
+              },
+            ),
+            cells: _buildDataCells(player, isUser: isUser),
+          ),
+        );
       }
     }
   } else if (_selectedRankingType == 'ホールドポイントランキング') {
     final rankKey = 'totalHoldPointsRank$ageSuffix';
     for (var player in _players) {
-        final rk = player.containsKey('rank') ? 'rank' : rankKey;
-        final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
+      final rk = player.containsKey('rank') ? 'rank' : rankKey;
+      final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
       if (playerRank != -1 && playerRank <= 10) {
-        result.add(DataRow(
-          cells: _buildDataCells(player, isUser: player['id'] == widget.uid),
-        ));
+        final isUser = player['id'] == widget.uid;
+        result.add(
+          DataRow(
+            color: MaterialStateProperty.resolveWith<Color?>(
+              (states) {
+                if (isUser) {
+                  return const Color(0xFF1565C0).withOpacity(0.08);
+                }
+                return null;
+              },
+            ),
+            cells: _buildDataCells(player, isUser: isUser),
+          ),
+        );
       }
     }
   } else if (_selectedRankingType == 'セーブランキング') {
     final rankKey = 'totalSavesRank$ageSuffix';
     for (var player in _players) {
-        final rk = player.containsKey('rank') ? 'rank' : rankKey;
-        final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
+      final rk = player.containsKey('rank') ? 'rank' : rankKey;
+      final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
       if (playerRank != -1 && playerRank <= 10) {
-        result.add(DataRow(
-          cells: _buildDataCells(player, isUser: player['id'] == widget.uid),
-        ));
+        final isUser = player['id'] == widget.uid;
+        result.add(
+          DataRow(
+            color: MaterialStateProperty.resolveWith<Color?>(
+              (states) {
+                if (isUser) {
+                  return const Color(0xFF1565C0).withOpacity(0.08);
+                }
+                return null;
+              },
+            ),
+            cells: _buildDataCells(player, isUser: isUser),
+          ),
+        );
       }
     }
   } else if (_selectedRankingType == '勝率ランキング') {
     final rankKey = 'winRateRank$ageSuffix';
     for (var player in _players) {
-      // int playerRank = int.tryParse(player[rankKey]?.toString() ?? '') ?? -1;
-        final rk = player.containsKey('rank') ? 'rank' : rankKey;
-        final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
+      final rk = player.containsKey('rank') ? 'rank' : rankKey;
+      final playerRank = int.tryParse(player[rk]?.toString() ?? '') ?? -1;
       if (playerRank != -1 && playerRank <= 10) {
-        result.add(DataRow(
-          cells: _buildDataCells(player, isUser: player['id'] == widget.uid),
-        ));
+        final isUser = player['id'] == widget.uid;
+        result.add(
+          DataRow(
+            color: MaterialStateProperty.resolveWith<Color?>(
+              (states) {
+                if (isUser) {
+                  return const Color(0xFF1565C0).withOpacity(0.08);
+                }
+                return null;
+              },
+            ),
+            cells: _buildDataCells(player, isUser: isUser),
+          ),
+        );
       }
     }
   }
@@ -1229,9 +1283,20 @@ else if (_selectedRankingType == '勝率ランキング') {
       for (var player in _players) {
         int playerRank = int.tryParse(player['eraRank'].toString()) ?? -1;
         if (playerRank <= 10) {
-          result.add(DataRow(
-              cells: _buildDataCells(player,
-                  isUser: player['id'] == widget.uid))); // ユーザー自身のデータを太字で表示
+          final isUser = player['id'] == widget.uid;
+          result.add(
+            DataRow(
+              color: MaterialStateProperty.resolveWith<Color?>(
+                (states) {
+                  if (isUser) {
+                    return const Color(0xFF1565C0).withOpacity(0.08);
+                  }
+                  return null;
+                },
+              ),
+              cells: _buildDataCells(player, isUser: isUser),
+            ),
+          );
         }
       }
     }
@@ -1294,7 +1359,16 @@ bool _isUserInSelectedAgeGroup() {
         userRank > 0 ? userRank : _extractRankForCurrentMetric(_userData!);
 
     if (centerRank <= 0) {
-      return [DataRow(cells: _buildDataCells(_userData!, isUser: true))];
+      // Always highlight user row
+      const isUser = true;
+      return [
+        DataRow(
+          color: MaterialStateProperty.all(
+            const Color(0xFF1565C0).withOpacity(0.08),
+          ),
+          cells: _buildDataCells(_userData!, isUser: isUser),
+        ),
+      ];
     }
 
     // Prefer lightweight context if available
@@ -1326,7 +1400,16 @@ bool _isUserInSelectedAgeGroup() {
       rows.add(DataRow(cells: _buildDataCells(upper[i])));
     }
 
-    rows.add(DataRow(cells: _buildDataCells(_userData!, isUser: true)));
+    // Highlight the user row
+    const isUser = true;
+    rows.add(
+      DataRow(
+        color: MaterialStateProperty.all(
+          const Color(0xFF1565C0).withOpacity(0.08),
+        ),
+        cells: _buildDataCells(_userData!, isUser: isUser),
+      ),
+    );
 
     for (var i = 0; i < lower.length && i < 2; i++) {
       rows.add(DataRow(cells: _buildDataCells(lower[i])));

@@ -276,263 +276,297 @@ class _PrivateCalendarState extends State<PrivateCalendar> {
 void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
   final user = FirebaseAuth.instance.currentUser;
 
-  if (user != null) {
-    final String uid = user.uid;
+  if (user == null) return;
 
-    // Firestoreから指定のイベントIDのデータを取得
-    DocumentSnapshot eventSnapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('games')
-        .doc(eventId)
-        .get();
+  final String uid = user.uid;
 
-    if (eventSnapshot.exists) {
-      final eventData = eventSnapshot.data() as Map<String, dynamic>;
+  // Firestoreから指定のイベントIDのデータを取得
+  final DocumentSnapshot eventSnapshot = await FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .collection('games')
+      .doc(eventId)
+      .get();
 
-      // ユーザー情報を取得してポジションを確認
-      DocumentSnapshot userDoc =
-          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+  if (!eventSnapshot.exists) return;
 
-      List<dynamic> userPositions = userDoc['positions'] ?? [];
+  final eventData = eventSnapshot.data() as Map<String, dynamic>;
 
-      // ボトムシートを表示
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        builder: (BuildContext context) {
-          return Container(
-            padding: const EdgeInsets.all(16.0),
-            height: MediaQuery.of(context).size.height * 0.8, // 画面の高さの80%を使用
-            width: MediaQuery.of(context).size.width, // 横幅いっぱい
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+  // ユーザー情報を取得してポジションを確認
+  final DocumentSnapshot userDoc =
+      await FirebaseFirestore.instance.collection('users').doc(uid).get();
+
+  final List<dynamic> userPositions = (userDoc.data() as Map<String, dynamic>?)
+          ?['positions'] as List<dynamic>? ??
+      [];
+
+  final bool isTablet = MediaQuery.of(context).size.width >= 600;
+
+  Widget content(BuildContext ctx) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          // iPadは横幅を抑えて読みやすく
+          maxWidth: isTablet ? 720 : double.infinity,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        '試合詳細',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  // 試合の基本情報
-                  Text(
-                    '${eventData['gameType'] ?? '不明'}',
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    '対戦相手: ${eventData['opponent'] ?? '不明'}',
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    '場所: ${eventData['location'] ?? '不明'}',
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // 投手成績（もし投手なら）
-                  if (userPositions.contains('投手')) ...[
-                    const Text(
-                      '投手成績',
-                      style:
-                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Text(
-                          '投球回: ${eventData['inningsThrow'] ?? 0}回',
-                        ),
-
-                        if (eventData['outFraction'] != null &&
-                            eventData['outFraction'] != '0' &&
-                            eventData['outFraction'].isNotEmpty)
-                          Text(
-                            'と${eventData['outFraction']}',
-                          ),
-                        const SizedBox(
-                          width: 45,
-                        ),
-
-                        if (eventData['resultGame'] != null &&
-                            eventData['resultGame'] != '0' &&
-                            eventData['resultGame'].isNotEmpty)
-                          Text('${eventData['resultGame']}投手'),
-                        // 完投がtrueの場合
-                        if (eventData['isCompleteGame'] == true) ...[
-                          const SizedBox(width: 10),
-                          const Text('完投'),
-                        ],
-                        // 完封がtrueの場合
-                        if (eventData['isShutoutGame'] == true) ...[
-                          const SizedBox(width: 10),
-                          const Text('完封'),
-                        ],
-                        // セーブがtrueの場合
-                        if (eventData['isSave'] == true) ...[
-                          const SizedBox(width: 10),
-                          const Text('セーブ'),
-                        ],
-                        // ホールドがtrueの場合
-                        if (eventData['isHold'] == true) ...[
-                          const SizedBox(width: 10),
-                          const Text('ホールド'),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Text('登板: ${eventData['appearanceType'] ?? 0}'),
-                        const SizedBox(
-                          width: 45,
-                        ),
-                        Text('対戦打者: ${eventData['battersFaced'] ?? 0}人'),
-                        const SizedBox(
-                          width: 45,
-                        ),
-                        Text('球数: ${eventData['pitchCount'] ?? 0}球'),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text('与四球: ${eventData['walks'] ?? 0}'),
-                        ),
-                        Expanded(
-                          child: Text('与死球: ${eventData['hitByPitch'] ?? 0}'),
-                        ),
-                        Expanded(
-                          child: Text('失点: ${eventData['runsAllowed'] ?? 0}'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text('自責点: ${eventData['earnedRuns'] ?? 0}'),
-                        ),
-                        Expanded(
-                          child: Text('被安打: ${eventData['hitsAllowed'] ?? 0}'),
-                        ),
-                        Expanded(
-                          child: Text('奪三振: ${eventData['strikeouts'] ?? 0}'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-
-                  // 打席結果
-                const Text('打席結果',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            if (eventData['atBats'] != null && eventData['atBats'] is List)
-              ...List.generate((eventData['atBats'] as List).length, (index) {
-                final atBat = eventData['atBats'][index];
-                final swingCount = atBat['swingCount'];
-                final batterPitchCount = atBat['batterPitchCount'];
-
-                String extraInfo = '';
-                if (swingCount != null) {
-                  extraInfo += 'スイング数: $swingCount';
-                }
-                if (batterPitchCount != null) {
-                  if (extraInfo.isNotEmpty) extraInfo += ' / ';
-                  extraInfo += '球数: $batterPitchCount';
-                }
-
-                                return Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    '${atBat['at_bat']}打席目: '
-                    '${atBat['position'] ?? '不明'} - '
-                    '${atBat['result'] ?? '不明'}'
-                    '${extraInfo.isNotEmpty ? '（$extraInfo）' : ''}',
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                );
-              }),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('盗塁: ${eventData['steals'] ?? 0}'),
-                      Text('打点: ${eventData['rbis'] ?? 0}'),
-                      Text('得点: ${eventData['runs'] ?? 0}'),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // 守備成績
                   const Text(
-                    '守備成績',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('刺殺: ${eventData['putouts'] ?? 0}'),
-                      Text('捕殺: ${eventData['assists'] ?? 0}'),
-                      Text('失策: ${eventData['errors'] ?? 0}'),
-                    ],
-                  ),
-                  if (userPositions.contains('捕手')) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Text('盗塁刺し: ${eventData['caughtStealing'] ?? 0}'),
-                      ],
+                    '試合詳細',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
                     ),
-                  ],
-                  const SizedBox(height: 20),
-
-                  // メモ
-                  const Text(
-                    'メモ',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 10),
-                  Text(eventData['memo'] ?? 'メモなし'),
-                  const SizedBox(height: 20),
-
-                  ElevatedButton(
+                  IconButton(
+                    icon: const Icon(Icons.close),
                     onPressed: () {
-                      Navigator.of(context).pop(); // ダイアログを閉じる
+                      Navigator.of(ctx).pop();
                     },
-                    style: ElevatedButton.styleFrom(
-                      minimumSize:
-                          const Size(double.infinity, 50), // ボタンを横幅いっぱいにする
-                    ),
-                    child: const Text('閉じる'),
                   ),
-                  const SizedBox(height: 20),
                 ],
               ),
-            ),
-          );
-        },
-      );
-    }
+              const SizedBox(height: 20),
+              // 試合の基本情報
+              Text(
+                '${eventData['gameType'] ?? '不明'}',
+                style: const TextStyle(fontSize: 18),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '対戦相手: ${eventData['opponent'] ?? '不明'}',
+                style: const TextStyle(fontSize: 18),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '場所: ${eventData['location'] ?? '不明'}',
+                style: const TextStyle(fontSize: 18),
+              ),
+              const SizedBox(height: 20),
+
+              // 投手成績（もし投手なら）
+              if (userPositions.contains('投手')) ...[
+                const Text(
+                  '投手成績',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Text(
+                      '投球回: ${eventData['inningsThrow'] ?? 0}回',
+                    ),
+
+                    if (eventData['outFraction'] != null &&
+                        eventData['outFraction'] != '0' &&
+                        eventData['outFraction'].isNotEmpty)
+                      Text(
+                        'と${eventData['outFraction']}',
+                      ),
+                    const SizedBox(
+                      width: 45,
+                    ),
+
+                    if (eventData['resultGame'] != null &&
+                        eventData['resultGame'] != '0' &&
+                        eventData['resultGame'].isNotEmpty)
+                      Text('${eventData['resultGame']}投手'),
+                    // 完投がtrueの場合
+                    if (eventData['isCompleteGame'] == true) ...[
+                      const SizedBox(width: 10),
+                      const Text('完投'),
+                    ],
+                    // 完封がtrueの場合
+                    if (eventData['isShutoutGame'] == true) ...[
+                      const SizedBox(width: 10),
+                      const Text('完封'),
+                    ],
+                    // セーブがtrueの場合
+                    if (eventData['isSave'] == true) ...[
+                      const SizedBox(width: 10),
+                      const Text('セーブ'),
+                    ],
+                    // ホールドがtrueの場合
+                    if (eventData['isHold'] == true) ...[
+                      const SizedBox(width: 10),
+                      const Text('ホールド'),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Text('登板: ${eventData['appearanceType'] ?? 0}'),
+                    const SizedBox(
+                      width: 45,
+                    ),
+                    Text('対戦打者: ${eventData['battersFaced'] ?? 0}人'),
+                    const SizedBox(
+                      width: 45,
+                    ),
+                    Text('球数: ${eventData['pitchCount'] ?? 0}球'),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text('与四球: ${eventData['walks'] ?? 0}'),
+                    ),
+                    Expanded(
+                      child: Text('与死球: ${eventData['hitByPitch'] ?? 0}'),
+                    ),
+                    Expanded(
+                      child: Text('失点: ${eventData['runsAllowed'] ?? 0}'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text('自責点: ${eventData['earnedRuns'] ?? 0}'),
+                    ),
+                    Expanded(
+                      child: Text('被安打: ${eventData['hitsAllowed'] ?? 0}'),
+                    ),
+                    Expanded(
+                      child: Text('奪三振: ${eventData['strikeouts'] ?? 0}'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+              ],
+
+              // 打席結果
+              const Text('打席結果',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              if (eventData['atBats'] != null && eventData['atBats'] is List)
+                ...List.generate((eventData['atBats'] as List).length, (index) {
+                  final atBat = eventData['atBats'][index];
+                  final swingCount = atBat['swingCount'];
+                  final batterPitchCount = atBat['batterPitchCount'];
+
+                  String extraInfo = '';
+                  if (swingCount != null) {
+                    extraInfo += 'スイング数: $swingCount';
+                  }
+                  if (batterPitchCount != null) {
+                    if (extraInfo.isNotEmpty) extraInfo += ' / ';
+                    extraInfo += '球数: $batterPitchCount';
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      '${atBat['at_bat']}打席目: '
+                      '${atBat['position'] ?? '不明'} - '
+                      '${atBat['result'] ?? '不明'}'
+                      '${extraInfo.isNotEmpty ? '（$extraInfo）' : ''}',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  );
+                }),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('盗塁: ${eventData['steals'] ?? 0}'),
+                  Text('打点: ${eventData['rbis'] ?? 0}'),
+                  Text('得点: ${eventData['runs'] ?? 0}'),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // 守備成績
+              const Text(
+                '守備成績',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('刺殺: ${eventData['putouts'] ?? 0}'),
+                  Text('捕殺: ${eventData['assists'] ?? 0}'),
+                  Text('失策: ${eventData['errors'] ?? 0}'),
+                ],
+              ),
+              if (userPositions.contains('捕手')) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Text('盗塁刺し: ${eventData['caughtStealing'] ?? 0}'),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 20),
+
+              // メモ
+              const Text(
+                'メモ',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              Text(eventData['memo'] ?? 'メモなし'),
+              const SizedBox(height: 20),
+
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                },
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                ),
+                child: const Text('閉じる'),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  if (isTablet) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: SizedBox(
+            // 画面の高さに対して適度なサイズ
+            height: MediaQuery.of(dialogContext).size.height * 0.82,
+            child: Center(child: content(dialogContext)),
+          ),
+        );
+      },
+    );
+  } else {
+    // スマホはボトムシート
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SizedBox(
+          height: MediaQuery.of(sheetContext).size.height * 0.8,
+          width: MediaQuery.of(sheetContext).size.width,
+          child: content(sheetContext),
+        );
+      },
+    );
   }
 }

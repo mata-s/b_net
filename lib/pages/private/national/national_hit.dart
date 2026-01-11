@@ -144,6 +144,14 @@ class _NationalHitState extends State<NationalHit> {
       final isUser =
           player['prefecture'] == widget.prefecture; // ユーザー自身の都道府県チェック
       return DataRow(
+        color: MaterialStateProperty.resolveWith<Color?>(
+          (states) {
+            if (isUser) {
+              return const Color(0xFF1565C0).withOpacity(0.08);
+            }
+            return null;
+          },
+        ),
         cells: _buildDataCells(player, isUser: isUser),
       );
     }).toList();

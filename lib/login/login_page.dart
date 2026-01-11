@@ -184,16 +184,24 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isTablet = screenWidth >= 600;
+
+    final double formWidth = isTablet
+        ? (screenWidth * 0.55).clamp(360.0, 460.0)
+        : 300;
+
     return Scaffold(
       body: SafeArea(
         child: SizedBox(
           width: double.infinity,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
               SizedBox(
-                width: 300,
+                width: formWidth,
                 child: TextField(
                   controller: _emailController,
                   decoration: const InputDecoration(
@@ -204,7 +212,7 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 20),
               SizedBox(
-                width: 300,
+                width: formWidth,
                 child: TextField(
                   controller: _passwordController,
                   obscureText: _obscureText,
@@ -269,7 +277,8 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

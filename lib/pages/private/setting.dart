@@ -106,154 +106,268 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  bool _isTablet(BuildContext context) {
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    return shortestSide >= 600;
+  }
+
+  Widget _sectionTitle(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: Colors.black54,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+
+  Widget _cardGroup({required List<Widget> children}) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: children,
+      ),
+    );
+  }
+
+  Widget _divider() {
+    return Divider(height: 1, thickness: 1, color: Colors.grey.shade200);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('設定'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          // ===== 通知セクション =====
-          const Text(
-            '通知',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          ListTile(
-            title: const Text('通知を受け取る'),
-            trailing: Switch(
-              value: _notificationsEnabled,
-              onChanged: (value) {
-                _updateNotificationSetting(value);
-              },
-            ),
-          ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isTablet = _isTablet(context);
+          final double horizontalPadding = 16.0 + (isTablet ? 60.0 : 0.0);
+          final double maxContentWidth = isTablet ? 720.0 : double.infinity;
 
-          const SizedBox(height: 16),
-          const Divider(),
-
-          // ===== アカウントセクション =====
-          const SizedBox(height: 8),
-          const Text(
-            'アカウント',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          ListTile(
-            title: const Text('メールアドレス'),
-            subtitle: Text(
-              FirebaseAuth.instance.currentUser?.email?.isNotEmpty == true
-                  ? FirebaseAuth.instance.currentUser!.email!
-                  : '未登録',
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ChangeMailPage(),
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  16,
+                  horizontalPadding,
+                  24,
                 ),
-              );
-            },
-          ),
-          ListTile(
-            title: const Text('パスワードを変更する'),
-             trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-            Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const PasswordResetPage(),
-                ),
-              );
-            },
-          ),
-          ListTile(
-            title: const Text(
-              'アカウントを削除する',
-              style: TextStyle(color: Colors.red),
+                children: [
+                  // ===== 通知 =====
+                  _sectionTitle('通知'),
+                  _cardGroup(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.notifications_outlined),
+                        title: const Text('通知を受け取る'),
+                        subtitle: const Text(
+                          '試合やチームのお知らせを受け取ります',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: Switch(
+                          value: _notificationsEnabled,
+                          onChanged: (value) {
+                            _updateNotificationSetting(value);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // ===== アカウント =====
+                  _sectionTitle('アカウント'),
+                  _cardGroup(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.mail_outline),
+                        title: const Text('メールアドレス'),
+                        subtitle: Text(
+                          FirebaseAuth.instance.currentUser?.email?.isNotEmpty ==
+                                      true
+                              ? FirebaseAuth.instance.currentUser!.email!
+                              : '未登録',
+                          style:
+                              const TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ChangeMailPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _divider(),
+                      ListTile(
+                        leading: const Icon(Icons.lock_outline),
+                        title: const Text('パスワードを変更する'),
+                        subtitle: const Text(
+                          'パスワード再設定メールを送信します',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const PasswordResetPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _divider(),
+                      ListTile(
+                        leading:
+                            const Icon(Icons.delete_forever, color: Colors.red),
+                        title: const Text(
+                          'アカウントを削除する',
+                          style: TextStyle(color: Colors.red),
+                        ),
+                        subtitle: const Text(
+                          '登録情報とデータを削除します',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const DeleteAccountPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _divider(),
+                      ListTile(
+                        leading: const Icon(Icons.logout, color: Colors.red),
+                        title: const Text(
+                          'ログアウト',
+                          style: TextStyle(color: Colors.red),
+                        ),
+                        subtitle: const Text(
+                          'この端末からログアウトします',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        onTap: () async {
+                          // 👻 RevenueCatの現在のUserIDを取得して、匿名かチェック
+                          try {
+                            final purchaserInfo =
+                                await Purchases.getCustomerInfo();
+                            final currentAppUserID =
+                                purchaserInfo.originalAppUserId;
+
+                            if (currentAppUserID.contains('anonymous')) {
+                              debugPrint(
+                                  '👻 匿名ユーザーなので RevenueCat logOut スキップ');
+                            } else {
+                              await Purchases.logOut();
+                              debugPrint('✅ RevenueCat: logOut 完了');
+                            }
+                          } catch (e) {
+                            debugPrint('⚠️ RevenueCat logOut エラー: $e');
+                          }
+
+                          // Firebase ログアウト
+                          await _auth.signOut();
+
+                          // ログイン画面へ遷移（スタックをすべてクリア）
+                          if (!context.mounted) return;
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (_) => const LoginPage()),
+                            (route) => false,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // ===== サポート =====
+                  _sectionTitle('サポート'),
+                  _cardGroup(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.rule_folder_outlined),
+                        title: const Text('ランキングルール・計算方法について'),
+                        subtitle: const Text(
+                          'Webサイトで詳しいルール・成績の計算方法を確認できます',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: const Icon(Icons.open_in_new, size: 20),
+                        onTap: () {
+                          _openExternalUrl('$_webBaseUrl/ranking-rules');
+                        },
+                      ),
+                      _divider(),
+                      ListTile(
+                        leading: const Icon(Icons.support_agent_outlined),
+                        title: const Text('お問い合わせ'),
+                        subtitle: const Text(
+                          'ご不明点・ご要望はこちらから',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: const Icon(Icons.open_in_new, size: 20),
+                        onTap: () {
+                          _openExternalUrl('$_webBaseUrl/contact');
+                        },
+                      ),
+                      _divider(),
+                      ListTile(
+                        leading: const Icon(Icons.description_outlined),
+                        title: const Text('利用規約'),
+                        trailing: const Icon(Icons.open_in_new, size: 20),
+                        onTap: () {
+                          _openExternalUrl('$_webBaseUrl/terms');
+                        },
+                      ),
+                      _divider(),
+                      ListTile(
+                        leading: const Icon(Icons.privacy_tip_outlined),
+                        title: const Text('プライバシーポリシー'),
+                        trailing: const Icon(Icons.open_in_new, size: 20),
+                        onTap: () {
+                          _openExternalUrl('$_webBaseUrl/privacy');
+                        },
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 22),
+                  Center(
+                    child: Text(
+                      'Baseball Net',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
-            leading: const Icon(Icons.delete_forever, color: Colors.red),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const DeleteAccountPage(),
-                ),
-              );
-            },
-          ),
-          ListTile(
-            title: const Text('ログアウト'),
-            leading: const Icon(Icons.logout, color: Colors.red),
-            onTap: () async {
-              // 👻 RevenueCatの現在のUserIDを取得して、匿名かチェック
-              try {
-                final purchaserInfo = await Purchases.getCustomerInfo();
-                final currentAppUserID = purchaserInfo.originalAppUserId;
-
-                if (currentAppUserID.contains('anonymous')) {
-                  debugPrint('👻 匿名ユーザーなので RevenueCat logOut スキップ');
-                } else {
-                  await Purchases.logOut();
-                  debugPrint('✅ RevenueCat: logOut 完了');
-                }
-              } catch (e) {
-                debugPrint('⚠️ RevenueCat logOut エラー: $e');
-              }
-
-              // Firebase ログアウト
-              await _auth.signOut();
-
-              // ログイン画面へ遷移（スタックをすべてクリア）
-              if (!context.mounted) return;
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => const LoginPage()),
-                (route) => false,
-              );
-            },
-          ),
-
-          const SizedBox(height: 16),
-          const Divider(),
-
-          // ===== サポートセクション =====
-          const SizedBox(height: 8),
-          const Text(
-            'サポート',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          ListTile(
-            title: const Text('ランキングルール・計算方法について'),
-            subtitle: const Text(
-              'Webサイトで詳しいランキングのルール・成績の計算方法を確認できます',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            onTap: () {
-              _openExternalUrl('$_webBaseUrl/ranking-rules');
-            },
-          ),
-          ListTile(
-            title: const Text('お問い合わせ'),
-            onTap: () {
-              _openExternalUrl('$_webBaseUrl/contact');
-            },
-          ),
-          ListTile(
-            title: const Text('利用規約'),
-            onTap: () {
-              _openExternalUrl('$_webBaseUrl/terms');
-            },
-          ),
-          ListTile(
-            title: const Text('プライバシーポリシー'),
-            onTap: () {
-              _openExternalUrl('$_webBaseUrl/privacy');
-            },
-          ),
-        ],
+          );
+        },
       ),
     );
   }
