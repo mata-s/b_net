@@ -540,14 +540,6 @@ class PremiumFeaturesSection extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            "このプランに登録すると、こんな機能が使えるようになります。",
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.black54,
-            ),
-          ),
           const SizedBox(height: 16),
           const Divider(height: 1),
           const SizedBox(height: 12),

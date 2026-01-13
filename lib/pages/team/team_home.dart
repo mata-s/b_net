@@ -308,12 +308,14 @@ Future<void> _init() async {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              isPremium ? Icons.workspace_premium : Icons.lock_outline,
-              size: 14,
-              color: Colors.white,
-            ),
-            const SizedBox(width: 6),
+            if (isPremium) ...[
+              const Icon(
+                Icons.workspace_premium,
+                size: 14,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 6),
+            ],
             Text(
               planLabel,
               style: const TextStyle(

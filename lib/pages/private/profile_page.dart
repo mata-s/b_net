@@ -78,6 +78,32 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  String _personalPlanNameFromProductId(String productId) {
+    // iOS
+    if (productId == 'com.sk.bNet.app.personal12month' ||
+        productId.contains('personal12month') ||
+        productId.contains('12month')) {
+      return 'プレミアム(年額)';
+    }
+    if (productId == 'com.sk.bNet.app.personal1month' ||
+        productId.contains('personal1month') ||
+        productId.contains('1month')) {
+      return 'プレミアム';
+    }
+
+    // Android (Play Store)
+    if (productId == 'com.sk.bnet.app.personal:personal-yearly' ||
+        productId.contains('personal-yearly')) {
+      return 'プレミアム(年額)';
+    }
+    if (productId == 'com.sk.bnet.app.personal:personal-monthly' ||
+        productId.contains('personal-monthly')) {
+      return 'プレミアム';
+    }
+
+    return '不明なプラン';
+  }
+
   Future<void> _loadSubscriptionStatus() async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -96,15 +122,21 @@ class _ProfilePageState extends State<ProfilePage> {
       final productId = data?['productId'];
 
       if (status == 'active' && productId != null) {
-        _isPersonalSubscribed = true;
-        if (productId.contains('12month')) {
-          _personalPlanName = 'プレミアム(年額)';
-        } else if (productId.contains('1month')) {
-          _personalPlanName = 'プレミアム';
-        } else {
-          _personalPlanName = '不明なプラン';
-        }
+        setState(() {
+          _isPersonalSubscribed = true;
+          _personalPlanName = _personalPlanNameFromProductId(productId);
+        });
+      } else {
+        setState(() {
+          _isPersonalSubscribed = false;
+          _personalPlanName = null;
+        });
       }
+    } else {
+      setState(() {
+        _isPersonalSubscribed = false;
+        _personalPlanName = null;
+      });
     }
   }
 

@@ -91,35 +91,49 @@ class _TeamProfilePageState extends State<TeamProfilePage> {
   }
 
   Future<void> _loadTeamSubscriptionStatus() async {
-    final platform =
-        Theme.of(context).platform == TargetPlatform.iOS ? 'iOS' : 'Android';
-    final doc = await FirebaseFirestore.instance
-        .collection('teams')
-        .doc(widget.teamId)
-        .collection('subscription')
-        .doc(platform)
-        .get();
+  final platform =
+      Theme.of(context).platform == TargetPlatform.iOS ? 'iOS' : 'Android';
 
-    if (doc.exists) {
-      final data = doc.data();
-      final status = data?['status'];
-      final productId = data?['productId'];
+  final doc = await FirebaseFirestore.instance
+      .collection('teams')
+      .doc(widget.teamId)
+      .collection('subscription')
+      .doc(platform)
+      .get();
 
-      if (status == 'active' && productId != null) {
-        _isTeamSubscribed = true;
-
-        if (productId.contains('Platina')) {
-          _teamPlanName = productId.contains('12month') ? 'プラチナ（年額）' : 'プラチナ';
-        } else if (productId.contains('Gold')) {
-          _teamPlanName = productId.contains('12month') ? 'ゴールド（年額）' : 'ゴールド';
-        } else {
-          _teamPlanName = '不明なプラン';
-        }
-      }
-    }
-
+  if (!doc.exists) {
     setState(() {});
+    return;
   }
+
+  final data = doc.data();
+  final status = data?['status'];
+  final productIdRaw = data?['productId'];
+
+  if (status != 'active' || productIdRaw == null) {
+    setState(() {});
+    return;
+  }
+
+  _isTeamSubscribed = true;
+
+  final productId = productIdRaw.toString().toLowerCase();
+
+  final isGold = productId.contains('gold');
+  final isPlatina = productId.contains('platina');
+  final isYearly =
+      productId.contains('12month') || productId.contains('yearly');
+
+  if (isGold) {
+    _teamPlanName = isYearly ? 'ゴールド（年額）' : 'ゴールド';
+  } else if (isPlatina) {
+    _teamPlanName = isYearly ? 'プラチナ（年額）' : 'プラチナ';
+  } else {
+    _teamPlanName = '不明なプラン';
+  }
+
+  setState(() {});
+}
 
   /// 🔹 **管理者（createdBy）の名前を取得**
   Future<void> _fetchAdminName(String adminId) async {
