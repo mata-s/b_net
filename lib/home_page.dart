@@ -314,9 +314,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final isDirectorOrManager =
-    widget.userPosition.contains('監督') ||
-    widget.userPosition.contains('マネージャー');
      final hasTeam = (widget.userTeamId != null && widget.userTeamId!.trim().isNotEmpty);
     return Scaffold(
       appBar: AppBar(
@@ -612,7 +609,6 @@ class _HomePageState extends State<HomePage> {
                     const SizedBox(height: 6),
 
                     _DrawerSectionTitle(title: '情報・設定'),
-                    if (!isDirectorOrManager)
                     _RichDrawerTile(
                       icon: Icons.workspace_premium,
                       title: 'プレミアムプラン',

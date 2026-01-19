@@ -34,11 +34,15 @@ class TeamSubscriptionService {
     }
 
     // productId からプラン種別を推定（表示用/保存用）
-    final bool isAnnualPlan =
-        actualProductId.contains('12month') ||
-        actualProductId.toLowerCase().contains('annual');
-    final bool isPlatinaPlan =
-        actualProductId.toLowerCase().contains('teamplatina');
+    final String lowerId = actualProductId.toLowerCase();
+
+    // 年額判定: "year" / "yearly"（および念のため "annual"）を年額扱い
+    final bool isAnnualPlan = lowerId.contains('annual') ||
+        lowerId.contains('year') ||
+        lowerId.contains('yearly');
+
+    // プラチナ判定: "platina" を含んでいればプラチナ扱い
+    final bool isPlatinaPlan = lowerId.contains('platina');
 
     // 現在のチームプラン表示名
     final String planName = isPlatinaPlan ? 'プラチナプラン' : 'ゴールドプラン';

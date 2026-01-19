@@ -121,8 +121,7 @@ class _TeamProfilePageState extends State<TeamProfilePage> {
 
   final isGold = productId.contains('gold');
   final isPlatina = productId.contains('platina');
-  final isYearly =
-      productId.contains('12month') || productId.contains('yearly');
+  final isYearly = productId.contains('yearly');
 
   if (isGold) {
     _teamPlanName = isYearly ? 'ゴールド（年額）' : 'ゴールド';

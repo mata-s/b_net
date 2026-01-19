@@ -10440,13 +10440,20 @@ export const revenuecatWebhook = onRequest(
         // --- Writes ---
         if (targetType === "user" && uid) {
           const looksLikeTeamPlan = (() => {
-            const pid = String(productId || "");
-            const eid = String(entitlementId || "");
-            if (pid.startsWith("com.sk.bNet.team")) return true;
-            // entitlement examples: "B-Net Team Gold Monthly" etc.
-            if (eid.toLowerCase().includes("team")) return true;
-            // fallback: event type sometimes includes TEAM
-            if (String(type || "").toLowerCase().includes("team")) return true;
+            const pid = String(productId || "").toLowerCase();
+            const eid = String(entitlementId || "").toLowerCase();
+            const t = String(type || "").toLowerCase();
+
+            // productId に "team" が含まれていればチーム扱い（ドメイン部分も含めてざっくり）
+            if (pid.includes(".team") || pid.includes("team:") ||
+              pid.includes("team")) {
+              return true;
+            }
+
+            // entitlement 名や type に team が入っている場合もチーム扱い
+            if (eid.includes("team")) return true;
+            if (t.includes("team")) return true;
+
             return false;
           })();
 

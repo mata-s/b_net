@@ -48,23 +48,23 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
 
     switch (id) {
       // --- Gold (Monthly) ---
-      case 'com.sk.bNet.teamGold':
-      case 'com.sk.bnet.team:gold-monthly':
+      case 'com.sk.bNet.teamGold.monthly': // 新 iOS（月額）
+      case 'com.sk.bnet.team:gold-monthly': // Android（月額）
         return 'ゴールドプラン';
 
       // --- Gold (Yearly) ---
-      case 'com.sk.bNet.teamGold12month':
-      case 'com.sk.bnet.team:gold-yearly':
+      case 'com.sk.bNet.teamGold.yearly': // 新 iOS（年額）
+      case 'com.sk.bnet.team:gold-yearly': // Android（年額）
         return 'ゴールドプラン';
 
       // --- Platina (Monthly) ---
-      case 'com.sk.bNet.teamPlatina':
-      case 'com.sk.bnet.team:platina-monthly':
+      case 'com.sk.bNet.teamPlatina.monthly': //iOS（月額）
+      case 'com.sk.bnet.team:platina-monthly': // Android（月額）
         return 'プラチナプラン';
 
       // --- Platina (Yearly) ---
-      case 'com.sk.bNet.teamPlatina12month':
-      case 'com.sk.bnet.team:platina-yearly':
+      case 'com.sk.bNet.teamPlatina.yearly': // 新 iOS（年額）
+      case 'com.sk.bnet.team:platina-yearly': // Android（年額）
         return 'プラチナプラン';
 
       default:

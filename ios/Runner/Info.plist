@@ -35,12 +35,8 @@
 	<string>画像を保存するために写真へのアクセスが必要です。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>プロフィール画像を撮影するためにカメラを使用します。</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>動画を録画するためにマイクを使用します。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>プロフィール画像を選択するために写真ライブラリへアクセスします。</string>
-	<key>NSUserTrackingUsageDescription</key>
-	<string>あなたのサブスクリプション状態を確認するために使用します</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
