@@ -1114,45 +1114,6 @@ class _GameInputPageState extends State<GameInputPage> {
     };
   }
 
-  void _resetData() {
-    setState(() {
-      numberOfMatches = 0;
-      errorMessage = null;
-    });
-    // リセットしたいリストやコントローラを初期化
-    numberOfMatches = 0;
-    _selectedGameType.clear();
-    _locationControllers.clear();
-    _opponentControllers.clear();
-    _stealsControllers.clear();
-    _rbisControllers.clear();
-    _runsControllers.clear();
-    _memoControllers.clear();
-    _atBatControllers.clear();
-    _selectedLeftList.clear();
-    _selectedRightList.clear();
-    _inningsThrowControllers.clear();
-    _strikeoutsControllers.clear();
-    _walksControllers.clear();
-    _hitByPitchControllers.clear();
-    _earnedRunsControllers.clear();
-    _runsAllowedControllers.clear();
-    _hitsAllowedControllers.clear();
-    _resultList.clear();
-    _outFractionList.clear();
-    _putoutsControllers.clear();
-    _assistsControllers.clear();
-    _errorsControllers.clear();
-    atBatList.clear();
-    _eventController.clear();
-    _selectedAppearanceType.clear();
-    _isAppearanceSelected.clear();
-    _isCompleteGame.clear();
-    _isShutoutGame.clear();
-    _isSave.clear();
-    _isHold.clear();
-    _battersFacedControllers.clear();
-  }
 
   List<Widget> _atBatGameWidgets(
       int matchIndex, int atBat, StateSetter setState) {

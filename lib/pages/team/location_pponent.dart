@@ -112,35 +112,6 @@ class _LocationOpponentPageState extends State<LocationOpponentPage> {
     );
   }
 
-  Widget _buildStatColumn(String label, String value, double underlineWidth) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 20,
-          ),
-        ),
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: underlineWidth,
-              height: 1,
-              color: Colors.black,
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
   Widget _builinMoreDetaildStats() {
     final opponentStats = teamLocationStats
         .where((s) => s['id'].toString().startsWith('opponent_'))
@@ -872,28 +843,6 @@ class _StatTile extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ExpandedStats extends StatelessWidget {
-  final Map<String, dynamic> stat;
-
-  const _ExpandedStats({required this.stat});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('得点合計: ${stat['totalScore'] ?? 0}'),
-        Text('失点合計: ${stat['totalRunsAllowed'] ?? 0}'),
-        Text('勝利: ${stat['totalWins'] ?? 0}'),
-        Text('敗北: ${stat['totalLosses'] ?? 0}'),
-        Text('引き分け: ${stat['totalDraws'] ?? 0}'),
-        Text('勝率: ${formatPercentage(stat['winRate'] ?? 0)}'),
-        const SizedBox(height: 8),
-      ],
     );
   }
 }

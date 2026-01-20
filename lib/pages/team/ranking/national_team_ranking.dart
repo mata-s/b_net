@@ -1,4 +1,5 @@
 import 'package:b_net/pages/team/team_home.dart';
+import 'package:b_net/common/profile_dialog.dart';
 import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -434,17 +435,33 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
           ),
         ),
       )),
-      DataCell(Center(
-        child: Text(
-          (team['teamName'] ?? 'チーム名不明').toString().length > 8
-              ? '${team['teamName'].toString().substring(0, 8)}…'
-              : team['teamName'].toString(),
-          style: TextStyle(
-            fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
-            color: isTeam ? Colors.blue : Colors.black,
+      DataCell(
+        GestureDetector(
+          onLongPress: () {
+            final teamId = team['id']?.toString() ?? '';
+            if (teamId.isEmpty) return;
+
+            showProfileDialog(
+              context,
+              teamId,
+              true,
+              currentUserUid: widget.teamId,
+              currentUserName: 'チームメンバー',
+            );
+          },
+          child: Center(
+            child: Text(
+              (team['teamName'] ?? 'チーム名不明').toString().length > 8
+                  ? '${team['teamName'].toString().substring(0, 8)}…'
+                  : team['teamName'].toString(),
+              style: TextStyle(
+                fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+                color: isTeam ? Colors.blue : Colors.black,
+              ),
+            ),
           ),
         ),
-      )),
+      ),
       DataCell(Center(
         child: Text(
           _selectedRankingType == '防御率'
@@ -641,16 +658,6 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
     return const Center(
       child: Text(
         '都道府県',
-        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      ),
-    );
-  }
-
-  // 選手名のヘッダー
-  static Widget _buildTeamHeader() {
-    return const Center(
-      child: Text(
-        '選手',
         style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       ),
     );

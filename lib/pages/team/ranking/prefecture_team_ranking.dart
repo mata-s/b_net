@@ -1,4 +1,5 @@
 import 'package:b_net/pages/team/team_home.dart';
+import 'package:b_net/common/profile_dialog.dart';
 import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -1409,24 +1410,6 @@ class _PrefectureTeamRankingState extends State<PrefectureTeamRanking> {
     }
   }
 
-  List<DataRow> _buildTopRankedRows() {
-    List<DataRow> result = [];
-
-    if (_selectedRankingType == '勝率ランキング') {
-      // rankが10以下の選手を表示
-      for (var team in _teams) {
-        int teamRank = int.tryParse(team['winRateRank'].toString()) ?? -1;
-        if (teamRank <= 10) {
-          result.add(DataRow(
-              cells: _buildDataCells(team,
-                  isTeam: team['id'] == widget.teamId))); // ユーザー自身のデータを太字で表示
-        }
-      }
-    }
-
-    return result;
-  }
-
     // ==== 共通ヘルパー（前後±2表示用）====
 String _ageSuffixStr() {
   return _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
@@ -1608,17 +1591,33 @@ bool _isTeamInSelectedAgeGroup() {
             ),
           ),
         )),
-        DataCell(Center(
-          child: Text(
-            (team['teamName'] ?? 'チーム名不明').toString().length > 8
-                ? '${team['teamName'].toString().substring(0, 8)}…'
-                : team['teamName'].toString(),
-            style: TextStyle(
-              fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
-              color: isTeam ? Colors.blue : Colors.black,
+        DataCell(
+          GestureDetector(
+            onLongPress: () {
+              final teamId = team['id']?.toString() ?? '';
+              if (teamId.isEmpty) return;
+
+              showProfileDialog(
+                context,
+                teamId,
+                true,
+                currentUserUid: widget.teamId,
+                currentUserName: 'チームメンバー',
+              );
+            },
+            child: Center(
+              child: Text(
+                (team['teamName'] ?? 'チーム名不明').toString().length > 8
+                    ? '${team['teamName'].toString().substring(0, 8)}…'
+                    : team['teamName'].toString(),
+                style: TextStyle(
+                  fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+                  color: isTeam ? Colors.blue : Colors.black,
+                ),
+              ),
             ),
           ),
-        )),
+        ),
         DataCell(Center(
           child: Text(
             formatPercentage(team['winRate'] ?? 0.0),
@@ -1748,17 +1747,33 @@ bool _isTeamInSelectedAgeGroup() {
             ),
           ),
         )),
-        DataCell(Center(
-          child: Text(
-            (team['teamName'] ?? 'チーム名不明').toString().length > 8
-                ? '${team['teamName'].toString().substring(0, 8)}…'
-                : team['teamName'].toString(),
-            style: TextStyle(
-              fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
-              color: isTeam ? Colors.blue : Colors.black,
+        DataCell(
+          GestureDetector(
+            onLongPress: () {
+              final teamId = team['id']?.toString() ?? '';
+              if (teamId.isEmpty) return;
+
+              showProfileDialog(
+                context,
+                teamId,
+                true,
+                currentUserUid: widget.teamId,
+                currentUserName: 'チームメンバー',
+              );
+            },
+            child: Center(
+              child: Text(
+                (team['teamName'] ?? 'チーム名不明').toString().length > 8
+                    ? '${team['teamName'].toString().substring(0, 8)}…'
+                    : team['teamName'].toString(),
+                style: TextStyle(
+                  fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+                  color: isTeam ? Colors.blue : Colors.black,
+                ),
+              ),
             ),
           ),
-        )),
+        ),
         DataCell(Center(
           child: Text(
             formatPercentage(
@@ -1808,17 +1823,33 @@ bool _isTeamInSelectedAgeGroup() {
             ),
           ),
         )),
-        DataCell(Center(
-          child: Text(
-            (team['teamName'] ?? 'チーム名不明').toString().length > 8
-                ? '${team['teamName'].toString().substring(0, 8)}…'
-                : team['teamName'].toString(),
-            style: TextStyle(
-              fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
-              color: isTeam ? Colors.blue : Colors.black,
+        DataCell(
+          GestureDetector(
+            onLongPress: () {
+              final teamId = team['id']?.toString() ?? '';
+              if (teamId.isEmpty) return;
+
+              showProfileDialog(
+                context,
+                teamId,
+                true,
+                currentUserUid: widget.teamId,
+                currentUserName: 'チームメンバー',
+              );
+            },
+            child: Center(
+              child: Text(
+                (team['teamName'] ?? 'チーム名不明').toString().length > 8
+                    ? '${team['teamName'].toString().substring(0, 8)}…'
+                    : team['teamName'].toString(),
+                style: TextStyle(
+                  fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+                  color: isTeam ? Colors.blue : Colors.black,
+                ),
+              ),
             ),
           ),
-        )),
+        ),
         DataCell(Center(
           child: Text(
             formatPercentage(
@@ -1859,17 +1890,33 @@ bool _isTeamInSelectedAgeGroup() {
             ),
           ),
         )),
-        DataCell(Center(
-          child: Text(
-            (team['teamName'] ?? 'チーム名不明').toString().length > 8
-                ? '${team['teamName'].toString().substring(0, 8)}…'
-                : team['teamName'].toString(),
-            style: TextStyle(
-              fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
-              color: isTeam ? Colors.blue : Colors.black,
+        DataCell(
+          GestureDetector(
+            onLongPress: () {
+              final teamId = team['id']?.toString() ?? '';
+              if (teamId.isEmpty) return;
+
+              showProfileDialog(
+                context,
+                teamId,
+                true,
+                currentUserUid: widget.teamId,
+                currentUserName: 'チームメンバー',
+              );
+            },
+            child: Center(
+              child: Text(
+                (team['teamName'] ?? 'チーム名不明').toString().length > 8
+                    ? '${team['teamName'].toString().substring(0, 8)}…'
+                    : team['teamName'].toString(),
+                style: TextStyle(
+                  fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+                  color: isTeam ? Colors.blue : Colors.black,
+                ),
+              ),
             ),
           ),
-        )),
+        ),
         DataCell(Center(
           child: Text(
             formatPercentage(
@@ -1910,17 +1957,33 @@ bool _isTeamInSelectedAgeGroup() {
             ),
           ),
         )),
-        DataCell(Center(
-          child: Text(
-            (team['teamName'] ?? 'チーム名不明').toString().length > 8
-                ? '${team['teamName'].toString().substring(0, 8)}…'
-                : team['teamName'].toString(),
-            style: TextStyle(
-              fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
-              color: isTeam ? Colors.blue : Colors.black,
+        DataCell(
+          GestureDetector(
+            onLongPress: () {
+              final teamId = team['id']?.toString() ?? '';
+              if (teamId.isEmpty) return;
+
+              showProfileDialog(
+                context,
+                teamId,
+                true,
+                currentUserUid: widget.teamId,
+                currentUserName: 'チームメンバー',
+              );
+            },
+            child: Center(
+              child: Text(
+                (team['teamName'] ?? 'チーム名不明').toString().length > 8
+                    ? '${team['teamName'].toString().substring(0, 8)}…'
+                    : team['teamName'].toString(),
+                style: TextStyle(
+                  fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+                  color: isTeam ? Colors.blue : Colors.black,
+                ),
+              ),
             ),
           ),
-        )),
+        ),
         DataCell(Center(
           child: Text(
             formatPercentageEra(
@@ -1963,17 +2026,33 @@ bool _isTeamInSelectedAgeGroup() {
             ),
           ),
         )),
-        DataCell(Center(
-          child: Text(
-            (team['teamName'] ?? 'チーム名不明').toString().length > 8
-                ? '${team['teamName'].toString().substring(0, 8)}…'
-                : team['teamName'].toString(),
-            style: TextStyle(
-              fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
-              color: isTeam ? Colors.blue : Colors.black,
+        DataCell(
+          GestureDetector(
+            onLongPress: () {
+              final teamId = team['id']?.toString() ?? '';
+              if (teamId.isEmpty) return;
+
+              showProfileDialog(
+                context,
+                teamId,
+                true,
+                currentUserUid: widget.teamId,
+                currentUserName: 'チームメンバー',
+              );
+            },
+            child: Center(
+              child: Text(
+                (team['teamName'] ?? 'チーム名不明').toString().length > 8
+                    ? '${team['teamName'].toString().substring(0, 8)}…'
+                    : team['teamName'].toString(),
+                style: TextStyle(
+                  fontWeight: isTeam ? FontWeight.bold : FontWeight.normal,
+                  color: isTeam ? Colors.blue : Colors.black,
+                ),
+              ),
             ),
           ),
-        )),
+        ),
         DataCell(Center(
           child: Text(
             formatPercentage(

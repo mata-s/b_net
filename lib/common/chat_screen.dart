@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // クリップボード用
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:video_player/video_player.dart'; // 動画再生用
+// import 'package:video_player/video_player.dart'; // 動画再生用
 import 'package:image/image.dart' as img; // 画像圧縮用
 import 'package:b_net/common/profile_dialog.dart';
 
@@ -38,7 +38,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
   User? _user;
-  VideoPlayerController? _videoController;
+  // VideoPlayerController? _videoController;
   List<File> _imageFiles = [];
   late final Stream<QuerySnapshot> _messageStream;
   String? _userName; // Firestore 上のユーザー名
@@ -355,40 +355,40 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _pickVideo() async {
-    final XFile? videoFile =
-        await ImagePicker().pickVideo(source: ImageSource.gallery);
-    if (videoFile != null) {
-      setState(() {
-        _isUploading = true; // 🔹 動画アップロード開始
-      });
-      File file = File(videoFile.path);
-      await _validateAndUploadVideo(file);
-      setState(() {
-        _isUploading = false; // 🔹 動画アップロード完了
-      });
-    }
-  }
+  // Future<void> _pickVideo() async {
+  //   final XFile? videoFile =
+  //       await ImagePicker().pickVideo(source: ImageSource.gallery);
+  //   if (videoFile != null) {
+  //     setState(() {
+  //       _isUploading = true; // 🔹 動画アップロード開始
+  //     });
+  //     File file = File(videoFile.path);
+  //     await _validateAndUploadVideo(file);
+  //     setState(() {
+  //       _isUploading = false; // 🔹 動画アップロード完了
+  //     });
+  //   }
+  // }
 
-  Future<void> _validateAndUploadVideo(File videoFile) async {
-    _videoController = VideoPlayerController.file(videoFile);
-    await _videoController!.initialize();
+  // Future<void> _validateAndUploadVideo(File videoFile) async {
+  //   _videoController = VideoPlayerController.file(videoFile);
+  //   await _videoController!.initialize();
 
-    final videoDuration = _videoController!.value.duration;
-    if (videoDuration.inSeconds > 30) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('30秒以内の動画のみアップロード可能です。')),
-      );
-      return;
-    }
+  //   final videoDuration = _videoController!.value.duration;
+  //   if (videoDuration.inSeconds > 30) {
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       const SnackBar(content: Text('30秒以内の動画のみアップロード可能です。')),
+  //     );
+  //     return;
+  //   }
 
-    String fileName =
-        'chat_videos/${DateTime.now().millisecondsSinceEpoch}.mp4';
-    Reference storageRef = _storage.ref().child(fileName);
-    await storageRef.putFile(videoFile);
-    String downloadUrl = await storageRef.getDownloadURL();
-    await _sendMessage('', videoUrl: downloadUrl);
-  }
+  //   String fileName =
+  //       'chat_videos/${DateTime.now().millisecondsSinceEpoch}.mp4';
+  //   Reference storageRef = _storage.ref().child(fileName);
+  //   await storageRef.putFile(videoFile);
+  //   String downloadUrl = await storageRef.getDownloadURL();
+  //   await _sendMessage('', videoUrl: downloadUrl);
+  // }
 
   /// **Timestamp を `MM月dd日` 形式に変換**
   String _formatDateHeader(Timestamp timestamp) {
@@ -408,7 +408,12 @@ class _ChatScreenState extends State<ChatScreen> {
           onTap: () {
             if (widget.recipientId != null && widget.recipientId!.isNotEmpty) {
               showProfileDialog(
-                  context, widget.recipientId!, false); // 🔹 false = ユーザープロフィール
+                context, 
+                widget.recipientId!, 
+                false,
+                currentUserUid: _user?.uid,
+                currentUserName: _userName ?? '匿名',
+              );
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text("相手のプロフィールを開けません")),
@@ -688,7 +693,13 @@ class _ChatScreenState extends State<ChatScreen> {
             GestureDetector(
               onTap: () {
                 if (widget.recipientId != null) {
-                  showProfileDialog(context, widget.recipientId!, false);
+                  showProfileDialog(
+                    context, 
+                    widget.recipientId!, 
+                    false,
+                    currentUserUid: _user?.uid,
+                    currentUserName: _userName ?? '匿名',
+                  );
                 } else {
                   print("⚠️ recipientId is null");
                 }

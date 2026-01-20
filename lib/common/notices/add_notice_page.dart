@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_linkify/flutter_linkify.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class AddNoticePage extends StatefulWidget {
   const AddNoticePage({super.key});
@@ -127,15 +125,6 @@ class _AddNoticePageState extends State<AddNoticePage> {
     Navigator.pop(context);
   }
 
-  /// **URLをタップすると開く**
-  Future<void> _onOpenLink(LinkableElement link) async {
-    if (await canLaunchUrl(Uri.parse(link.url))) {
-      await launchUrl(Uri.parse(link.url),
-          mode: LaunchMode.externalApplication);
-    } else {
-      debugPrint("シミュレーターでは開けません: ${link.url}");
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

@@ -213,31 +213,6 @@ class _NationalHitState extends State<NationalHit> {
     ];
   }
 
-  static Widget _buildVerticalText(String text) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 80),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: text.split('').map((char) {
-          return Flexible(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Transform.rotate(
-                angle: char == 'ー' ? 90 * 3.14159 / 180 : 0, // 「ー」の場合90度回転
-                child: Text(
-                  char,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
   Widget _buildPlayerNational() {
     return const Center(
       child: Text(

@@ -91,7 +91,7 @@ class _HomePageState extends State<HomePage> {
         bool hasOngoing = false;
 
         for (final doc in snapshot.docs) {
-          final data = doc.data() as Map<String, dynamic>;
+          final data = doc.data();
 
           // month は "YYYY-MM" / "YYYY-M" の両方を許容して "YYYY-MM" に正規化
           String? month;
@@ -186,7 +186,7 @@ class _HomePageState extends State<HomePage> {
         int totalUnread = 0;
 
         for (var doc in chatSnapshot.docs) {
-          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+          Map<String, dynamic> data = doc.data();
           int unreadCount = data['unreadCounts']?[userId] ?? 0;
           totalUnread += unreadCount;
         }
@@ -772,7 +772,6 @@ class _UnreadDot extends StatelessWidget {
 class _RichDrawerTile extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String? subtitle;
   final VoidCallback onTap;
   final String? badgeText;
   final Widget? trailingWidget;
@@ -783,7 +782,6 @@ class _RichDrawerTile extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.onTap,
-    this.subtitle,
     this.badgeText,
     this.trailingWidget,
     this.leadingIconColor,
@@ -836,13 +834,6 @@ class _RichDrawerTile extends StatelessWidget {
           ],
         ],
       ),
-      subtitle: (subtitle == null)
-          ? null
-          : Text(
-              subtitle!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
       trailing: trailingWidget ?? const Icon(Icons.chevron_right),
       onTap: onTap,
       dense: false,

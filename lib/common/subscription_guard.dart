@@ -341,7 +341,7 @@ class _FeaturePage {
 class _FeatureCard extends StatelessWidget {
   final _FeaturePage page;
 
-  const _FeatureCard({super.key, required this.page});
+  const _FeatureCard({required this.page});
 
   @override
   Widget build(BuildContext context) {

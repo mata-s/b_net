@@ -226,104 +226,185 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       appBar: AppBar(
         title: const Text('プロフィール編集'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            GestureDetector(
-              onTap: _pickImage,
-              child: CircleAvatar(
-                radius: 50,
-                backgroundImage: _profileImageFile != null
-                    ? FileImage(_profileImageFile!)
-                    : (_profileImageUrl != null && _profileImageUrl!.isNotEmpty)
-                        ? NetworkImage(_profileImageUrl!)
-                        : const AssetImage('assets/default_avatar.png')
-                            as ImageProvider,
-                child: _profileImageFile == null
-                    ? const Icon(Icons.camera_alt, size: 50)
-                    : null,
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(labelText: '名前'),
-            ),
-            const SizedBox(height: 20),
-            // 都道府県選択
-            GestureDetector(
-              onTap: () {
-                _showCupertinoPrefecturePicker(context);
-              },
-              child: AbsorbPointer(
-                child: TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: '都道府県',
-                    border: UnderlineInputBorder(),
-                    suffixIcon: Icon(Icons.arrow_drop_down), // 🔽 右側に下矢印アイコン追加
-                  ),
-                  controller: TextEditingController(
-                    text: _selectedPrefecture ?? '選択してください',
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight,
+                ),
+                child: IntrinsicHeight(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      GestureDetector(
+                        onTap: _pickImage,
+                        child: CircleAvatar(
+                          radius: 50,
+                          backgroundImage: _profileImageFile != null
+                              ? FileImage(_profileImageFile!)
+                              : (_profileImageUrl != null &&
+                                      _profileImageUrl!.isNotEmpty)
+                                  ? NetworkImage(_profileImageUrl!)
+                                  : const AssetImage(
+                                          'assets/default_avatar.png')
+                                      as ImageProvider,
+                          child: const Icon(Icons.camera_alt, size: 50),
+                        ),
+                      ),
+                      // 🔹 プロフィール写真削除ボタン（画像があるときだけ表示）
+                      if (_profileImageFile != null ||
+                          (_profileImageUrl != null &&
+                              _profileImageUrl!.isNotEmpty))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _profileImageFile = null;
+                                _profileImageUrl = '';
+                              });
+                            },
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                            label: const Text(
+                              '写真を削除',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              tapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(labelText: '名前'),
+                      ),
+                      const SizedBox(height: 20),
+                      // 都道府県選択
+                      GestureDetector(
+                        onTap: () {
+                          _showCupertinoPrefecturePicker(context);
+                        },
+                        child: AbsorbPointer(
+                          child: TextFormField(
+                            decoration: const InputDecoration(
+                              labelText: '都道府県',
+                              border: UnderlineInputBorder(),
+                              suffixIcon: Icon(Icons.arrow_drop_down),
+                            ),
+                            controller: TextEditingController(
+                              text:
+                                  _selectedPrefecture ?? '選択してください',
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      // 🔹 自己紹介フィールド追加
+                      TextField(
+                        controller: _bioController,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          labelText: '自己紹介',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'ポジションを選択(複数選択可)',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 5.0,
+                        runSpacing: 5.0,
+                        children:
+                            _availablePositions.map((String position) {
+                          return ChoiceChip(
+                            label: Text(position),
+                            selected:
+                                _selectedPositions.contains(position),
+                            onSelected: (selected) {
+                              setState(() {
+                                if (selected) {
+                                  _selectedPositions.add(position);
+                                } else {
+                                  _selectedPositions.remove(position);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 20),
+                      Align(
+                        alignment: Alignment.center,
+                        child: ElevatedButton(
+                          onPressed:
+                              _isLoading ? null : _saveProfile, // 🔹 ローディング中は押せない
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white, // 🔹 ボタン内のインジケーターを白に
+                                    strokeWidth: 3,
+                                  ),
+                                )
+                              : const Text('保存'),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
-            // 🔹 自己紹介フィールド追加
-            TextField(
-              controller: _bioController,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: '自己紹介',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'ポジションを選択(複数選択可)',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 5.0,
-              runSpacing: 5.0,
-              children: _availablePositions.map((String position) {
-                return ChoiceChip(
-                  label: Text(position),
-                  selected: _selectedPositions.contains(position),
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        _selectedPositions.add(position);
-                      } else {
-                        _selectedPositions.remove(position);
-                      }
-                    });
-                  },
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _isLoading ? null : _saveProfile, // 🔹 ローディング中は押せない
-              child: _isLoading
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        color: Colors.white, // 🔹 ボタン内のインジケーターを白に
-                        strokeWidth: 3,
-                      ),
-                    )
-                  : const Text('保存'),
-            ),
-          ],
+            );
+          },
         ),
       ),
+      bottomNavigationBar: MediaQuery.of(context).viewInsets.bottom > 0
+          ? Padding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: Container(
+                height: 44,
+                color: Colors.grey[100],
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    GestureDetector(
+                      onTap: () => FocusScope.of(context).unfocus(),
+                      child: const Text(
+                        '完了',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.blue,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 }

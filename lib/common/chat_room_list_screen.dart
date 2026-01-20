@@ -16,11 +16,14 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   User? _user;
+  Set<String> _blockedUserIds = {};
+  bool _blockedUsersLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _user = _auth.currentUser;
+    _loadBlockedUsers();
   }
 
   void _openChatRoom(String roomId, List<dynamic> participants) async {
@@ -135,6 +138,40 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     }
   }
 
+  /// **ブロックしているユーザー一覧を取得**
+  Future<void> _loadBlockedUsers() async {
+    final current = _auth.currentUser;
+    if (current == null) {
+      setState(() {
+        _blockedUserIds = {};
+        _blockedUsersLoaded = true;
+      });
+      return;
+    }
+
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(current.uid)
+          .collection('blockedUsers')
+          .get();
+
+      if (!mounted) return;
+
+      setState(() {
+        _blockedUserIds = snapshot.docs.map((d) => d.id).toSet();
+        _blockedUsersLoaded = true;
+      });
+    } catch (e) {
+      // 読み込みに失敗してもチャット一覧自体は表示できるようにする
+      if (!mounted) return;
+      setState(() {
+        _blockedUserIds = {};
+        _blockedUsersLoaded = true;
+      });
+    }
+  }
+
   /// **メッセージを短縮（20文字以上の場合に省略）**
   String _shortenMessage(String message) {
     return message.length > 20 ? '${message.substring(0, 20)}...' : message;
@@ -161,7 +198,33 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
             return const Center(child: Text('チャットルームがありません'));
           }
 
-          List<QueryDocumentSnapshot> chatRooms = snapshot.data!.docs;
+          if (!_blockedUsersLoaded) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          List<QueryDocumentSnapshot> chatRooms = snapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final participants = (data['participants'] as List<dynamic>?) ?? [];
+            if (_user == null || participants.isEmpty) return false;
+
+            final String currentUserId = _user!.uid;
+            // 自分以外の相手ユーザーIDを取得
+            final String otherUserId = participants
+                .firstWhere(
+                  (id) => id != currentUserId,
+                  orElse: () => '',
+                )
+                .toString();
+
+            if (otherUserId.isEmpty) return false;
+
+            // ブロックしているユーザーとのチャットルームは表示しない
+            if (_blockedUserIds.contains(otherUserId)) {
+              return false;
+            }
+
+            return true;
+          }).toList();
 
           // 🔥 `lastMessageAt` がないデータにも対応
           chatRooms.sort((a, b) {

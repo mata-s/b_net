@@ -96,16 +96,6 @@ class _GameTeamInputPageState extends State<GameTeamInputPage> {
     print("Saving process completed and state updated.");
   }
 
-  void _resetControllers() {
-    _locationControllers.clear();
-    _opponentControllers.clear();
-    _scoreControllers.clear();
-    _runsAllowedControllers.clear();
-    _selectedGameType.clear();
-    _selectedResult.clear();
-    numberOfMatches = 0;
-  }
-
   Widget _buildGameTypePicker(int index, StateSetter setState) {
     return GestureDetector(
       onTap: () {

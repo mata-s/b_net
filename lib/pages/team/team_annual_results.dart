@@ -501,7 +501,7 @@ class _TeamAnnualResultsPageState extends State<TeamAnnualResultsPage> {
 
     final statsMapRaw = stats['stats'];
     final Map<String, dynamic> statsMap = (statsMapRaw is Map)
-        ? Map<String, dynamic>.from(statsMapRaw as Map)
+        ? Map<String, dynamic>.from(statsMapRaw)
         : <String, dynamic>{};
 
     return Column(

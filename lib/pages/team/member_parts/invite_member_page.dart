@@ -71,7 +71,7 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
 
       // 端末側で「スペース除去後の名前」が入力を含むかでフィルタ
       final filtered = userSnapshot.docs.where((doc) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final name = (data['name'] ?? '').toString();
         final normalizedName = _normalizeName(name);
         return normalizedName.contains(normalizedQuery);

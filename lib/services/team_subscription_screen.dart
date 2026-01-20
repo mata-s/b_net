@@ -1283,8 +1283,8 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
           // --- 審査向け：購読に関する詳細案内 ---
           Text(
             '■ 料金の請求について\n'
-            '・購入確定時に、Apple ID / Google アカウントに代金が請求されます。\n'
-            '・支払いは各ストア（App Store / Google Play）を通じて処理されます。',
+            '・購入確定時に、ご利用のストアアカウントに代金が請求されます。\n'
+            '・支払いは、ご利用のストアを通じて処理されます。',
             style: textStyle,
           ),
           const SizedBox(height: 10),
@@ -1300,9 +1300,8 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
 
         Text(
             '■ 解約（自動更新の停止）・プラン変更\n'
-            '・解約/プラン変更は、アプリ内ではなく App Store / Google Play のサブスクリプション管理から行えます。解約しても、現在の請求期間が終了するまでは利用できます。\n'
-            '・（iOS）設定アプリ ＞ Apple ID ＞ サブスクリプション\n'
-            '・（Android）Google Play ＞ お支払いと定期購入 ＞ 定期購入',
+            '・解約/プラン変更は、アプリ内ではなく、ご利用のストアのサブスクリプション管理画面から行えます。\n'
+            '・解約しても、現在の請求期間が終了するまでは機能を利用できます。',
             style: textStyle,
           ),
           const SizedBox(height: 10),
@@ -1310,8 +1309,8 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
 
           Text(
             '■ 返金について\n'
-            '・購入後の返金可否や手続きは、App Store / Google Play のポリシーに従います。\n'
-            '・返金を希望する場合は、各ストアのサポート窓口からお手続きください。',
+            '・購入後の返金可否や手続きは、各ストアのポリシーに従います。\n'
+            '・返金を希望する場合は、ご利用のストアのサポート窓口からお手続きください。',
             style: textStyle,
           ),
           const SizedBox(height: 10),
@@ -1337,10 +1336,11 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
                 onTap: () => _openUrl(context, termsUrl),
                 child: Text('利用規約', style: linkStyle),
               ),
-              GestureDetector(
-                onTap: () => _openUrl(context, appleEulaUrl),
-                child: Text('Apple 標準利用規約 (EULA)', style: linkStyle),
-              ),
+              if (Theme.of(context).platform == TargetPlatform.iOS)
+                GestureDetector(
+                  onTap: () => _openUrl(context, appleEulaUrl),
+                  child: Text('Apple 標準利用規約 (EULA)', style: linkStyle),
+                ),
             ],
           ),
         ],

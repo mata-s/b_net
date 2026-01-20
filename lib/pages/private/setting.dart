@@ -2,6 +2,7 @@ import 'package:b_net/login/login_page.dart';
 import 'package:b_net/pages/private/change_mail.dart';
 import 'package:b_net/pages/private/delete_account_page.dart';
 import 'package:b_net/pages/private/password_reset.dart';
+import 'package:b_net/pages/private/blocked_users_page.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -16,8 +17,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  // Webサイト（b-net-web）のベースURL
-  // ※デプロイ先に合わせて必要なら変更してください
   static const String _webBaseUrl = 'https://baseball-net.vercel.app';
 
   bool _notificationsEnabled = true;
@@ -229,6 +228,26 @@ class _SettingsPageState extends State<SettingsPage> {
                           Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => const PasswordResetPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _divider(),
+                      ListTile(
+                        leading: const Icon(Icons.block),
+                        title: const Text('ブロックしたユーザー'),
+                        subtitle: const Text(
+                          'ブロックしたユーザーの一覧と解除',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BlockedUsersPage(
+                                userUid: _currentUser?.uid,
+                              ),
                             ),
                           );
                         },

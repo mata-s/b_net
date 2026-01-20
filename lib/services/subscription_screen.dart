@@ -685,57 +685,67 @@ class SubscriptionLegalSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            '・「月額プラン」は 1か月ごとの自動更新サブスクリプションです。',
-            style: textStyle,
-          ),
-          const Text(
+            '■ プランの種類\n'
+            '・「月額プラン」は 1か月ごとの自動更新サブスクリプションです。\n'
             '・「年額プラン」は 1年ごとの自動更新サブスクリプションです。',
             style: textStyle,
           ),
+          const SizedBox(height: 10),
+
           const Text(
-            '・料金は購入確定時に（iOSはApple ID、AndroidはGoogle Play）に請求されます。',
+            '■ 料金の請求について\n'
+            '・料金は購入確定時に、ご利用のストアアカウントに請求されます。',
             style: textStyle,
           ),
+          const SizedBox(height: 10),
+
           const Text(
-            '・現在の期間が終了する24時間前までに自動更新をオフにしない限り、自動的に更新されます。',
+            '■ 自動更新について\n'
+            '・本プランは自動更新のサブスクリプションです。\n'
+            '・現在の期間が終了する24時間前までに解約しない限り、自動的に更新されます。\n'
+            '・更新時には、次回分の料金が同じストアアカウントに請求されます。',
             style: textStyle,
           ),
+          const SizedBox(height: 10),
+
           const Text(
-            '・解約/プラン変更は、アプリ内ではなく App Store / Google Play のサブスクリプション管理から行えます。解約しても、現在の請求期間が終了するまでは利用できます。',
+            '■ 解約（自動更新の停止）・プラン変更\n'
+            '・解約/プラン変更は、アプリ内ではなく、ご利用のストアのサブスクリプション管理画面から行えます。\n'
+            '・解約しても、現在の請求期間が終了するまでは機能を利用できます。',
             style: textStyle,
           ),
+          const SizedBox(height: 10),
+
           const Text(
-            '・（iOS）設定アプリ ＞ Apple ID ＞ サブスクリプション',
-            style: textStyle,
-          ),
-          const Text(
-            '・（Android）Google Play ＞ お支払いと定期購入 ＞ 定期購入',
-            style: textStyle,
-          ),
-          const Text(
-            '・無料トライアルがある場合、トライアル終了後に自動的に有料期間に切り替わります。',
-            style: textStyle,
-          ),
-          const Text(
+            '■ 無料トライアルについて\n'
+            '・無料トライアルがある場合、トライアル終了後に自動的に有料期間に切り替わります。\n'
             '・無料トライアルを利用している場合、トライアル期間中に解約しても請求は発生しません。',
             style: textStyle,
           ),
+          const SizedBox(height: 10),
+
           const Text(
+            '■ 購入の復元について\n'
             '・購入の復元（機種変更時など）は、画面右上の「復元」から行えます。',
             style: textStyle,
           ),
+          const SizedBox(height: 10),
+
           const Text(
-            '・払い戻し（返金）については、Apple / Google の規定に従い、原則としてストア側での対応となります。',
+            '■ 返金について\n'
+            '・購入後の返金可否や手続きは、各ストアのポリシーに従います。\n'
+            '・返金を希望する場合は、ご利用のストアのサポート窓口からお手続きください。',
             style: textStyle,
           ),
+          const SizedBox(height: 10),
+
           const Text(
-            '・プランの有効期間中は、解約しても機能がすぐに止まることはありません（期間終了まで利用できます）。',
-            style: textStyle,
-          ),
-          const Text(
+            '■ その他\n'
+            '・プランの有効期間中は、解約しても機能がすぐに止まることはありません（期間終了まで利用できます）。\n'
             '・アプリ内の表示や利用可否は、ストアの購読状態（有効/失効）に基づいて反映されます。反映に少し時間がかかる場合があります。',
             style: textStyle,
           ),
+
           const SizedBox(height: 12),
           Wrap(
             spacing: 16,
@@ -749,6 +759,7 @@ class SubscriptionLegalSection extends StatelessWidget {
                 onTap: () => _openUrl(context, termsUrl),
                 child: Text('利用規約', style: linkStyle),
               ),
+              if (Theme.of(context).platform == TargetPlatform.iOS)
               GestureDetector(
                 onTap: () => _openUrl(context, appleEulaUrl),
                 child: Text('Apple 標準利用規約 (EULA)', style: linkStyle),

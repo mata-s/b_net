@@ -38,13 +38,13 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
     bool foundTodayDoc = false;
 
     for (var doc in snapshot.docs) {
-      final createdAt = (doc.data() as Map<String, dynamic>)['createdAt'];
+      final createdAt = (doc.data())['createdAt'];
       if (createdAt != null && createdAt is Timestamp) {
         final createdAtDate = createdAt.toDate();
         final createdStart = DateTime(
             createdAtDate.year, createdAtDate.month, createdAtDate.day);
         if (createdStart == todayStart) {
-          data = doc.data() as Map<String, dynamic>;
+          data = doc.data();
           foundTodayDoc = true;
           break;
         }
@@ -69,7 +69,7 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
       });
     } else {
       final docRef = snapshot.docs.firstWhere((doc) {
-        final createdAt = (doc.data() as Map<String, dynamic>)['createdAt'];
+        final createdAt = doc.data()['createdAt'];
         if (createdAt is Timestamp) {
           final createdAtDate = createdAt.toDate();
           final createdStart = DateTime(
@@ -126,7 +126,7 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
         .get();
 
     for (var doc in snapshot.docs) {
-      final createdAt = (doc.data() as Map<String, dynamic>)['createdAt'];
+      final createdAt = doc.data()['createdAt'];
       if (createdAt != null && createdAt is Timestamp) {
         final createdAtDate = createdAt.toDate();
         final createdStart = DateTime(

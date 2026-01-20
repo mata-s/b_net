@@ -110,30 +110,6 @@ class _TeamMissionPageState extends State<TeamMissionPage> {
 
   bool get _isCustomMonthGoal => _selectedMonthStatField == 'custom';
 
-  /// Auto-save expired goals with debugging output.
-  Future<void> _autoSaveExpiredGoals() async {
-    // No-op: auto-save logic removed as per requirements.
-    return;
-  }
-
-  // Firestoreから指定フィールドの今年の値を取得
-  Future<int> _calculateActual(dynamic type, dynamic field) async {
-    final year = DateTime.now().year;
-    final statsDoc = await FirebaseFirestore.instance
-        .collection('teams')
-        .doc(widget.teamId)
-        .collection('stats')
-        .doc('results_stats_${year}_all')
-        .get();
-
-    if (statsDoc.exists) {
-      final stats = statsDoc.data() ?? {};
-      final raw = stats[field];
-      return raw is int ? raw : int.tryParse(raw.toString()) ?? 0;
-    }
-    return 0;
-  }
-
   final TextEditingController _yearTitleController = TextEditingController();
   final TextEditingController _yearValueController = TextEditingController();
   final TextEditingController _monthValueController = TextEditingController();

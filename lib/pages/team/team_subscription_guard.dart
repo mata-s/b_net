@@ -334,7 +334,7 @@ class _FeaturePage {
 class _FeatureCard extends StatelessWidget {
   final _FeaturePage page;
 
-  const _FeatureCard({super.key, required this.page});
+  const _FeatureCard({required this.page});
 
   @override
   Widget build(BuildContext context) {
@@ -381,7 +381,7 @@ class _FeatureCard extends StatelessWidget {
 }
 
 class _TeamPricingSection extends StatelessWidget {
-  const _TeamPricingSection({super.key});
+  const _TeamPricingSection();
 
   @override
   Widget build(BuildContext context) {
@@ -432,7 +432,6 @@ class _PlanCard extends StatelessWidget {
   final String description;
 
   const _PlanCard({
-    super.key,
     required this.title,
     required this.price,
     required this.badgeText,

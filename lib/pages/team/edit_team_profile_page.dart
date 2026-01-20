@@ -161,7 +161,7 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
           'teamDescription': _teamDescriptionController.text,
           'prefecture': _selectedPrefecture,
           'achievements': _achievements,
-          if (imageUrl != null) 'profileImage': imageUrl,
+          'profileImage': imageUrl ?? _profileImageUrl,
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -263,6 +263,37 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
                     ],
                   ),
                 ),
+                // 🔹 チームプロフィール写真削除ボタン（画像があるときだけ表示）
+                if (_profileImage != null ||
+                    (_profileImageUrl != null &&
+                        _profileImageUrl!.isNotEmpty))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _profileImage = null;
+                          _profileImageUrl = '';
+                        });
+                      },
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: Colors.grey,
+                      ),
+                      label: const Text(
+                        '写真を削除',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _teamNameController,
@@ -351,6 +382,33 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
           ),
         ),
       ),
+      bottomNavigationBar: MediaQuery.of(context).viewInsets.bottom > 0
+          ? Padding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: Container(
+                height: 44,
+                color: Colors.grey[100],
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    GestureDetector(
+                      onTap: () => FocusScope.of(context).unfocus(),
+                      child: const Text(
+                        '完了',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.blue,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 

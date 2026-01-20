@@ -2,6 +2,7 @@ import 'package:b_net/common/profile_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class PitchingRanking extends StatefulWidget {
   final String uid; // ユーザーのUID
@@ -1275,34 +1276,6 @@ else if (_selectedRankingType == '勝率ランキング') {
     }
   }
 
-  List<DataRow> _buildTopRankedRows() {
-    List<DataRow> result = [];
-
-    if (_selectedRankingType == '防御率ランキング') {
-      // rankが10以下の選手を表示
-      for (var player in _players) {
-        int playerRank = int.tryParse(player['eraRank'].toString()) ?? -1;
-        if (playerRank <= 10) {
-          final isUser = player['id'] == widget.uid;
-          result.add(
-            DataRow(
-              color: MaterialStateProperty.resolveWith<Color?>(
-                (states) {
-                  if (isUser) {
-                    return const Color(0xFF1565C0).withOpacity(0.08);
-                  }
-                  return null;
-                },
-              ),
-              cells: _buildDataCells(player, isUser: isUser),
-            ),
-          );
-        }
-      }
-    }
-
-    return result;
-  }
 
 
     // ==== 共通ヘルパー（前後±2表示用）====
@@ -1448,7 +1421,6 @@ bool _isUserInSelectedAgeGroup() {
       return [
         DataCell(Center(
           child: Text(
-            // player['eraRank']?.toString() ?? '圏外',
             (player['rank'] ?? player['eraRank$ageSuffix'] ?? player['eraRank'] ?? '圏外').toString(),
             style: TextStyle(
               fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
@@ -1460,7 +1432,14 @@ bool _isUserInSelectedAgeGroup() {
           GestureDetector(
             onLongPress: () {
               if (player['id'] != null) {
-                showProfileDialog(context, player['id'].toString(), false);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  player['id'].toString(),
+                  false,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1482,7 +1461,14 @@ bool _isUserInSelectedAgeGroup() {
               final teamIDs = player['teamID'] as List<dynamic>? ?? [];
               if (teamIDs.isNotEmpty) {
                 // 最初の teamID を使用してチームプロフィールを表示
-                showProfileDialog(context, teamIDs.first.toString(), true);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  teamIDs.first.toString(),
+                  true,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1683,7 +1669,14 @@ bool _isUserInSelectedAgeGroup() {
           GestureDetector(
             onLongPress: () {
               if (player['id'] != null) {
-                showProfileDialog(context, player['id'].toString(), false);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  player['id'].toString(),
+                  false,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1705,7 +1698,14 @@ bool _isUserInSelectedAgeGroup() {
               final teamIDs = player['teamID'] as List<dynamic>? ?? [];
               if (teamIDs.isNotEmpty) {
                 // 最初の teamID を使用してチームプロフィールを表示
-                showProfileDialog(context, teamIDs.first.toString(), true);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  teamIDs.first.toString(),
+                  true,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1771,7 +1771,14 @@ bool _isUserInSelectedAgeGroup() {
           GestureDetector(
             onLongPress: () {
               if (player['id'] != null) {
-                showProfileDialog(context, player['id'].toString(), false);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  player['id'].toString(),
+                  false,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1793,7 +1800,14 @@ bool _isUserInSelectedAgeGroup() {
               final teamIDs = player['teamID'] as List<dynamic>? ?? [];
               if (teamIDs.isNotEmpty) {
                 // 最初の teamID を使用してチームプロフィールを表示
-                showProfileDialog(context, teamIDs.first.toString(), true);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  teamIDs.first.toString(),
+                  true,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1859,7 +1873,14 @@ bool _isUserInSelectedAgeGroup() {
           GestureDetector(
             onLongPress: () {
               if (player['id'] != null) {
-                showProfileDialog(context, player['id'].toString(), false);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  player['id'].toString(),
+                  false,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1881,7 +1902,14 @@ bool _isUserInSelectedAgeGroup() {
               final teamIDs = player['teamID'] as List<dynamic>? ?? [];
               if (teamIDs.isNotEmpty) {
                 // 最初の teamID を使用してチームプロフィールを表示
-                showProfileDialog(context, teamIDs.first.toString(), true);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  teamIDs.first.toString(),
+                  true,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1947,7 +1975,14 @@ bool _isUserInSelectedAgeGroup() {
           GestureDetector(
             onLongPress: () {
               if (player['id'] != null) {
-                showProfileDialog(context, player['id'].toString(), false);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  player['id'].toString(),
+                  false,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(
@@ -1969,7 +2004,14 @@ bool _isUserInSelectedAgeGroup() {
               final teamIDs = player['teamID'] as List<dynamic>? ?? [];
               if (teamIDs.isNotEmpty) {
                 // 最初の teamID を使用してチームプロフィールを表示
-                showProfileDialog(context, teamIDs.first.toString(), true);
+                final user = FirebaseAuth.instance.currentUser;
+                showProfileDialog(
+                  context,
+                  teamIDs.first.toString(),
+                  true,
+                  currentUserUid: user?.uid,
+                  currentUserName: user?.displayName,
+                );
               }
             },
             child: Center(

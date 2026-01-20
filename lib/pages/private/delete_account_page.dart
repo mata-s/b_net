@@ -38,7 +38,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
           await _firestore.collection('users').doc(user.uid).get();
       if (!doc.exists) return;
 
-      final data = doc.data() as Map<String, dynamic>?;
+     final data = doc.data();
 
       if (!mounted) return;
       setState(() {

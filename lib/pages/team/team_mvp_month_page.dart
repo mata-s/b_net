@@ -30,9 +30,6 @@ class _TeamMvpMonthPageState extends State<TeamMvpMonthPage>
   DateTime? _voteStartDate;
   DateTime? _voteEndDate;
 
-  // Holds the currently selected MVP event ID
-  String? _selectedMvpId;
-
   // ignore: unused_field
   bool _isTallied = false;
 
@@ -62,7 +59,7 @@ class _TeamMvpMonthPageState extends State<TeamMvpMonthPage>
 
     setState(() {
       _teamMembers = memberSnapshots.where((doc) => doc.exists).map((doc) {
-        final data = doc.data() as Map<String, dynamic>? ?? {};
+        final data = doc.data() ?? {};
         return {
           'id': doc.id,
           'name': data['name'] ?? 'No Name',
@@ -93,10 +90,6 @@ class _TeamMvpMonthPageState extends State<TeamMvpMonthPage>
       'isAnonymous': isAnonymous,
       'votedAt': FieldValue.serverTimestamp(),
     });
-  }
-
-  String _getPlayerName(String playerId) {
-    return _teamMembers.firstWhere((p) => p['id'] == playerId)['name'] ?? '';
   }
 
   // MVP作成用コントローラや状態
@@ -435,40 +428,6 @@ class _TeamMvpMonthPageState extends State<TeamMvpMonthPage>
     );
   }
 
-  Future<void> _submitVote(
-      String votedPlayerId, String comment, bool isAnonymous) async {
-    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUserId == null || _selectedMvpId == null) return;
-
-    final voteData = {
-      'votedPlayerId': votedPlayerId,
-      'comment': comment,
-      'isAnonymous': isAnonymous,
-      'votedAt': Timestamp.now(),
-    };
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('teams')
-          .doc(widget.teamId)
-          .collection('mvp_month')
-          .doc(_selectedMvpId)
-          .collection('votes')
-          .doc(currentUserId)
-          .set(voteData);
-      setState(() {
-        // Optionally update UI state after vote
-        // e.g., mark already voted player id
-        // _alreadyVotedPlayerId = votedPlayerId;
-      });
-      Navigator.of(context).pop(); // close the dialog if not already closed
-    } catch (e) {
-      debugPrint('Error submitting vote: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('投票の送信中にエラーが発生しました')),
-      );
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

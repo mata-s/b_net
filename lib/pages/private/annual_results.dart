@@ -83,31 +83,6 @@ final future = docRef.get().then((doc) {
     return (value: data[baseKey], ageKey: null);
   }
 
-  String _ageLabel(String? ageKey) {
-    if (ageKey == null) return '';
-    switch (ageKey) {
-      case 'age_0_19':
-        return '（10代）';
-      case 'age_20_29':
-        return '（20代）';
-      case 'age_30_39':
-        return '（30代）';
-      case 'age_40_49':
-        return '（40代）';
-      case 'age_50_59':
-        return '（50代）';
-      case 'age_60_69':
-        return '（60代）';
-      case 'age_70_79':
-        return '（70代）';
-      case 'age_80_89':
-        return '（80代）';
-      case 'age_90_100':
-        return '（90代以上）';
-      default:
-        return '';
-    }
-  }
 
   String _rankText(Object? rank) {
     if (rank == null || rank.toString().isEmpty) {
@@ -643,7 +618,7 @@ Widget _miniChip(String text) {
     // 年齢別は stats フィールドの中（Map）に入っている
     final statsMapRaw = stats['stats'];
     final Map<String, dynamic> statsMap = (statsMapRaw is Map)
-        ? Map<String, dynamic>.from(statsMapRaw as Map)
+        ? Map<String, dynamic>.from(statsMapRaw)
         : <String, dynamic>{};
 
     return Column(
@@ -736,10 +711,6 @@ return Container(
     }
   }
 
-  String _ageLongLabelFromTotalKey(String totalKey) {
-    final raw = totalKey.replaceFirst('totalPlayers_age_', '');
-    return raw.replaceAll('_', '-');
-  }
 
   String _formatNumber(dynamic value) {
     if (value == null) return '';

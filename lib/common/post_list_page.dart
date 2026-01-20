@@ -26,6 +26,20 @@ class PostListPage extends StatefulWidget {
 class _PostListPageState extends State<PostListPage> {
   String _selectedPrefecture = ''; // 検索用都道府県
   final TextEditingController _searchController = TextEditingController();
+  Set<String> _blockedUserIds = {};
+  bool _blockedUsersLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBlockedUsers();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   String _normalizePrefecture(String value) {
     return value
@@ -35,6 +49,149 @@ class _PostListPageState extends State<PostListPage> {
         .replaceAll('道', '')
         .replaceAll('府', '')
         .replaceAll('県', '');
+  }
+
+  Future<void> _loadBlockedUsers() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userUid)
+          .collection('blockedUsers')
+          .get();
+
+      if (!mounted) return;
+      setState(() {
+        _blockedUserIds = snap.docs.map((d) => d.id).toSet();
+        _blockedUsersLoaded = true;
+      });
+    } catch (e) {
+      // 読み込みに失敗しても投稿一覧自体は表示できるようにする
+      if (!mounted) return;
+      setState(() {
+        _blockedUsersLoaded = true;
+      });
+    }
+  }
+
+  Future<void> _reportPost({
+    required String postId,
+    required String reportedUserId,
+    required String reason,
+    required String? details,
+  }) async {
+    await FirebaseFirestore.instance.collection('reports').add({
+      'contentType': 'post',
+      'contentId': postId,
+      'reportedUserId': reportedUserId,
+      'reporterUserId': widget.userUid,
+      'reason': reason,
+      'details': details,
+      'createdAt': Timestamp.now(),
+    });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('通報しました')),
+    );
+  }
+
+  Future<void> _blockUserFromPost({
+    required String targetUserId,
+    required String postId,
+    required String? targetUserName,
+  }) async {
+    // ブロック登録
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.userUid)
+        .collection('blockedUsers')
+        .doc(targetUserId)
+        .set({'blockedAt': Timestamp.now()});
+
+    // Apple ガイドライン要件: ブロック時に開発者へ通知（通報記録として残す）
+    await FirebaseFirestore.instance.collection('reports').add({
+      'contentType': 'user_block',
+      'contentId': postId,
+      'reportedUserId': targetUserId,
+      'reporterUserId': widget.userUid,
+      'reason': 'blocked_user',
+      'details': targetUserName,
+      'createdAt': Timestamp.now(),
+    });
+
+    if (!mounted) return;
+    setState(() {
+      _blockedUserIds.add(targetUserId);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ユーザーをブロックしました')),
+    );
+  }
+
+  Future<void> _showReportDialog({
+    required String postId,
+    required String reportedUserId,
+  }) async {
+    String selectedReason = 'inappropriate';
+    final detailsController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('通報する'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                value: selectedReason,
+                items: const [
+                  DropdownMenuItem(value: 'spam', child: Text('スパム')),
+                  DropdownMenuItem(value: 'abuse', child: Text('暴言・嫌がらせ')),
+                  DropdownMenuItem(value: 'inappropriate', child: Text('不適切な内容')),
+                ],
+                onChanged: (v) {
+                  if (v != null) selectedReason = v;
+                },
+                decoration: const InputDecoration(labelText: '理由'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: detailsController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: '詳細（任意）',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('キャンセル'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('送信'),
+            ),
+          ],
+        );
+      },
+    );
+
+    final details = detailsController.text.trim();
+    detailsController.dispose();
+
+    if (result == true) {
+      await _reportPost(
+        postId: postId,
+        reportedUserId: reportedUserId,
+        reason: selectedReason,
+        details: details.isEmpty ? null : details,
+      );
+    }
   }
 
   /// **投稿を削除**
@@ -151,7 +308,13 @@ class _PostListPageState extends State<PostListPage> {
                         ),
                         onTap: () {
                           if (teamId.isNotEmpty) {
-                            showProfileDialog(context, teamId, true);
+                            showProfileDialog(
+                              context, 
+                              teamId, 
+                              true,
+                              currentUserUid: widget.userUid,
+                              currentUserName: widget.userName,
+                            );
                           }
                         },
                       ),
@@ -210,11 +373,22 @@ class _PostListPageState extends State<PostListPage> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                if (!_blockedUsersLoaded) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
                 final posts = snapshot.data!.docs.where((doc) {
                   var post = doc.data() as Map<String, dynamic>;
+
+                  // ブロックしているユーザーの投稿は即非表示
+                  final postedBy = (post['postedBy'] ?? '').toString();
+                  if (postedBy.isNotEmpty && _blockedUserIds.contains(postedBy)) {
+                    return false;
+                  }
+
                   if (_selectedPrefecture.isEmpty) return true;
-                  final postPref = _normalizePrefecture((post['prefecture'] ?? '').toString());
+                  final postPref =
+                      _normalizePrefecture((post['prefecture'] ?? '').toString());
                   final queryPref = _selectedPrefecture;
                   return postPref.contains(queryPref);
                 }).toList();
@@ -266,7 +440,13 @@ class _PostListPageState extends State<PostListPage> {
                             children: [
                               GestureDetector(
                                 onTap: () =>
-                                    showProfileDialog(context, postedBy, false),
+                                    showProfileDialog(
+                                      context,
+                                      postedBy,
+                                      false,
+                                      currentUserUid: widget.userUid,
+                                      currentUserName: widget.userName,
+                                    ),
                                 child: Row(
                                   children: [
                                     CircleAvatar(
@@ -307,13 +487,23 @@ class _PostListPageState extends State<PostListPage> {
                                     onTap: () async {
                                       if (teamId != null && teamId.isNotEmpty) {
                                         showProfileDialog(
-                                            context, teamId, true);
+                                          context,
+                                          teamId,
+                                          true,
+                                          currentUserUid: widget.userUid,
+                                          currentUserName: widget.userName,
+                                        );
                                       } else {
                                         String? fetchedTeamId =
                                             await _fetchTeamId(teamName);
                                         if (fetchedTeamId != null) {
                                           showProfileDialog(
-                                              context, fetchedTeamId, true);
+                                            context, 
+                                            fetchedTeamId, 
+                                            true,
+                                            currentUserUid: widget.userUid,
+                                            currentUserName: widget.userName,
+                                          );
                                         } else {
                                           ScaffoldMessenger.of(context)
                                               .showSnackBar(
@@ -452,21 +642,91 @@ class _PostListPageState extends State<PostListPage> {
                                   ],
                                 )
                               else
-                                // 🔹 自分の投稿ではない場合のみ「連絡を取る」ボタンを表示
-                                Align(
-                                  alignment: Alignment.center,
-                                  child: ElevatedButton(
-                                    onPressed: () {
-                                      startChatRoom(
-                                        context: context,
-                                        recipientId: post['postedBy'],
-                                        recipientName: displayName,
-                                        userUid: widget.userUid,
-                                        userName: widget.userName,
-                                      );
-                                    },
-                                    child: const Text('連絡を取る'),
-                                  ),
+                                Column(
+                                  children: [
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: PopupMenuButton<String>(
+                                        icon: const Icon(Icons.more_horiz,
+                                            color: Colors.grey),
+                                        onSelected: (value) async {
+                                          if (value == 'report') {
+                                            await _showReportDialog(
+                                              postId: postId,
+                                              reportedUserId: postedBy,
+                                            );
+                                          } else if (value == 'block') {
+                                            final confirm = await showDialog<bool>(
+                                              context: context,
+                                              builder: (context) {
+                                                return AlertDialog(
+                                                  title: const Text('ユーザーをブロック'),
+                                                  content: const Text(
+                                                      'このユーザーをブロックしますか？\nブロックすると投稿は即時非表示になります。'),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(context, false),
+                                                      child: const Text('キャンセル'),
+                                                    ),
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(context, true),
+                                                      child: const Text('ブロック'),
+                                                    ),
+                                                  ],
+                                                );
+                                              },
+                                            );
+                                            if (confirm == true) {
+                                              await _blockUserFromPost(
+                                                targetUserId: postedBy,
+                                                postId: postId,
+                                                targetUserName: displayName,
+                                              );
+                                            }
+                                          }
+                                        },
+                                        itemBuilder: (context) => const [
+                                          PopupMenuItem(
+                                            value: 'report',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.flag, color: Colors.red),
+                                                SizedBox(width: 8),
+                                                Text('通報する'),
+                                              ],
+                                            ),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'block',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.block, color: Colors.black54),
+                                                SizedBox(width: 8),
+                                                Text('このユーザーをブロック'),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Align(
+                                      alignment: Alignment.center,
+                                      child: ElevatedButton(
+                                        onPressed: () {
+                                          startChatRoom(
+                                            context: context,
+                                            recipientId: post['postedBy'],
+                                            recipientName: displayName,
+                                            userUid: widget.userUid,
+                                            userName: widget.userName,
+                                          );
+                                        },
+                                        child: const Text('連絡を取る'),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               const Divider(), // 下線
 

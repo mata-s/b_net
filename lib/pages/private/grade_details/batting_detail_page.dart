@@ -80,24 +80,6 @@ class _BattingDetailPageState extends State<BattingDetailPage> {
     return value.toString();
   }
 
-  Widget _buildStatItem(String label, dynamic value, {IconData? icon}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          if (icon != null) Icon(icon, color: Colors.blueAccent, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '$label: ${value != null ? (value is num ? value.toStringAsFixed(3) : value.toString()) : '0.000'}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildStatColumn(String label, dynamic value,
       [double underlineWidth = 40]) {
     return Column(

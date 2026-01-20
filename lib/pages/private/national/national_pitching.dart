@@ -2,6 +2,7 @@ import 'package:b_net/common/profile_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class NationalPitching extends StatefulWidget {
   final String uid;
@@ -396,7 +397,14 @@ class _NationalPitchingState extends State<NationalPitching> {
         GestureDetector(
           onLongPress: () {
             if (player['id'] != null) {
-              showProfileDialog(context, player['id'].toString(), false);
+              final user = FirebaseAuth.instance.currentUser;
+              showProfileDialog(
+                context,
+                player['id'].toString(),
+                false,
+                currentUserUid: user?.uid,
+                currentUserName: user?.displayName,
+              );
             }
           },
           child: Center(
@@ -418,7 +426,14 @@ class _NationalPitchingState extends State<NationalPitching> {
             final teamIDs = player['teamID'] as List<dynamic>? ?? [];
             if (teamIDs.isNotEmpty) {
               // 最初の teamID を使用してチームプロフィールを表示
-              showProfileDialog(context, teamIDs.first.toString(), true);
+              final user = FirebaseAuth.instance.currentUser;
+              showProfileDialog(
+                context,
+                teamIDs.first.toString(),
+                true,
+                currentUserUid: user?.uid,
+                currentUserName: user?.displayName,
+              );
             }
           },
           child: Center(

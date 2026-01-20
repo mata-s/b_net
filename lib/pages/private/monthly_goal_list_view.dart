@@ -328,17 +328,6 @@ class _MonthlyGoalListViewState extends State<MonthlyGoalListView> {
     );
   }
 
-  String _formatYearMonth(String yearMonth) {
-    try {
-      final parts = yearMonth.split('-');
-      if (parts.length == 2) {
-        final year = parts[0];
-        final month = parts[1];
-        return '$year年${int.parse(month)}月';
-      }
-    } catch (_) {}
-    return yearMonth;
-  }
 
   String _formatMonthOnly(String yearMonth) {
     try {

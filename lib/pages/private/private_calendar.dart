@@ -156,10 +156,6 @@ class _PrivateCalendarState extends State<PrivateCalendar> {
     }
   }
 
-  void _resetDataDay() {
-    _selectedDay = _focusedDay;
-    _selectedEvents.value = _getEventsForDay(_selectedDay!);
-  }
 
   @override
   Widget build(BuildContext context) {

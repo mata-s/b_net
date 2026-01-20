@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:b_net/common/chat_utils.dart';
+import 'package:b_net/main.dart';
 
 void showProfileDialog(
     BuildContext context, String accountId, bool isTeamAccount,
@@ -138,20 +139,187 @@ class _ProfileDialogState extends State<ProfileDialog> {
     return "${date.year}年${date.month}月${date.day}日";
   }
 
+  int _calculateAge(Timestamp birthday) {
+    final b = birthday.toDate();
+    final now = DateTime.now();
+
+    int age = now.year - b.year;
+    final hasHadBirthdayThisYear =
+        (now.month > b.month) || (now.month == b.month && now.day >= b.day);
+    if (!hasHadBirthdayThisYear) age -= 1;
+    return age;
+  }
+
+  Future<void> _reportUser({
+    required String reportedUserId,
+    required String reason,
+    required String? details,
+  }) async {
+    if (widget.currentUserUid == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('通報するにはログインが必要です')),
+        );
+      }
+      return;
+    }
+
+    await FirebaseFirestore.instance.collection('reports').add({
+      'contentType': widget.isTeamAccount ? 'team_profile' : 'user_profile',
+      'contentId': reportedUserId,
+      'reportedUserId': reportedUserId,
+      'reporterUserId': widget.currentUserUid,
+      'reason': reason,
+      'details': details,
+      'createdAt': Timestamp.now(),
+    });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(widget.isTeamAccount ? 'チームを通報しました' : 'ユーザーを通報しました'),
+      ),
+    );
+  }
+
+  Future<void> _blockUser({
+    required String targetUserId,
+    required String? targetUserName,
+  }) async {
+    if (widget.currentUserUid == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ブロックするにはログインが必要です')),
+        );
+      }
+      return;
+    }
+
+    // ブロック登録
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.currentUserUid)
+        .collection('blockedUsers')
+        .doc(targetUserId)
+        .set({'blockedAt': Timestamp.now()});
+
+    // Apple ガイドライン要件: ブロック時に開発者へ通知（通報記録として残す）
+    await FirebaseFirestore.instance.collection('reports').add({
+      'contentType': 'user_block',
+      'contentId': targetUserId,
+      'reportedUserId': targetUserId,
+      'reporterUserId': widget.currentUserUid,
+      'reason': 'blocked_user',
+      'details': targetUserName,
+      'createdAt': Timestamp.now(),
+    });
+
+    if (!mounted) return;
+
+    // 先にダイアログを閉じる（context破棄によるassert回避）
+    Navigator.of(context).pop();
+
+    // root ScaffoldMessenger に対して SnackBar を表示
+    Future.microtask(() {
+      final messenger = ScaffoldMessenger.maybeOf(
+          navigatorKey.currentContext ?? context);
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('ユーザーをブロックしました')),
+      );
+    });
+  }
+
+  Future<void> _showUserReportDialog(String reportedUserId) async {
+    String selectedReason = 'inappropriate';
+    final detailsController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(widget.isTeamAccount ? 'チームを通報する' : 'ユーザーを通報する'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                value: selectedReason,
+                items: const [
+                  DropdownMenuItem(value: 'spam', child: Text('スパム')),
+                  DropdownMenuItem(value: 'abuse', child: Text('暴言・嫌がらせ')),
+                  DropdownMenuItem(value: 'inappropriate', child: Text('不適切な内容')),
+                ],
+                onChanged: (v) {
+                  if (v != null) selectedReason = v;
+                },
+                decoration: const InputDecoration(labelText: '理由'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: detailsController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: '詳細（任意）',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('キャンセル'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('送信'),
+            ),
+          ],
+        );
+      },
+    );
+
+    final details = detailsController.text.trim();
+
+    if (result == true) {
+      await _reportUser(
+        reportedUserId: reportedUserId,
+        reason: selectedReason,
+        details: details.isEmpty ? null : details,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.8,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
+    return SafeArea(
+      top: false,
+      bottom: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: MediaQuery.of(context).size.height * 0.4,
+          maxHeight: MediaQuery.of(context).size.height * 0.82,
         ),
-      ),
-      child: FutureBuilder<Map<String, dynamic>?>(
-        future: _profileData,
-        builder: (context, snapshot) {
+        child: Container(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).padding.bottom,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(20),
+              topRight: Radius.circular(20),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 18,
+                offset: const Offset(0, -6),
+              ),
+            ],
+          ),
+          child: FutureBuilder<Map<String, dynamic>?>(
+            future: _profileData,
+            builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -181,290 +349,677 @@ class _ProfileDialogState extends State<ProfileDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Image(
-                  image: profileImageUrl
-                          .startsWith('http') // ネットワーク画像なら `NetworkImage`
-                      ? NetworkImage(profileImageUrl) as ImageProvider
-                      : AssetImage(profileImageUrl)
-                          as ImageProvider, // ローカル画像なら `AssetImage`
-                  width: MediaQuery.of(context).size.width,
-                  height: MediaQuery.of(context).size.height * 0.3,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Image.asset(
-                      widget.isTeamAccount
-                          ? 'assets/default_team_avatar.png'
-                          : 'assets/default_avatar.png',
-                      width: MediaQuery.of(context).size.width,
-                      height: MediaQuery.of(context).size.height * 0.3,
-                      fit: BoxFit.cover,
-                    );
-                  },
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  name,
-                  style: const TextStyle(
-                      fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-
-                if (widget.isTeamAccount) ...[
-                  if (data['prefecture'] != null &&
-                      data['prefecture'].toString().isNotEmpty)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.location_on,
-                            size: 20, color: Colors.grey),
-                        const SizedBox(width: 5),
-                        Text(
-                          data['prefecture'],
-                          style: const TextStyle(fontSize: 18),
+                    // ===== Header =====
+                    if (widget.isTeamAccount)
+                      ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          topRight: Radius.circular(20),
                         ),
-                      ],
-                    ),
-                  if (data['averageAge'] != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '平均年齢: ${data['averageAge']}歳',
-                            style: const TextStyle(fontSize: 18),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (data['startYear'] != null &&
-                      data['startYear'].toString().isNotEmpty)
-                    const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text('チーム結成: ',
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text('${data['startYear']}年',
-                          style: const TextStyle(fontSize: 18)),
-                    ],
-                  ),
-                  if (data['achievements'] != null &&
-                      data['achievements'].isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    const Text('実績',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children:
-                          List.generate(data['achievements'].length, (index) {
-                        return Text('- ${data['achievements'][index]}',
-                            style: const TextStyle(fontSize: 18));
-                      }),
-                    ),
-                  ],
-                  if (data['teamDescription'] != null &&
-                      data['teamDescription'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    const Text('チーム紹介文',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0, vertical: 8.0),
-                      child: Text(
-                        data['teamDescription'],
-                        style: const TextStyle(fontSize: 18),
-                      ),
-                    ),
-                  ],
-                ],
-                if (!widget.isTeamAccount) ...[
-                  Center(
-                    // 🔹 全体を中央揃え
-                    child: Container(
-                      constraints: BoxConstraints(
-                        maxHeight: MediaQuery.of(context).size.height *
-                            0.6, // 60%の高さ制限
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.center, // 🔹 テキストを中央揃え
+                        child: Stack(
                           children: [
-                            // ✅ 都道府県（データがある場合のみ表示）
-                            if (data['prefecture'] != null &&
-                                data['prefecture'].toString().isNotEmpty)
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.center, // 🔹 中央揃え
+                            // 背景画像（チームは写真を大きく見せる）
+                            SizedBox(
+                              width: MediaQuery.of(context).size.width,
+                              height: MediaQuery.of(context).size.height * 0.28,
+                              child: Image(
+                                image: profileImageUrl.startsWith('http')
+                                    ? NetworkImage(profileImageUrl)
+                                        as ImageProvider
+                                    : AssetImage(profileImageUrl)
+                                        as ImageProvider,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Image.asset(
+                                    'assets/default_team_avatar.png',
+                                    fit: BoxFit.cover,
+                                  );
+                                },
+                              ),
+                            ),
+                            // 画像の上に薄いグラデーション
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.black.withOpacity(0.10),
+                                      Colors.black.withOpacity(0.60),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // 閉じるボタン
+                            Positioned(
+                              top: 10,
+                              right: 10,
+                              child: Material(
+                                color: Colors.black.withOpacity(0.25),
+                                shape: const CircleBorder(),
+                                child: IconButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  icon: const Icon(Icons.close,
+                                      color: Colors.white),
+                                  tooltip: '閉じる',
+                                ),
+                              ),
+                            ),
+                            // チーム名 + 都道府県 + 平均年齢（下に寄せる）
+                            Positioned(
+                              left: 16,
+                              right: 16,
+                              bottom: 16,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.location_on,
-                                      size: 20, color: Colors.grey),
-                                  const SizedBox(width: 5),
                                   Text(
-                                    data['prefecture'],
+                                    name,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      height: 1.1,
+                                    ),
+                                  ),
+                                  if (data['prefecture'] != null &&
+                                      data['prefecture']
+                                          .toString()
+                                          .isNotEmpty)
+                                    Padding(
+                                      padding:
+                                          const EdgeInsets.only(top: 6.0),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.location_on,
+                                            size: 16,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Flexible(
+                                            child: Text(
+                                              data['prefecture'].toString(),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  if (data['averageAge'] != null)
+                                    Padding(
+                                      padding:
+                                          const EdgeInsets.only(top: 2.0),
+                                      child: Text(
+                                        '平均年齢: ${data['averageAge']}歳',
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      // ユーザーは「カードっぽい」グラデーション + 中央アバターに
+                      ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          topRight: Radius.circular(20),
+                        ),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFFFFB3B3),
+                                Color(0xFFFF8FA3),
+                                Color(0xFFFFB07A),
+                              ],
+                            ),
+                          ),
+                          child: Stack(
+                            children: [
+                              // 閉じるボタン（右上）
+                              Align(
+                                alignment: Alignment.topRight,
+                                child: Material(
+                                  color: Colors.white.withOpacity(0.18),
+                                  shape: const CircleBorder(),
+                                  child: IconButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    icon: const Icon(Icons.close,
+                                        color: Colors.white),
+                                    tooltip: '閉じる',
+                                  ),
+                                ),
+                              ),
+
+                              // 中央コンテンツ
+                              Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.center,
+                                  children: [
+                                    const SizedBox(height: 18),
+
+                                    // アバター（ユーザーだけ）
+                                    CircleAvatar(
+                                      radius: 44,
+                                      backgroundColor:
+                                          Colors.white.withOpacity(0.75),
+                                      child: CircleAvatar(
+                                        radius: 40,
+                                        backgroundImage:
+                                            profileImageUrl.startsWith('http')
+                                                ? NetworkImage(profileImageUrl)
+                                                    as ImageProvider
+                                                : AssetImage(profileImageUrl)
+                                                    as ImageProvider,
+                                        backgroundColor: Colors.grey.shade200,
+                                        onBackgroundImageError: (_, __) {},
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+
+                                    Text(
+                                      name,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                        height: 1.1,
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 6),
+
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        if (data['prefecture'] != null &&
+                                            data['prefecture']
+                                                .toString()
+                                                .isNotEmpty)
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              Icon(
+                                                Icons.location_on,
+                                                size: 14,
+                                                color: Colors.white
+                                                    .withOpacity(0.90),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                data['prefecture']
+                                                    .toString(),
+                                                style: TextStyle(
+                                                  color: Colors.white
+                                                      .withOpacity(0.90),
+                                                  fontSize: 12,
+                                                  fontWeight:
+                                                      FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        if (data['prefecture'] != null &&
+                                            data['prefecture']
+                                                .toString()
+                                                .isNotEmpty &&
+                                            data['positions'] != null &&
+                                            data['positions'].isNotEmpty)
+                                          const SizedBox(height: 4),
+                                        if (data['positions'] != null &&
+                                            data['positions'].isNotEmpty)
+                                          Text(
+                                            (data['positions'] as List)
+                                                .join(', '),
+                                            style: TextStyle(
+                                              color: Colors.white
+                                                  .withOpacity(0.85),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        if (data['birthday'] != null)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 8),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Icon(
+                                                  Icons.cake,
+                                                  size: 14,
+                                                  color: Colors.white
+                                                      .withOpacity(0.90),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${_formatBirthday(data['birthday'])}（${_calculateAge(data['birthday'])}歳）',
+                                                  style: TextStyle(
+                                                    color: Colors.white
+                                                        .withOpacity(0.85),
+                                                    fontSize: 12,
+                                                    fontWeight:
+                                                        FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    // ===== Actions =====
+                    const SizedBox(height: 14),
+
+                    if (widget.isTeamAccount)
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 420),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (data['startYear'] != null &&
+                                    data['startYear'].toString().isNotEmpty) ...[
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.start,
+                                    children: const [
+                                      Icon(Icons.flag, size: 18, color: Colors.grey),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'チーム結成',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${data['startYear']}年',
+                                    style: const TextStyle(fontSize: 15),
+                                  ),
+                                ],
+
+                                if (data['achievements'] != null &&
+                                    data['achievements'].isNotEmpty) ...[
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    '実績',
+                                    style: TextStyle(
                                       fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: List.generate(
+                                      data['achievements'].length,
+                                      (index) => Text(
+                                        '・${data['achievements'][index]}',
+                                        style: const TextStyle(fontSize: 15),
+                                      ),
                                     ),
                                   ),
                                 ],
-                              ),
 
-                            // ✅ 誕生日（データがある場合のみ表示）
-                            if (data['birthday'] != null)
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.center, // 🔹 中央揃え
-                                children: [
-                                  const Icon(Icons.cake,
-                                      size: 20, color: Colors.grey),
-                                  const SizedBox(width: 5),
-                                  Text(_formatBirthday(data['birthday'])),
-                                ],
-                              ),
-
-                            // ✅ ポジション（データがある場合のみ表示）
-                            if (data['positions'] != null &&
-                                data['positions'].isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: Text(
-                                  '${data['positions'].join(', ')}',
-                                  style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w600),
-                                  textAlign: TextAlign.center, // 🔹 中央揃え
-                                ),
-                              ),
-
-                            // ✅ 所属チーム（データがある場合のみ表示）
-                            if (_teamNames.isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              const Text('所属チーム',
-                                  style: TextStyle(
+                                if (data['teamDescription'] != null &&
+                                    data['teamDescription'].toString().isNotEmpty) ...[
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'チーム紹介文',
+                                    style: TextStyle(
                                       fontSize: 16,
-                                      fontWeight: FontWeight.w600)),
-                              Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.center, // 🔹 中央揃え
-                                children: _teamNames
-                                    .map((team) => GestureDetector(
-                                          onTap: () {
-                                            String teamId = team[
-                                                'teamId']!; // 🔹 明示的に String として扱う
-                                            if (teamId.isNotEmpty) {
-                                              showProfileDialog(
-                                                  context, teamId, true);
-                                            } else {
-                                              ScaffoldMessenger.of(context)
-                                                  .showSnackBar(
-                                                const SnackBar(
-                                                    content: Text(
-                                                        "チーム情報が取得できませんでした")),
-                                              );
-                                            }
-                                          },
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                                vertical: 4.0),
-                                            child: Text(
-                                              team[
-                                                  'teamName']!, // 🔹 teamName も String 扱い
-                                              style: const TextStyle(
-                                                  fontSize: 16,
-                                                  color: Colors.blue),
-                                              textAlign:
-                                                  TextAlign.center, // 🔹 中央揃え
-                                            ),
-                                          ),
-                                        ))
-                                    .toList(),
-                              ),
-                            ],
-
-                            // ✅ 自己紹介（データがある場合のみ表示）
-                            if (data['include'] != null &&
-                                data['include'].toString().isNotEmpty) ...[
-                              const SizedBox(height: 20),
-                              const Text(
-                                '自己紹介',
-                                style: TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.w600),
-                              ),
-                              const SizedBox(height: 3),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16.0),
-                                child: Text(
-                                  data['include'],
-                                  style: const TextStyle(fontSize: 16),
-                                  textAlign: TextAlign.center, // 🔹 中央揃え
-                                ),
-                              ),
-                            ],
-                          ],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    data['teamDescription'],
+                                    style: const TextStyle(fontSize: 15),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                ],
+                    if (!widget.isTeamAccount) ...[
+                      Center(
+                        child: Container(
+                          constraints: BoxConstraints(
+                            maxHeight:
+                                MediaQuery.of(context).size.height * 0.6,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // ✅ 所属チーム（データがある場合のみ表示）
+                                if (_teamNames.isNotEmpty) ...[
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    children: const [
+                                      Icon(Icons.groups,
+                                          size: 18, color: Colors.grey),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        '所属チーム',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    alignment: WrapAlignment.center,
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: _teamNames.map((team) {
+                                      final String teamId =
+                                          team['teamId'] ?? '';
+                                      final String teamName =
+                                          team['teamName'] ?? '不明なチーム';
 
-                const SizedBox(height: 10),
-                // 🔹 **チーム or ユーザー両方に「連絡を取る」ボタンを追加**
-                if (widget.isFromSearch && recipientId.isNotEmpty)
-                  Center(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        print("✅ 連絡を取るボタンが押されました");
-                        print("👤 送信者 UID: ${widget.currentUserUid}");
-                        print("📛 送信者名: $currentUserName");
-                        print("👤 受信者 UID: $recipientId");
-                        print("📛 受信者名: $recipientName");
+                                      return ActionChip(
+                                        label: Text(teamName),
+                                        onPressed: teamId.isEmpty
+                                            ? null
+                                            : () {
+                                                showProfileDialog(
+                                                  context,
+                                                  teamId,
+                                                  true,
+                                                  currentUserUid:
+                                                      widget.currentUserUid,
+                                                  currentUserName:
+                                                      widget.currentUserName ??
+                                                          currentUserName,
+                                                );
+                                              },
+                                      );
+                                    }).toList(),
+                                  ),
+                                ],
 
-                        if (widget.currentUserUid == null ||
-                            currentUserName == null) {
-                          print("⚠️ 送信者情報が不足しています");
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("エラー: 送信者情報が不足しています")),
-                          );
-                          return;
-                        }
+                                // ✅ 自己紹介（データがある場合のみ表示）
+                                if (data['include'] != null &&
+                                    data['include']
+                                        .toString()
+                                        .isNotEmpty) ...[
+                                  const SizedBox(height: 20),
+                                  const SizedBox(height: 3),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16.0),
+                                    child: SizedBox(
+                                      width: double.infinity,
+                                      child: Text(
+                                        data['include'].toString(),
+                                        style: const TextStyle(fontSize: 16),
+                                        textAlign: TextAlign.start,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
 
-                        if (recipientId.isEmpty || recipientName.isEmpty) {
-                          print("⚠️ 受信者情報が不足しています");
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("エラー: 受信者情報が不足しています")),
-                          );
-                          return;
-                        }
+                    const SizedBox(height: 20),
+                    // 🔹 **チーム / ユーザー共通の「メッセージを送る」ボタン**
+                    if (recipientId.isNotEmpty &&
+                        widget.currentUserUid != null &&
+                        widget.currentUserUid != recipientId)
+                      Center(
+                        child: ConstrainedBox(
+                          // 少しコンパクトな横幅に制限（中央寄せボタン）
+                          constraints: const BoxConstraints(maxWidth: 260),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  print("✅ メッセージを送るボタンが押されました");
+                                  print("👤 送信者 UID: ${widget.currentUserUid}");
+                                  print("📛 送信者名: $currentUserName");
+                                  print("👤 受信者 UID: $recipientId");
+                                  print("📛 受信者名: $recipientName");
 
-                        startChatRoom(
-                          context: context,
-                          recipientId: recipientId,
-                          recipientName: recipientName,
-                          userUid: widget.currentUserUid!,
-                          userName: currentUserName!,
-                        );
-                      },
-                      child: const Text("連絡を取る"),
-                    ),
-                  ),
+                                  if (widget.currentUserUid == null ||
+                                      currentUserName == null) {
+                                    print("⚠️ 送信者情報が不足しています");
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content:
+                                            Text("エラー: 送信者情報が不足しています"),
+                                      ),
+                                    );
+                                    return;
+                                  }
 
-                const SizedBox(height: 10),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('閉じる',
-                      style: TextStyle(color: Colors.red, fontSize: 18)),
+                                  if (recipientId.isEmpty ||
+                                      recipientName.isEmpty) {
+                                    print("⚠️ 受信者情報が不足しています");
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content:
+                                            Text("エラー: 受信者情報が不足しています"),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  startChatRoom(
+                                    context: context,
+                                    recipientId: recipientId,
+                                    recipientName: recipientName,
+                                    userUid: widget.currentUserUid!,
+                                    userName: currentUserName!,
+                                  );
+                                },
+                                icon: const Icon(Icons.send_rounded),
+                                label: const Text("メッセージを送る"),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 12, horizontal: 20),
+                                  shape: const StadiumBorder(),
+                                  textStyle: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  backgroundColor:
+                                      Theme.of(context).colorScheme.primary,
+                                  foregroundColor:
+                                      Theme.of(context).colorScheme.onPrimary,
+                                  elevation: 2,
+                                ),
+                              ),
+                              if (widget.isTeamAccount)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6.0),
+                                  child: Text(
+                                    '※メッセージはチームの代表者に届きます。',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    const SizedBox(height: 8),
+                    // 🔹 通報・ブロック（ユーザーのみ / スクロール末尾・右寄せ）
+                    if (!widget.isTeamAccount &&
+                        widget.currentUserUid != null &&
+                        widget.currentUserUid != widget.accountId)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Wrap(
+                            spacing: 4,
+                            children: [
+                              TextButton.icon(
+                                onPressed: () {
+                                  _showUserReportDialog(widget.accountId);
+                                },
+                                icon: const Icon(Icons.flag,
+                                    size: 18, color: Colors.red),
+                                label: const Text(
+                                  '通報',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 6),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  minimumSize: const Size(0, 0),
+                                ),
+                              ),
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) {
+                                      return AlertDialog(
+                                        title: const Text('ユーザーをブロック'),
+                                        content: const Text(
+                                          'このユーザーをブロックしますか？\nブロックすると投稿やメッセージは表示されなくなります。',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, false),
+                                            child: const Text('キャンセル'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, true),
+                                            child: const Text('ブロック'),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+
+                                  if (confirm == true) {
+                                    await _blockUser(
+                                      targetUserId: widget.accountId,
+                                      targetUserName: name,
+                                    );
+                                  }
+                                },
+                                icon: const Icon(Icons.block,
+                                    size: 18, color: Colors.grey),
+                                label: const Text(
+                                  'ブロック',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 6),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  minimumSize: const Size(0, 0),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    // 🔹 チームプロフィール用 通報（スクロール末尾・右寄せ）
+                    if (widget.isTeamAccount &&
+                        widget.currentUserUid != null &&
+                        teamAdminUid != null &&
+                        widget.currentUserUid != teamAdminUid)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: () {
+                              _showUserReportDialog(widget.accountId);
+                            },
+                            icon: const Icon(Icons.flag, color: Colors.red),
+                            label: const Text(
+                              '通報',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 6),
+                              tapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              minimumSize: const Size(0, 0),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    const SizedBox(height: 24),
+                  ],
                 ),
-                const SizedBox(height: 20),
-              ],
-            ),
           );
         },
+      ),
+      ),
       ),
     );
   }
