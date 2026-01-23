@@ -11,6 +11,8 @@ import 'package:intl/intl.dart'; // 日付フォーマット用
 import 'package:image/image.dart' as img;
 import 'package:flutter/cupertino.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -28,6 +30,7 @@ class _SignUpPageState extends State<SignUpPage> {
   DateTime? _selectedDate; // 生年月日（任意）
   File? _profileImage;
   bool _isLoading = false;
+  bool _acceptedTerms = false;
   final List<String> _positions = [
     '監督',
     'マネージャー',
@@ -159,6 +162,13 @@ class _SignUpPageState extends State<SignUpPage> {
   }
 
   Future<void> _signUp() async {
+    if (!_acceptedTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('利用規約とプライバシーポリシーに同意してください')),
+      );
+      return;
+    }
+
     if (_formKey.currentState!.validate() && _selectedPositions.isNotEmpty) {
       setState(() {
         _isLoading = true;
@@ -422,6 +432,17 @@ class _SignUpPageState extends State<SignUpPage> {
     });
   }
 
+  Future<void> _openUrl(String url) async {
+  final uri = Uri.parse(url);
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ページを開けませんでした')),
+    );
+  }
+}
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -675,6 +696,60 @@ class _SignUpPageState extends State<SignUpPage> {
                     return null;
                   },
                 ),
+                const SizedBox(height: 16),
+          CheckboxListTile(
+            value: _acceptedTerms,
+            onChanged: (value) {
+              setState(() {
+                _acceptedTerms = value ?? false;
+              });
+            },
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: () => _openUrl('https://baseball-net.vercel.app/terms'),
+                  child: Text(
+                    '利用規約',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontSize: 13,
+                      decoration: TextDecoration.underline,
+                      decorationColor: Colors.blue,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Text(
+                  '・',
+                  style: TextStyle(fontSize: 13),
+                ),
+                GestureDetector(
+                  onTap: () => _openUrl('https://baseball-net.vercel.app/privacy'),
+                  child: Text(
+                    'プライバシーポリシー',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontSize: 13,
+                      decoration: TextDecoration.underline,
+                      decorationColor: Colors.blue,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Text(
+                  'に同意します',
+                  style: TextStyle(fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
                 const SizedBox(height: 16),
                 _isLoading
                     ? const CircularProgressIndicator()

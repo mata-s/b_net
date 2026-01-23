@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.baseballnet.bnet"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     // 🔐 リリース署名設定を読み込む
@@ -27,7 +27,7 @@ android {
 
     defaultConfig {
         applicationId = "com.baseballnet.bnet"
-        minSdk = 23
+        minSdkVersion = flutter.minSdkVersion
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName

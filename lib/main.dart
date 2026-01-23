@@ -333,6 +333,47 @@ Future<void> _handleMessageNavigation(RemoteMessage message) async {
     return;
   }
 
+  // 🔔 重要なお知らせの通知（type == 'announcement'）は HomePage へ遷移
+  if (type == 'announcement') {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      nav.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (route) => false,
+      );
+      return;
+    }
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final userData = userDoc.data() ?? {};
+      final positions = List<String>.from(userData['positions'] ?? []);
+      final teams = List<String>.from(userData['teams'] ?? []);
+      final prefecture = userData['prefecture'] ?? '未設定';
+
+      nav.pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => HomePage(
+            userUid: user.uid,
+            isTeamAccount: false,
+            accountId: user.uid,
+            accountName: userData['username'] ?? '未設定',
+            userPrefecture: prefecture,
+            userPosition: positions,
+            userTeamId: teams.isNotEmpty ? teams.first : null,
+          ),
+        ),
+        (route) => false,
+      );
+    } catch (e) {
+      print('⚠️ お知らせ通知からの HomePage 遷移に失敗: $e');
+    }
+    return;
+  }
+
   // ① スケジュール通知（type == 'schedule'）
   if (data['type'] == 'schedule') {
     final teamId = data['teamId'];

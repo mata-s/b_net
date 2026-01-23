@@ -3784,7 +3784,7 @@ export const createPrayerRanking = onSchedule(
     {
       schedule: "30 1 1 * *",
       timeZone: "Asia/Tokyo",
-      timeoutSeconds: 3600,
+      timeoutSeconds: 1800,
     },
     async () => {
       const date = new Date();
@@ -4204,7 +4204,7 @@ export const scheduleRankingProcessing = onSchedule(
     {
       schedule: "40 2 1 * *",
       timeZone: "Asia/Tokyo",
-      timeoutSeconds: 3600,
+      timeoutSeconds: 1800,
     },
     async () => {
       const now = new Date();
@@ -6179,7 +6179,7 @@ export const createTeamRankingProcessing = onSchedule(
     {
       schedule: "0 1 1 * *", // 毎月1日 1:00 AM
       timeZone: "Asia/Tokyo",
-      timeoutSeconds: 3600,
+      timeoutSeconds: 1800,
     },
     async () => {
       const date = new Date();
@@ -6570,7 +6570,7 @@ export const TeamRankingProcessing = onSchedule(
     {
       schedule: "40 2 1 * *",
       timeZone: "Asia/Tokyo",
-      timeoutSeconds: 3600,
+      timeoutSeconds: 1800,
     },
     async () => {
       const now = new Date();
@@ -10615,3 +10615,95 @@ export const revenuecatWebhook = onRequest(
       }
     },
 );
+
+/**
+ * 全ユーザーの FCM トークンを取得するヘルパー
+ * users コレクションの各ドキュメントに fcmTokens: string[] が入っている前提
+ */
+async function getAllFcmTokens() {
+  const tokens = [];
+  const usersSnap = await db.collection("users").get();
+
+  usersSnap.forEach((doc) => {
+    const userData = doc.data() || {};
+    const userTokens = userData.fcmTokens || [];
+    if (Array.isArray(userTokens)) {
+      for (const t of userTokens) {
+        if (typeof t === "string" && t.trim() !== "") {
+          tokens.push(t.trim());
+        }
+      }
+    }
+  });
+
+  // 重複削除
+  return Array.from(new Set(tokens));
+}
+
+/**
+ * 重要なお知らせドキュメント作成時にプッシュ通知を送る Cloud Function
+ *
+ * コレクション例:
+ *   announcements (root)
+ *     - {announcementId}
+ *        - title: string
+ *        - body: string
+ *        - deepLinkPath?: string  // 例: "/announcement/{id}"
+ */
+export const onAnnouncementCreated =
+  onDocumentCreated("announcements/{announcementId}", async (event) => {
+    const snap = event.data;
+    if (!snap) {
+      console.log("onAnnouncementCreated: no snapshot data");
+      return;
+    }
+
+    const announcementId = event.params.announcementId;
+    const data = snap.data() || {};
+
+    const title =
+      data.title || "ベースボールネットからのお知らせ";
+    const body =
+      data.body || "新しいお知らせがあります。アプリ内で確認してください。";
+    const deepLinkPath =
+      data.deepLinkPath || `/announcement/${announcementId}`;
+
+    try {
+      const tokens = await getAllFcmTokens();
+      if (!tokens.length) {
+        console.log("onAnnouncementCreated: no FCM tokens found");
+        return;
+      }
+
+      console.log(
+          `sending notification to ${tokens.length} tokens`,
+      );
+
+      // 500 件ずつに分割して送信（FCM の上限対策）
+      const chunkSize = 500;
+      for (let i = 0; i < tokens.length; i += chunkSize) {
+        const chunk = tokens.slice(i, i + chunkSize);
+
+        const message = {
+          notification: {
+            title,
+            body,
+          },
+          data: {
+            type: "announcement",
+            announcementId,
+            deepLinkPath,
+          },
+          tokens: chunk,
+        };
+
+        const response = await messaging.sendEachForMulticast(message);
+        console.log(
+            `onAnnouncementCreated: sent to chunk ${i / chunkSize}, 
+            success=${response.successCount}, failure=${response.failureCount}`,
+        );
+      }
+    } catch (err) {
+      console.error("onAnnouncementCreated: error sending notifications", err);
+    }
+  });

@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>B Net</string>
+	<string>B-Net</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -31,10 +31,10 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>画像を保存するために写真へのアクセスが必要です。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>プロフィール画像を撮影するためにカメラを使用します。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>画像を保存するために写真へのアクセスが必要です。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>プロフィール画像を選択するために写真ライブラリへアクセスします。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
