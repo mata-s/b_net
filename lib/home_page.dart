@@ -3,6 +3,7 @@ import 'package:b_net/common/notices/notices_page.dart';
 import 'package:b_net/common/post_list_page.dart';
 import 'package:b_net/common/search_page.dart';
 import 'package:b_net/pages/private/annual_results.dart';
+import 'package:b_net/pages/private/predict_analysis_page.dart';
 import 'package:b_net/pages/private/director_and_manager.dart';
 import 'package:b_net/pages/private/director/director_calendar.dart';
 import 'package:b_net/pages/private/manager/manager_geme_page.dart';
@@ -327,7 +328,13 @@ class _HomePageState extends State<HomePage> {
             icon: const Icon(Icons.search),
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => SearchPage()),
+                MaterialPageRoute(
+                  builder: (context) => SearchPage(
+                    userPosition: widget.userPosition,
+                    userTeamId: widget.userTeamId,
+                    userPrefecture: widget.userPrefecture,
+                  ),
+                ),
               );
             },
           ),
@@ -509,6 +516,31 @@ class _HomePageState extends State<HomePage> {
                 child: ListView(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   children: [
+                    // 監督・マネージャー専用：相手チーム探し（SearchPageへ）
+                    if (widget.userPosition.contains('監督') ||
+                        widget.userPosition.contains('マネージャー')) ...[
+                      _DrawerSectionTitle(title: 'チーム'),
+                      _RichDrawerTile(
+                        icon: Icons.search,
+                        title: '相手チームを探す',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => SearchPage(
+                                userPosition: widget.userPosition,
+                                userTeamId: widget.userTeamId,
+                                userPrefecture: widget.userPrefecture,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      const Divider(height: 1),
+                      const SizedBox(height: 6),
+                    ],
                     _DrawerSectionTitle(title: '成績・振り返り'),
                     _RichDrawerTile(
                       icon: Icons.flag,
@@ -544,6 +576,24 @@ class _HomePageState extends State<HomePage> {
                         );
                       },
                     ),
+                   if (!(widget.userPosition.contains('監督') ||
+                         widget.userPosition.contains('マネージャー')))
+                     _RichDrawerTile(
+                       icon: Icons.insights,
+                       title: '予測・分析',
+                       onTap: () {
+                         Navigator.pop(context);
+                         Navigator.push(
+                           context,
+                           MaterialPageRoute(
+                             builder: (context) => PredictAnalysisPage(
+                               userUid: widget.userUid,
+                               userPosition: widget.userPosition,
+                             ),
+                           ),
+                         );
+                       },
+                     ),
 
                     const SizedBox(height: 6),
                     const Divider(height: 1),

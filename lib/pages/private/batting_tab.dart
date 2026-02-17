@@ -140,84 +140,95 @@ class BattingTab extends StatelessWidget {
                       color: Colors.white,
                       margin: const EdgeInsets.only(bottom: 16),
                       child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if ((streaks['currentHitStreak'] ?? 0) >= 2)
-                              RichText(
-                                text: TextSpan(
-                                  style: DefaultTextStyle.of(context).style,
-                                  children: [
-                                    TextSpan(
-                                      text:
-                                          '${streaks['currentHitStreak']}試合連続ヒット',
-                                    ),
-                                  ],
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        child: Builder(
+                          builder: (context) {
+                            // 表示候補を作る（>=2だけ）
+                            final items = <Map<String, dynamic>>[];
+
+                            void addItem(String key, String label, {String unit = '試合'}) {
+                              final v = (streaks[key] ?? 0) as int;
+                              if (v >= 2) {
+                                items.add({
+                                  'value': v,
+                                  'text': unit == '打席'
+                                      ? '${v}打席連続$label'
+                                      : '${v}試合連続$label',
+                                });
+                              }
+                            }
+
+                            void addPaItem(String key, String label) {
+                              final v = (streaks[key] ?? 0) as int;
+                              if (v >= 2) {
+                                items.add({'value': v, 'text': '${v}打席連続$label'});
+                              }
+                            }
+
+                            addItem('currentHitStreak', 'ヒット!');
+                            addItem('currentOnBaseStreak', '出塁!');
+                            addItem('currentNoStrikeoutStreak', '三振なし！');
+                            addPaItem('consecutiveHitCount', 'ヒット中！');
+                            addPaItem('consecutiveOnBaseCount', '出塁中！');
+                            addPaItem('consecutiveNoStrikeoutCount', '三振なし！');
+
+                            // 値が大きい順に
+                            items.sort((a, b) => (b['value'] as int).compareTo(a['value'] as int));
+
+                            if (items.isEmpty) return const SizedBox.shrink();
+
+                            final top = items.first['text'] as String;
+                            final restCount = items.length - 1;
+
+                            return Theme(
+                              // ExpansionTileの余白を小さくして圧縮
+                              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                              child: ExpansionTile(
+                                tilePadding: EdgeInsets.zero,
+                                childrenPadding: const EdgeInsets.only(top: 8),
+                                leading: const Icon(Icons.local_fire_department,
+                                    size: 18, color: Colors.deepOrange),
+                                title: Text(
+                                  restCount > 0 ? '$top ほか$restCount件' : top,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
-                              ),
-                            if ((streaks['currentOnBaseStreak'] ?? 0) >= 2)
-                              RichText(
-                                text: TextSpan(
-                                  style: DefaultTextStyle.of(context).style,
-                                  children: [
-                                    TextSpan(
-                                      text:
-                                          '${streaks['currentOnBaseStreak']}試合連続出塁',
-                                    ),
-                                  ],
+                                subtitle: const Text(
+                                  'タップで詳細',
+                                  style: TextStyle(fontSize: 11, color: Colors.black54),
                                 ),
-                              ),
-                            if ((streaks['currentNoStrikeoutStreak'] ?? 0) >= 2)
-                              RichText(
-                                text: TextSpan(
-                                  style: DefaultTextStyle.of(context).style,
-                                  children: [
-                                    TextSpan(
-                                      text:
-                                          '${streaks['currentNoStrikeoutStreak']}試合連続三振なし！',
+                                children: [
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: items
+                                          .map(
+                                            (e) => Chip(
+                                              label: Text(
+                                                e['text'] as String,
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              visualDensity: VisualDensity.compact,
+                                              materialTapTargetSize:
+                                                  MaterialTapTargetSize.shrinkWrap,
+                                            ),
+                                          )
+                                          .toList(),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
-                            if ((streaks['consecutiveHitCount'] ?? 0) >= 2)
-                              RichText(
-                                text: TextSpan(
-                                  style: DefaultTextStyle.of(context).style,
-                                  children: [
-                                    TextSpan(
-                                      text:
-                                          '${streaks['consecutiveHitCount']}打席連続ヒット中！',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            if ((streaks['consecutiveOnBaseCount'] ?? 0) >= 2)
-                              RichText(
-                                text: TextSpan(
-                                  style: DefaultTextStyle.of(context).style,
-                                  children: [
-                                    TextSpan(
-                                      text:
-                                          '${streaks['consecutiveOnBaseCount']}打席連続出塁中！',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            if ((streaks['consecutiveNoStrikeoutCount'] ?? 0) >=
-                                2)
-                              RichText(
-                                text: TextSpan(
-                                  style: DefaultTextStyle.of(context).style,
-                                  children: [
-                                    TextSpan(
-                                      text:
-                                          '${streaks['consecutiveNoStrikeoutCount']}打席連続三振なし！',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
+                            );
+                          },
                         ),
                       ),
                     ),

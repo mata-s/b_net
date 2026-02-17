@@ -23,7 +23,7 @@ class _GradeDetailTabState extends State<GradeDetailTab>
     with SingleTickerProviderStateMixin {
   List<int> _availableYears = [];
   late TabController _tabController;
-  String selectedPeriodFilter = '通算'; // 期間フィルタ
+  String selectedPeriodFilter = '今年'; // 期間フィルタ
   String selectedGameTypeFilter = '全試合'; // 試合タイプフィルタ
   late DateTime _startDate; // フィルタ開始日
   late DateTime _endDate; // フィルタ終了日
@@ -37,6 +37,7 @@ class _GradeDetailTabState extends State<GradeDetailTab>
   void initState() {
     super.initState();
     _setFilterDates(); // 初期のフィルタ設定
+    _ensureYearHasDataElseCareer();
     _loadPitcherStatus(); // Check if the user is a pitcher
     fetchAvailableYears();
   }
@@ -63,6 +64,45 @@ class _GradeDetailTabState extends State<GradeDetailTab>
     setState(() {
       _availableYears = years;
     });
+  }
+
+  /// 「今年」をデフォルトにしつつ、今年のstatsが無い/実質0なら「通算」に自動で切り替える
+  Future<void> _ensureYearHasDataElseCareer() async {
+    try {
+      final now = DateTime.now();
+      final docId = 'results_stats_${now.year}_all';
+
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userUid)
+          .collection('stats')
+          .doc(docId)
+          .get();
+
+      bool hasData = false;
+
+      if (doc.exists) {
+        final data = doc.data() ?? {};
+
+        // どの指標でもいいので「今年データがある」と言える値が入っていたらOK
+        final totalGames = (data['totalGames'] ?? 0) as num;
+        final atBats = (data['atBats'] ?? data['totalBats'] ?? 0) as num;
+        final hits = (data['hits'] ?? data['totalHits'] ?? 0) as num;
+        final ip = (data['totalInningsPitched'] ?? 0) as num;
+
+        hasData = (totalGames > 0) || (atBats > 0) || (hits > 0) || (ip > 0);
+      }
+
+      if (!hasData) {
+        if (!mounted) return;
+        setState(() {
+          selectedPeriodFilter = '通算';
+          _setFilterDates();
+        });
+      }
+    } catch (_) {
+      // 失敗しても落とさない（そのまま今年表示）
+    }
   }
 
   Future<void> _loadPitcherStatus() async {

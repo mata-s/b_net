@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "b-net-9bdc2"
+    "default": "b-net-9bdc2",
+    "yas": "b-net-9bdc2"
   },
   "targets": {},
   "etags": {

@@ -12,8 +12,9 @@ class ProfileEditPage extends StatefulWidget {
   final String userName;
   final String profileImageUrl;
   final List<String> positions;
-  final String? prefecture; // 既存の都道府県を受け取るためのフィールド
+  final String? prefecture;
   final String? bio;
+  final String? birthday;
 
   const ProfileEditPage({
     super.key,
@@ -23,6 +24,7 @@ class ProfileEditPage extends StatefulWidget {
     required this.positions,
     this.prefecture, // 既存の都道府県を受け取る
     this.bio,
+    this.birthday,
   });
 
   @override
@@ -99,6 +101,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   ];
   String? _selectedPrefecture;
   bool _isLoading = false;
+  DateTime? _selectedDate;
 
   @override
   void initState() {
@@ -108,6 +111,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     _selectedPositions = List<String>.from(widget.positions);
     _selectedPrefecture = widget.prefecture; // 既存の都道府県を初期値にセット
     _bioController.text = widget.bio ?? '';
+    if (widget.birthday != null && widget.birthday!.isNotEmpty) {
+      try {
+        _selectedDate = DateTime.parse(widget.birthday!);
+      } catch (_) {}
+    }
   }
 
   Future<void> _pickImage() async {
@@ -164,6 +172,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           'positions': _selectedPositions,
           'prefecture': _selectedPrefecture,
           'include': _bioController.text,
+          'birthday': _selectedDate != null
+              ? Timestamp.fromDate(_selectedDate!)
+              : null,
         }, SetOptions(merge: true));
 
         // 保存が成功したら、プロフィールページに戻る
@@ -182,39 +193,75 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   }
 
   void _showCupertinoPrefecturePicker(BuildContext context) {
-    int initialIndex = _selectedPrefecture != null
+    int tempIndex = _selectedPrefecture != null
         ? _prefectures.indexOf(_selectedPrefecture!)
         : 0;
 
     showModalBottomSheet(
       context: context,
+      backgroundColor: Colors.white,
       builder: (BuildContext context) {
-        return SizedBox(
-          height: 300,
-          child: CupertinoPicker(
-            backgroundColor: Colors.white,
-            itemExtent: 40.0,
-            scrollController: FixedExtentScrollController(
-              initialItem: initialIndex,
-            ),
-            onSelectedItemChanged: (int index) {},
-            children: _prefectures.map((prefecture) {
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedPrefecture = prefecture;
-                  });
-                  Navigator.pop(context);
-                },
-                child: Center(
-                  child: Text(
-                    prefecture,
-                    style: const TextStyle(fontSize: 18),
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SizedBox(
+              height: 300,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('キャンセル', style: TextStyle(fontSize: 16)),
+                        ),
+                        const Text(
+                          '都道府県を選択',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _selectedPrefecture = _prefectures[tempIndex];
+                            });
+                            Navigator.pop(context);
+                          },
+                          child: const Text(
+                            '決定',
+                            style: TextStyle(fontSize: 16, color: Colors.blue),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            }).toList(),
-          ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: CupertinoPicker(
+                      backgroundColor: Colors.white,
+                      itemExtent: 40.0,
+                      scrollController: FixedExtentScrollController(
+                        initialItem: tempIndex,
+                      ),
+                      onSelectedItemChanged: (int index) {
+                        setModalState(() {
+                          tempIndex = index;
+                        });
+                      },
+                      children: _prefectures.map((p) {
+                        return Center(
+                          child: Text(
+                            p,
+                            style: const TextStyle(fontSize: 22),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -291,6 +338,40 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                         controller: _nameController,
                         decoration: const InputDecoration(labelText: '名前'),
                       ),
+                      // 生年月日選択
+                      GestureDetector(
+                        onTap: () async {
+                          DateTime initialDate = _selectedDate ?? DateTime(2000);
+                          DateTime? picked = await showDatePicker(
+                            context: context,
+                            initialDate: initialDate,
+                            firstDate: DateTime(1900),
+                            lastDate: DateTime.now(),
+                            initialEntryMode: DatePickerEntryMode.calendarOnly,
+                            locale: const Locale('ja'),
+                          );
+
+                          if (picked != null) {
+                            setState(() {
+                              _selectedDate = picked;
+                            });
+                          }
+                        },
+                        child: AbsorbPointer(
+                          child: TextFormField(
+                            decoration: const InputDecoration(
+                              labelText: '生年月日',
+                              border: UnderlineInputBorder(),
+                              suffixIcon: Icon(Icons.calendar_today),
+                            ),
+                            controller: TextEditingController(
+                              text: _selectedDate != null
+                                  ? "${_selectedDate!.year}年${_selectedDate!.month.toString().padLeft(2, '0')}月${_selectedDate!.day.toString().padLeft(2, '0')}日"
+                                  : '選択してください',
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       // 都道府県選択
                       GestureDetector(
@@ -339,16 +420,25 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                           return ChoiceChip(
                             label: Text(position),
                             selected:
-                                _selectedPositions.contains(position),
-                            onSelected: (selected) {
-                              setState(() {
-                                if (selected) {
-                                  _selectedPositions.add(position);
-                                } else {
-                                  _selectedPositions.remove(position);
-                                }
-                              });
-                            },
+                              _selectedPositions.contains(position),
+                              onSelected: (selected) {
+                                setState(() {
+                                  if (selected) {
+                                    if (position == '監督' || position == 'マネージャー') {
+                                      _selectedPositions.clear();
+                                      _selectedPositions.add(position);
+                                    } else {
+                                      if (_selectedPositions.contains('監督') ||
+                                      _selectedPositions.contains('マネージャー')) {
+                                        return;
+                                        }
+                                        _selectedPositions.add(position);
+                                        }
+                                        } else {
+                                          _selectedPositions.remove(position);
+                                          }
+                                          });
+                                        },
                           );
                         }).toList(),
                       ),

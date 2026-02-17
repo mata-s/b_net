@@ -57,9 +57,14 @@ class _ProfilePageState extends State<ProfilePage> {
         _bio = userDoc.data()?['include'] ?? '';
         _nameController.text = _userName ?? '';
 
-        _birthday = userDoc.data()?['birthday'] != null
-            ? (userDoc.data()?['birthday'] as Timestamp).toDate().toString()
-            : null;
+        final birthdayValue = userDoc.data()?['birthday'];
+        if (birthdayValue is Timestamp) {
+          _birthday = birthdayValue.toDate().toIso8601String();
+        } else if (birthdayValue is String) {
+          _birthday = birthdayValue;
+        } else {
+          _birthday = null;
+        }
 
         if (_birthday != null) {
           final birthdayDate = DateTime.parse(_birthday!);
@@ -522,6 +527,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                     positions: _positions,
                                     prefecture: _prefecture,
                                     bio: _bio,
+                                    birthday: _birthday,
                                   ),
                                 ),
                               );
@@ -550,15 +556,17 @@ class _ProfilePageState extends State<ProfilePage> {
                         ],
                       ),
                       const SizedBox(height: 10),
-                      Row(
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(
                             '$_userName',
                             style: const TextStyle(
                                 fontSize: 25, fontWeight: FontWeight.bold),
                           ),
-                          const SizedBox(width: 8),
-                          if (_isPersonalSubscribed) ...[
+                          if (_isPersonalSubscribed)
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 4),
@@ -567,21 +575,26 @@ class _ProfilePageState extends State<ProfilePage> {
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   const Icon(Icons.verified,
                                       size: 16, color: Colors.amber),
                                   const SizedBox(width: 4),
-                                  Text(
-                                    _personalPlanName ?? '',
-                                    style: const TextStyle(
+                                  Flexible(
+                                    child: Text(
+                                      _personalPlanName ?? '',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.amber),
+                                        color: Colors.amber,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
-                            ),
-                          ] else ...[
+                            )
+                          else
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 4),
@@ -598,7 +611,6 @@ class _ProfilePageState extends State<ProfilePage> {
                                 ),
                               ),
                             ),
-                          ],
                         ],
                       ),
                       const SizedBox(height: 10),

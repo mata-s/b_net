@@ -216,9 +216,80 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     }
   }
 
+  bool _isMonthlyProduct(String productId) {
+    final p = productId.toLowerCase();
+    return p.contains('1month') || p.contains('monthly');
+  }
+
+  bool _isYearlyProduct(String productId) {
+    final p = productId.toLowerCase();
+    return p.contains('12month') || p.contains('yearly') || p.contains('annual');
+  }
+
+  bool _hasEverPurchasedMonthly() {
+    final ids = _customerInfo?.allPurchasedProductIdentifiers ?? <String>[];
+    if (ids.isEmpty) return false;
+
+    // RevenueCat/Store では `base:offer` のように返ることがあるので prefix も許容
+    return ids.any((id) {
+      final lower = id.toLowerCase();
+      return _isMonthlyProduct(lower);
+    });
+  }
+
+  bool _isSubscribedToPackageId(String packageId) {
+    const String entitlementKey = 'personal_premium';
+    final entitlement = _customerInfo?.entitlements.active[entitlementKey];
+    final String? activeProductId = entitlement?.productIdentifier;
+    final activeSubs = _customerInfo?.activeSubscriptions ?? <String>[];
+
+    if (activeSubs.isNotEmpty) {
+      if (activeSubs.contains(packageId)) return true;
+      return activeSubs.any((s) =>
+          s == packageId ||
+          s.startsWith('$packageId:') ||
+          packageId.startsWith('$s:'));
+    }
+
+    if (activeProductId == null || activeProductId.isEmpty) return false;
+    if (activeProductId == packageId) return true;
+    if (packageId.startsWith('$activeProductId:')) return true;
+    if (activeProductId.startsWith('$packageId:')) return true;
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+
+    final Package? monthlyPackage = _packages.cast<Package?>().firstWhere(
+      (p) => p != null && _isMonthlyProduct(p.storeProduct.identifier),
+      orElse: () => null,
+    );
+    final Package? yearlyPackage = _packages.cast<Package?>().firstWhere(
+      (p) => p != null && _isYearlyProduct(p.storeProduct.identifier),
+      orElse: () => null,
+    );
+
+    const int monthlyPrice = 480;
+    const int yearlyPrice = 4980;
+    const int yearlySavings = monthlyPrice * 12 - yearlyPrice; // 780
+    final int yearlyPerMonth = (yearlyPrice / 12).round(); // 415
+
+    final bool isMonthlySubscribed = monthlyPackage == null
+        ? false
+        : _isSubscribedToPackageId(monthlyPackage.storeProduct.identifier);
+    final bool isYearlySubscribed = yearlyPackage == null
+        ? false
+        : _isSubscribedToPackageId(yearlyPackage.storeProduct.identifier);
+
+    // trial判定（月額のみでOK）
+    const String entitlementKey = 'personal_premium';
+    final entitlement = _customerInfo?.entitlements.active[entitlementKey];
+    final bool isTrial = (isMonthlySubscribed || isYearlySubscribed) &&
+        (entitlement?.periodType ?? PeriodType.normal) == PeriodType.trial;
+    final bool hasEverPurchasedMonthly = _hasEverPurchasedMonthly();
+
     return Scaffold(
       // backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
@@ -241,174 +312,165 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: EdgeInsets.symmetric(
-                horizontal: isTablet ? 40 : 16,
-                vertical: 16,
-              ),
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: isTablet ? 720 : double.infinity,
-                  ),
-                  child: Column(
-                    children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 14,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
+      bottomNavigationBar: (_isLoading || (monthlyPackage == null && yearlyPackage == null))
+          ? null
+          : SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 18,
+                      offset: const Offset(0, -6),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (monthlyPackage != null)
+                      _PlanSelectTile(
+                        titleLeft: '月額プラン',
+                        subtitleLeft: null,
+                        badgeText: isMonthlySubscribed
+                            ? null
+                            : (isTrial
+                                ? '初月無料'
+                                : (hasEverPurchasedMonthly ? null : '初回無料')),
+                        priceRight: '${monthlyPrice}円/月',
+                        subPriceRight: null,
+                        isSubscribed: isMonthlySubscribed,
+                        onTap: isMonthlySubscribed ? null : () => _buy(monthlyPackage),
                       ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: const [
-                                Text(
-                                  "あなたの野球を、もう一段楽しく。",
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.2,
-                                  ),
+                    if (yearlyPackage != null) const SizedBox(height: 10),
+                    if (yearlyPackage != null)
+                      _PlanSelectTile(
+                        titleLeft: '年額プラン',
+                        subtitleLeft: null,
+                        badgeText: '年間${yearlySavings}円お得',
+                        priceRight: '${yearlyPrice}円/年',
+                        subPriceRight: '${yearlyPerMonth}円/月',
+                        isSubscribed: isYearlySubscribed,
+                        onTap: isYearlySubscribed ? null : () => _buy(yearlyPackage),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final hasPlans = !(monthlyPackage == null && yearlyPackage == null);
+
+                // bottomNavigationBar の実高さを厳密に取れないので、だいたいの高さを見積もる
+                // ここを確保しておくと、コンテンツが短い時でも「規約」を下に寄せられる。
+                final double estimatedBottomBarHeight = !hasPlans
+                    ? 0
+                    : (monthlyPackage != null && yearlyPackage != null)
+                        ? 170
+                        : 95;
+
+                final contentHorizontal = isTablet ? 40.0 : 16.0;
+
+                return SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    contentHorizontal,
+                    16,
+                    contentHorizontal,
+                    // 下の余白は“最小限”にして、余った分は Spacer で吸収して規約を下に寄せる
+                    16,
+                  ),
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: isTablet ? 720 : double.infinity,
+                        // 画面の残り高さを埋める（余った分は Spacer が吸収）
+                        minHeight: (constraints.maxHeight - estimatedBottomBarHeight)
+                            .clamp(0.0, double.infinity),
+                      ),
+                      child: IntrinsicHeight(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 14,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
                                 ),
-                                SizedBox(height: 6),
-                                Text(
-                                  "記録・分析・目標・ランキングなど、成長が見える。\n野球がもっと面白くなる機能が解放されます。",
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    height: 1.45,
-                                    color: Colors.black54,
-                                  ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: const [
+                                          Text(
+                                            "あなたの野球を、もう一段楽しく。",
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w600,
+                                              height: 1.2,
+                                            ),
+                                          ),
+                                          SizedBox(height: 6),
+                                          Text(
+                                            "記録・分析・目標・ランキングなど、成長が見える。\n野球がもっと面白くなる機能が解放されます。",
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              height: 1.45,
+                                              color: Colors.black54,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 24),
+                            const PremiumFeaturesSection(),
+
+                            // 🔻 ここがポイント：余った分を吸収して「規約」を下に寄せる
+                            const Spacer(),
+
+                            const SubscriptionLegalSection(
+                              privacyPolicyUrl:
+                                  'https://baseball-net.vercel.app/privacy',
+                              termsUrl: 'https://baseball-net.vercel.app/terms',
+                            ),
+
+                            // bottomNavigationBar に隠れないように最低限の余白だけ入れる
+                            if (hasPlans) const SizedBox(height: 12),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  ..._packages.map((package) {
-                    final id = package.storeProduct.identifier;
-                    
-                    // iOS: com.sk.bNet.app.personal1month / personal12month
-                    // Android: com.sk.bnet.app.personal:personal-monthly / personal-yearly
-                    bool _isMonthlyProduct(String productId) {
-                      final p = productId.toLowerCase();
-                      return p.contains('1month') || p.contains('monthly');
-                    }
-                    
-                    bool _isYearlyProduct(String productId) {
-                      final p = productId.toLowerCase();
-                      return p.contains('12month') || p.contains('yearly') || p.contains('annual');
-                    }
-                    
-                    final isMonthly = _isMonthlyProduct(id);
-                    final isYearly = _isYearlyProduct(id);
-
-                    // 画像（判定できない場合は年額側に寄せる）
-                    final imagePath = isMonthly
-                        ? 'assets/Subscription_personal1month.png'
-                        : 'assets/Subscription_personal12month.png';
-
-                    // 表示文言（判定できない場合は「プラン」表記）
-                    final planTitle = isMonthly
-                        ? '月額プラン'
-                        : (isYearly ? '年額プラン' : 'プラン');
-
-                    final planDescription = isMonthly
-                        ? '初回1ヶ月無料！\n2ヶ月目から自動更新されます。\nいつでもキャンセル可能。'
-                        : (isYearly
-                            ? '1年間まとめて支払い。\n月額よりお得な価格設定です。'
-                            : 'プラン内容をご確認ください。');
-                    
-                  const String entitlementKey = 'personal_premium';
-                  final entitlement = _customerInfo?.entitlements.active[entitlementKey];
-
-                  // ✅ 有効な商品ID（iOSは productId、Androidは base product だけ返るケースあり）
-                  final String? activeProductId = entitlement?.productIdentifier;
-
-                  // ✅ CustomerInfo.activeSubscriptions が一番確実（Androidは base:plan が入ることが多い）
-                  final activeSubs = _customerInfo?.activeSubscriptions ?? <String>[];
-
-                  bool _matchesActive(String packageId) {
-                    if (activeSubs.isNotEmpty) {
-                      // 1) そのまま一致
-                      if (activeSubs.contains(packageId)) return true;
-                      // 2) base:plan 形式のどちらかが prefix になっている場合も拾う
-                      return activeSubs.any((s) =>
-                          s == packageId ||
-                          s.startsWith('$packageId:') ||
-                          packageId.startsWith('$s:'));
-                    }
-
-                    // fallback: entitlement.productIdentifier だけで判断（Androidは base だけ返ることがある）
-                    if (activeProductId == null || activeProductId.isEmpty) return false;
-                    if (activeProductId == packageId) return true;
-                    // packageId が "base:plan" で、activeProductId が "base" の場合
-                    if (packageId.startsWith('$activeProductId:')) return true;
-                    // 逆（念のため）
-                    if (activeProductId.startsWith('$packageId:')) return true;
-                    return false;
-                  }
-
-                  // ✅ 月/年カードごとに「このpackageが登録中か」を判定
-                  final bool isSubscribed = _matchesActive(id);
-
-                  final bool isTrial = isSubscribed &&
-                      (entitlement?.periodType ?? PeriodType.normal) == PeriodType.trial;
-                      
-                    // 月額プランで、トライアル中のときだけ「初月無料」バッヂ
-                    final String? badge = (isMonthly && isTrial) ? '初月無料' : null;
-                    
-                    // デバッグ：このカードが何か/有効 product は何か
-                  // print('🧾 [card] id=$id, activeProductId=$activeProductId, activeSubs=${(_customerInfo?.activeSubscriptions ?? const [])}, isSubscribed=$isSubscribed, isTrial=$isTrial');
-
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      child: SubscriptionPlanCard(
-                        imagePath: imagePath,
-                        title: planTitle,
-                        description: planDescription,
-                        badge: badge,
-                        priceText: isSubscribed ? '登録中' : '購入',
-                        onPressed: isSubscribed ? null : () => _buy(package),
-                      ),
-                    );
-                  }),
-                  const SizedBox(height: 24),
-                  const PremiumFeaturesSection(),
-                  
-                  const SubscriptionLegalSection(
-                    privacyPolicyUrl: 'https://baseball-net.vercel.app/privacy',
-                    termsUrl: 'https://baseball-net.vercel.app/terms',
-                  ),
-                    ],
-                  ),
-                ),
-              ),
+                );
+              },
             ),
     );
   }
 }
 
 class SubscriptionPlanCard extends StatelessWidget {
-  final String imagePath;
   final String title;
   final String description;
   final String? badge;
@@ -416,7 +478,6 @@ class SubscriptionPlanCard extends StatelessWidget {
   final VoidCallback? onPressed;
 
   const SubscriptionPlanCard({
-    required this.imagePath,
     required this.title,
     required this.description,
     this.badge,
@@ -449,11 +510,6 @@ class SubscriptionPlanCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     )),
-            SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.asset(imagePath),
-            ),
             SizedBox(height: 12),
             Text(description,
                 style: TextStyle(
@@ -767,6 +823,130 @@ class SubscriptionLegalSection extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+class _PlanSelectTile extends StatelessWidget {
+  final String titleLeft;
+  final String? subtitleLeft;
+  final String? badgeText;
+  final String priceRight;
+  final String? subPriceRight;
+  final bool isSubscribed;
+  final VoidCallback? onTap;
+
+  const _PlanSelectTile({
+    required this.titleLeft,
+    required this.subtitleLeft,
+    required this.badgeText,
+    required this.priceRight,
+    required this.subPriceRight,
+    required this.isSubscribed,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = isSubscribed || onTap == null;
+
+    return Material(
+      color: disabled ? Colors.grey.shade200 : Theme.of(context).colorScheme.primary,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            titleLeft,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: disabled ? Colors.black87 : Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (badgeText != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(disabled ? 0.8 : 0.95),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              badgeText!,
+                              style: TextStyle(
+                                color: Colors.black87,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (subtitleLeft != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitleLeft!,
+                        style: TextStyle(
+                          color: disabled ? Colors.black54 : Colors.white70,
+                          fontSize: 12,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    isSubscribed ? '登録中' : priceRight,
+                    style: TextStyle(
+                      color: disabled ? Colors.black87 : Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (!isSubscribed && subPriceRight != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subPriceRight!,
+                      style: TextStyle(
+                        color: disabled ? Colors.black54 : Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(width: 10),
+              if (!isSubscribed)
+                Icon(
+                  Icons.chevron_right,
+                  color: disabled ? Colors.black45 : Colors.white,
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

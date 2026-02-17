@@ -152,6 +152,7 @@ class _SignUpPageState extends State<SignUpPage> {
       initialDate: DateTime(2000),
       firstDate: DateTime(1900),
       lastDate: DateTime.now(),
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
       locale: const Locale('ja'), // カレンダーを日本語に設定
     );
     if (picked != null && picked != _selectedDate) {
@@ -169,7 +170,10 @@ class _SignUpPageState extends State<SignUpPage> {
       return;
     }
 
-    if (_formKey.currentState!.validate() && _selectedPositions.isNotEmpty) {
+    if (_formKey.currentState!.validate() &&
+        _selectedPositions.isNotEmpty &&
+        _selectedDate != null &&
+        _selectedPrefecture != null) {
       setState(() {
         _isLoading = true;
       });
@@ -284,7 +288,7 @@ class _SignUpPageState extends State<SignUpPage> {
       }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('全ての必須項目を入力してください')),
+        const SnackBar(content: Text('必須項目（名前・都道府県・生年月日・ポジション・メール・パスワード・規約同意）を入力してください')),
       );
     }
   }
@@ -547,7 +551,7 @@ class _SignUpPageState extends State<SignUpPage> {
                                 ),
                               ),
                               controller: TextEditingController(
-                                text: _selectedPrefecture ?? '選択してください',
+                                text: _selectedPrefecture ?? '選択してください（必須）',
                               ),
                             ),
                           ),
@@ -580,7 +584,7 @@ class _SignUpPageState extends State<SignUpPage> {
                               Icon(Icons.arrow_drop_down, color: Colors.black54),
                         ),
                         controller: TextEditingController(
-                          text: _selectedPrefecture ?? '選択してください',
+                          text: _selectedPrefecture ?? '選択してください（必須）',
                         ),
                       ),
                     ),
@@ -593,7 +597,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     Expanded(
                       child: Text(
                         _selectedDate == null
-                            ? '生年月日を選択してください'
+                            ? '生年月日を選択してください（必須）'
                             : '生年月日: ${DateFormat('yyyy年MM月dd日').format(_selectedDate!)}',
                       ),
                     ),

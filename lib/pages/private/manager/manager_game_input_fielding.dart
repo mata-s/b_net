@@ -42,6 +42,9 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
   double fieldWidth = 0;
   double fieldHeight = 0;
 
+  final ScrollController _scrollController = ScrollController();
+  bool _isDragging = false;
+
   // --- Controllers for input fields ---
   late List<TextEditingController> _putoutsControllers;
   late List<TextEditingController> _assistsControllers;
@@ -187,9 +190,16 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
     }
   }
 
+    @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+
     memberPositions = {};
     final memberCount = widget.members.length;
     _putoutsControllers =
@@ -969,9 +979,42 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
 
         // return SingleChildScrollView(
         return Scaffold(
-          body: SingleChildScrollView(
-            child: Column(
-              children: [
+          body: Listener(
+            onPointerMove: (event) {
+              // Only auto-scroll while dragging
+              if (!_isDragging) return;
+
+              final position = event.position.dy;
+              final mediaQuery = MediaQuery.of(context);
+              final screenHeight = mediaQuery.size.height;
+
+              const edgeThreshold = 100; // distance from edge to trigger scroll
+              const scrollSpeed = 15.0;
+
+              // Start the top auto-scroll zone below status bar + (potential) AppBar height
+              final topTriggerY = mediaQuery.padding.top + kToolbarHeight;
+              // Start bottom auto-scroll after passing bench area (rough offset adjustment)
+              final bottomTriggerY =
+                  screenHeight - mediaQuery.padding.bottom - 200;
+
+              if (!_scrollController.hasClients) return;
+
+              if (position < topTriggerY + edgeThreshold) {
+                // Scroll up
+                final target = (_scrollController.offset - scrollSpeed)
+                    .clamp(0.0, _scrollController.position.maxScrollExtent);
+                _scrollController.jumpTo(target);
+              } else if (position > bottomTriggerY - edgeThreshold) {
+                // Scroll down
+                final target = (_scrollController.offset + scrollSpeed)
+                    .clamp(0.0, _scrollController.position.maxScrollExtent);
+                _scrollController.jumpTo(target);
+              }
+            },
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              child: Column(
+                children: [
                 if (shouldShowPitcherLabel) ...[
                   ...buildPitcherStatsWidgets(),
                 ],
@@ -1075,6 +1118,15 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                               },
                               child: Draggable<String>(
                                 data: uid,
+                                onDragStarted: () {
+                                  _isDragging = true;
+                                },
+                                onDragEnd: (_) {
+                                  _isDragging = false;
+                                },
+                                onDraggableCanceled: (_, __) {
+                                  _isDragging = false;
+                                },
                                 feedback: Material(
                                   type: MaterialType.transparency,
                                   child: Chip(
@@ -1139,6 +1191,15 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                             },
                             child: Draggable<String>(
                               data: uid,
+                              onDragStarted: () {
+                                _isDragging = true;
+                              },
+                              onDragEnd: (_) {
+                                _isDragging = false;
+                              },
+                              onDraggableCanceled: (_, __) {
+                                _isDragging = false;
+                              },
                               feedback: Material(
                                 color: Colors.transparent,
                                 child: Chip(
@@ -1265,7 +1326,8 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
               ],
             ),
           ),
-        );
+        ),
+      );
       },
     );
   }

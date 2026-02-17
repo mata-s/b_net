@@ -2,7 +2,7 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 import {initializeApp} from "firebase-admin/app";
-import {getFirestore, Timestamp} from "firebase-admin/firestore";
+import {getFirestore, Timestamp, FieldValue} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import * as functions from "firebase-functions";
 import {onRequest} from "firebase-functions/v2/https";
@@ -1346,6 +1346,213 @@ function calculateUpdatedStatistics(
   return updatedStats;
 }
 
+// チームに成績反映
+// ✅ チーム成績 即時リフレッシュ（ユーザーが試合保存した直後に叩く）
+const teamStatsRefreshQueue = "team-stats-refresh-queue";
+const teamStatsRefreshUrl = "https://refreshteamstatsondemand-etndg3x4ra-uc.a.run.app";
+
+// ✅ チーム内ランキング 即時リフレッシュ（ユーザーが試合保存した直後に叩く）
+// NOTE: URL はデプロイ後の Cloud Run URL を env で上書きできるようにしておく
+const teamRankingsRefreshQueue = "team-rankings-refresh-queue";
+const teamRankingsRefreshUrl =
+  process.env.TEAM_RANKINGS_REFRESH_URL ||
+  "https://processteamrankings-etndg3x4ra-uc.a.run.app";
+
+/**
+ * チーム内ランキングの即時更新を Cloud Tasks にエンキュー（デバウンス付き）
+ * - 同じチームに対して短時間に連続で積まないように teams/{teamId}.teamRankingsRefreshEnqueuedAt を使う
+ *
+ * @param {string} teamId - 対象チームID（teams/{teamId}）
+ * @param {number} debounceSeconds - 同一チームに対するデバウンス秒数（この秒数以内の連続要求はスキップ）
+ * @return {Promise<void>}
+ */
+async function enqueueTeamRankingRefresh(teamId, debounceSeconds = 120) {
+  if (!teamId) return;
+
+  if (!teamRankingsRefreshUrl) {
+    console.warn(
+        "⚠️ TEAM_RANKINGS_REFRESH_URL is empty. Skip.",
+    );
+    return;
+  }
+
+  const teamRef = db.collection("teams").doc(teamId);
+  const now = Date.now();
+
+  // デバウンス判定（トランザクションで安全に）
+  const shouldEnqueue = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    const data = snap.exists ? (snap.data() || {}) : {};
+
+    const last = data.teamRankingsRefreshEnqueuedAt || 0;
+    // last が Timestamp の可能性も吸収
+    const lastMs = (last && typeof last.toMillis === "function") ?
+      last.toMillis() :
+      Number(last) || 0;
+
+    if (now - lastMs < debounceSeconds * 1000) {
+      return false;
+    }
+
+    tx.set(teamRef, {
+      teamRankingsRefreshEnqueuedAt: now,
+      teamRankingsRefreshRequestedAt: now,
+    }, {merge: true});
+
+    return true;
+  });
+
+  if (!shouldEnqueue) {
+    console.log(`⏭ Skip enqueue team-rankings (debounced): team=${teamId}`);
+    return;
+  }
+
+  const parent = client.queuePath(project, location, teamRankingsRefreshQueue);
+
+  const task = {
+    httpRequest: {
+      httpMethod: "POST",
+      url: teamRankingsRefreshUrl,
+      headers: {"Content-Type": "application/json"},
+      body: Buffer.from(JSON.stringify({teamId})).toString("base64"),
+    },
+    scheduleTime: {
+      // 60秒後に実行（連打の波をまとめる）
+      seconds: Math.floor(Date.now() / 1000) + 60,
+    },
+  };
+
+  await client.createTask({parent, task});
+  console.log(`✅ Enqueued team-rankings refresh task: team=${teamId}`);
+}
+
+/**
+ * teams/{teamId}/stats に必要なドキュメントが無ければ「0埋め」で作成する
+ * ※ 既存ドキュメントがある場合は上書きしない
+ *
+ * @param {string} teamId - teams/{teamId}
+ * @param {Date} gameDateJst - 試合日（JST想定）
+ * @param {string} gameType - 公式戦/練習試合 など
+ * @return {Promise<void>}
+ */
+async function ensureTeamStatsDocsExist(teamId, gameDateJst, gameType) {
+  if (
+    !teamId || !(gameDateJst instanceof Date) || isNaN(gameDateJst.getTime())
+  ) return;
+
+  const year = gameDateJst.getFullYear();
+  const month = gameDateJst.getMonth() + 1;
+  const safeGameType =
+  (typeof gameType === "string" && gameType.trim() !== "") ?
+  gameType.trim() : "unknown";
+
+  const docIds = [
+    "results_stats_all",
+    `results_stats_${year}_all`,
+    `results_stats_${year}_${month}`,
+    `results_stats_${safeGameType}_all`,
+    `results_stats_${year}_${safeGameType}_all`,
+    `results_stats_${year}_${month}_${safeGameType}`,
+  ];
+
+  const colRef = db.collection("teams").doc(teamId).collection("stats");
+
+  // 既存があれば上書きしない（exists=false の時だけ作る）
+  const snaps = await Promise.all(docIds.map((id) => colRef.doc(id).get()));
+
+  let batch = db.batch();
+  let count = 0;
+  const now = Date.now();
+
+  for (let i = 0; i < snaps.length; i++) {
+    const snap = snaps[i];
+    if (snap.exists) continue;
+
+    const id = docIds[i];
+    const ref = colRef.doc(id);
+
+    // 0埋めの初期値を作成（既存の initializeStats() を利用）
+    batch.set(ref, {
+      ...initializeStats(),
+      createdAt: now,
+      initializedFrom: "onGameDataCreated",
+    }, {merge: false});
+
+    count++;
+
+    // 念のため 450件くらいで区切る
+    if (count % 450 === 0) {
+      await batch.commit();
+      batch = db.batch();
+    }
+  }
+
+  if (count % 450 !== 0) {
+    await batch.commit();
+  }
+}
+
+/**
+ * チーム成績の即時更新を Cloud Tasks にエンキュー（デバウンス付き）
+ * - 同じチームに対して短時間に連続で積まないように teams/{teamId}.teamStatsRefreshEnqueuedAt を使う
+ *
+ * @param {string} teamId - 対象チームID（teams/{teamId}）
+ * @param {number} debounceSeconds - 同一チームに対するデバウンス秒数（この秒数以内の連続要求はスキップ）
+ * @return {Promise<void>}
+ */
+async function enqueueTeamStatsRefreshTask(teamId, debounceSeconds = 120) {
+  if (!teamId) return;
+
+  const teamRef = db.collection("teams").doc(teamId);
+  const now = Date.now();
+
+  // デバウンス判定（トランザクションで安全に）
+  const shouldEnqueue = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    const data = snap.exists ? (snap.data() || {}) : {};
+    const last = data.teamStatsRefreshEnqueuedAt || 0;
+
+    // last が Timestamp の可能性も吸収
+    const lastMs = (last && typeof last.toMillis === "function") ?
+      last.toMillis() :
+      Number(last) || 0;
+
+    if (now - lastMs < debounceSeconds * 1000) {
+      return false;
+    }
+
+    tx.set(teamRef, {
+      teamStatsRefreshEnqueuedAt: now,
+      teamStatsRefreshRequestedAt: now, // 最新要求時刻も残す
+    }, {merge: true});
+
+    return true;
+  });
+
+  if (!shouldEnqueue) {
+    console.log(`⏭ Skip enqueue (debounced): team=${teamId}`);
+    return;
+  }
+
+  const parent = client.queuePath(project, location, teamStatsRefreshQueue);
+
+  const task = {
+    httpRequest: {
+      httpMethod: "POST",
+      url: teamStatsRefreshUrl,
+      headers: {"Content-Type": "application/json"},
+      body: Buffer.from(JSON.stringify({teamID: teamId})).toString("base64"),
+    },
+    scheduleTime: {
+      // 60秒後に実行（連打の波をまとめる）
+      seconds: Math.floor(Date.now() / 1000) + 60,
+    },
+  };
+
+  await client.createTask({parent, task});
+  console.log(`✅ Enqueued team-stats refresh task: team=${teamId}`);
+}
+
 /**
  * 循環参照を回避するための安全なJSON.stringify関数
  * @param {Object} obj - JSONに変換するオブジェクト
@@ -1431,6 +1638,65 @@ onDocumentCreated("users/{uid}/games/{gameId}", async (event) => {
     },
   };
   await client.createTask({parent, task: userGoalTask});
+
+  // ✅ 追加: ユーザーが試合保存したら、所属チームの成績を即時更新（デバウンス付き）
+  //   さらに、teams/{teamId}/stats の必要docが無ければ先に作成しておく（存在しないときだけ）
+  try {
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = userSnap.exists ? (userSnap.data() || {}) : {};
+
+    const teamIds = Array.isArray(userData.teams) ?
+      userData.teams.filter((t) => typeof t === "string" && t.trim() !== "") :
+      [];
+
+    if (teamIds.length === 0) {
+      console.log(`ℹ️ No teams[] on user ${uid}, skip team refresh.`);
+      return;
+    }
+
+    // 試合データから year/month/gameType を特定して、必要なチームstatsドキュメントを先に作成
+    let gameDateJst = null;
+    let gameType = null;
+    try {
+      const gameSnap = await db.collection("users").doc(uid)
+          .collection("games").doc(gameId).get();
+      const gameData = gameSnap.exists ? (gameSnap.data() || {}) : {};
+
+      const rawDate = gameData.gameDate || gameData.game_date || gameData.date;
+      if (rawDate && typeof rawDate.toDate === "function") {
+        gameDateJst = rawDate.toDate();
+      } else if (rawDate) {
+        gameDateJst = new Date(rawDate);
+      }
+
+      gameType =
+      gameData.gameType || gameData.game_type || gameData.game_type_name ||
+      gameData.game_type_label || "unknown";
+    } catch (e) {
+      console.warn(
+          "⚠️ Failed to read game data for pre-creating team stats docs:", e,
+      );
+    }
+
+    // teams/{teamId}/stats の必要ドキュメントを事前作成（存在しないときだけ）
+    if (gameDateJst instanceof Date && !isNaN(gameDateJst.getTime())) {
+      await Promise.all(teamIds.map((teamId) =>
+        ensureTeamStatsDocsExist(teamId, gameDateJst, gameType)));
+    } else {
+      console.log(
+          "ℹ️ gameDate is missing/invalid; skip pre-create team stats docs.",
+      );
+    }
+
+    // その後に、チームstatsの再集計（オンデマンド）をデバウンス付きでエンキュー
+    await Promise.all(teamIds.map((teamId) =>
+      enqueueTeamStatsRefreshTask(teamId)));
+    // ✅ 追加: チーム内ランキングも即時更新（デバウンス付き）
+    await Promise.all(teamIds.map((teamId) =>
+      enqueueTeamRankingRefresh(teamId)));
+  } catch (e) {
+    console.error("🚨 Failed to enqueue team refresh:", e);
+  }
 });
 
 
@@ -2056,6 +2322,7 @@ onRequest(async (req, res) => {
   }
 });
 
+
 // 週一チーム成績
 const gradesQueue = "team-grades-queue"; // 使用するキューの名前
 const gradesUrl = "https://processteamstats-etndg3x4ra-uc.a.run.app";
@@ -2078,6 +2345,8 @@ export const weeklyTeamStatsBatch = onSchedule(
 
           // Cloud Tasks にタスクをスケジュール
           await scheduleTeamProcessing(teamID);
+          // ✅ 週一バッチの保険: チーム内ランキング更新も要求（URL未設定ならスキップされる）
+          await enqueueTeamRankingRefresh(teamID, 0);
         }
 
         console.log("Weekly team stats batch completed successfully.");
@@ -2097,7 +2366,7 @@ async function scheduleTeamProcessing(teamID) {
     console.error("Error: `project` is undefined. Check Firebase config.");
     return;
   }
-  if (! gradesQueue) {
+  if (!gradesQueue) {
     console.error("Error: gradesQueue` is undefined. Check gradesQueue name.");
     return;
   }
@@ -2114,7 +2383,7 @@ async function scheduleTeamProcessing(teamID) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: Buffer.from(JSON.stringify({teamID})),
+        body: Buffer.from(JSON.stringify({teamID})).toString("base64"),
       },
       scheduleTime: {
         seconds: Date.now() / 1000 + 10, // 10秒後に実行
@@ -2140,78 +2409,237 @@ export const processTeamStats = onRequest(
     async (req, res) => {
       console.log("🚀 Received request on processTeamStats");
 
-      const {teamID} = req.body;
+      let body = req.body;
+      // Cloud Tasks 経由などで base64 文字列が来るケースを吸収
+      if (typeof body === "string") {
+        try {
+          body = JSON.parse(Buffer.from(body, "base64").toString());
+        } catch (e) {
+          // すでにJSON文字列だった場合など
+          body = JSON.parse(body);
+        }
+      }
+
+      const {teamID} = body || {};
       console.log(`Processing team stats for team: ${teamID}`);
 
+      if (!teamID) {
+        return res.status(400).send("Missing teamID");
+      }
+
       try {
-        const teamDoc = await db.collection("teams").doc(teamID).get();
-        const teamData = teamDoc.data();
-
-        if (!teamData) {
-          return res.status(404).send(`Team ${teamID} not found.`);
-        }
-
-        const userIDs = teamData.members || [];
-        if (userIDs.length === 0) {
-          console.log(`Found 0 members for team ${teamID}. Skipping...`);
-          return res.status(200)
-              .send(`No members to process for team ${teamID}`);
-        }
-
-        const teamStats = {}; // チーム統計データの集計用オブジェクト
-
-        // ユーザーデータの取得
-        for (const userID of userIDs) {
-          const userDoc = await db.collection("users").doc(userID).get();
-          const userData = userDoc.data();
-
-          if (!userData) {
-            console.warn(`No data found for user ${userID}. Skipping...`);
-            continue;
-          }
-
-          const isPitcher =
-          userData.positions && userData.positions.includes("投手");
-
-          // 個人統計を取得
-          const statsSnapshot =
-       await db.collection("users").doc(userID).collection("stats").get();
-
-          for (const statsDoc of statsSnapshot.docs) {
-            const statsData = statsDoc.data();
-            const categoryPath = statsDoc.id;
-
-            // チーム統計に集計
-            if (!teamStats[categoryPath]) {
-              teamStats[categoryPath] = initializeStats(); // 初期化
-            }
-
-            aggregateStats(teamStats[categoryPath], statsData, isPitcher);
-          }
-        }
-
-        const teamStatsCollectionRef =
-    db.collection("teams").doc(teamID).collection("stats");
-        await saveWithBatch(teamStats, teamStatsCollectionRef);
-        // チームごとの統計処理の後、すべてのチームの統計統合が完了した後に呼び出す
-        console.log(
-            "now calculating advanced team stats...",
-        );
-        await calculateAdvancedTeamStats();
-        // 週次目標進捗確認タスクをエンキュー
-        await enqueueWeeklyGoalProgressTask(teamID);
-
-        console.log(`✅ Successfully processed stats for team ${teamID}`);
+        await runProcessTeamStats(teamID);
         return res.status(200).send(
-            `Successfully processed stats for team ${teamID}`);
+            `Successfully processed stats for team ${teamID}`,
+        );
       } catch (error) {
         console.error("Error processing team stats:", error);
-
         if (!res.headersSent) {
           return res.status(500).send("Failed to process team stats.");
         }
       }
-    });
+    },
+);
+
+/**
+ * チーム統計の集計・保存を実行（processTeamStats / 即時更新で共通）
+ * @param {string} teamID
+ */
+async function runProcessTeamStats(teamID) {
+  if (!teamID) throw new Error("Missing teamID");
+
+  const teamDoc = await db.collection("teams").doc(teamID).get();
+  const teamData = teamDoc.data();
+
+  if (!teamData) {
+    throw new Error(`Team ${teamID} not found.`);
+  }
+
+  const userIDs = teamData.members || [];
+  if (userIDs.length === 0) {
+    console.log(`Found 0 members for team ${teamID}. Skipping...`);
+    return;
+  }
+
+  const teamStats = {}; // チーム統計データの集計用オブジェクト
+
+  // ユーザーデータの取得
+  for (const userID of userIDs) {
+    const userDoc = await db.collection("users").doc(userID).get();
+    const userData = userDoc.data();
+
+    if (!userData) {
+      console.warn(`No data found for user ${userID}. Skipping...`);
+      continue;
+    }
+
+    const isPitcher =
+      userData.positions && userData.positions.includes("投手");
+
+    // 個人統計を取得
+    const statsSnapshot =
+      await db.collection("users").doc(userID).collection("stats").get();
+
+    for (const statsDoc of statsSnapshot.docs) {
+      const statsData = statsDoc.data();
+      const categoryPath = statsDoc.id;
+
+      // チーム統計に集計
+      if (!teamStats[categoryPath]) {
+        teamStats[categoryPath] = initializeStats(); // 初期化
+      }
+
+      aggregateStats(teamStats[categoryPath], statsData, isPitcher);
+    }
+  }
+
+  const teamStatsCollectionRef =
+    db.collection("teams").doc(teamID).collection("stats");
+  await saveWithBatch(teamStats, teamStatsCollectionRef);
+
+  // - 年別: teams/{teamId}/powerScores/{seasonYear}
+  // - 通算: teams/{teamId}/powerScores/all
+  // - teams/{teamId} には total だけミラー
+  //   - powerScores{seasonYear}: 今年の総合
+  //   - powerScoresAll: 通算の総合（常に上書き）
+  //   - 年が変わったら前年度のミラー字段は削除して入れ替える
+  try {
+    const seasonYear = new Date().getFullYear();
+    // 年別（results_stats_{year}_all が無ければ results_stats_all をフォールバック）
+    const yearKey = `results_stats_${seasonYear}_all`;
+    const yearBaseKey = teamStats[yearKey] ? yearKey : "results_stats_all";
+    const yearBaseStats = teamStats[yearBaseKey] || initializeStats();
+    const yearProvisional = computeProvisionalTeamPowerScores(yearBaseStats);
+
+    // 通算（results_stats_all を必ず使う）
+    const allBaseKey = "results_stats_all";
+    const allBaseStats = teamStats[allBaseKey] || initializeStats();
+    const allProvisional = computeProvisionalTeamPowerScores(allBaseStats);
+
+    const teamRef = db.collection("teams").doc(teamID);
+    const powerScoresCol = teamRef.collection("powerScores");
+
+    // ① subcollection に保存
+    await Promise.all([
+      powerScoresCol.doc(String(seasonYear)).set({
+        season: seasonYear,
+        baseStatsKey: yearBaseKey,
+        provisional: yearProvisional,
+        total: yearProvisional.total,
+        updatedAt: Date.now(),
+        source: "runProcessTeamStats",
+      }, {merge: true}),
+
+      powerScoresCol.doc("all").set({
+        baseStatsKey: allBaseKey,
+        provisional: allProvisional,
+        total: allProvisional.total,
+        updatedAt: Date.now(),
+        source: "runProcessTeamStats",
+      }, {merge: true}),
+    ]);
+
+    // ② teams/{teamId} に total だけミラー
+    //    - 前年度ミラー字段を削除して、今年の字段名に入れ替える
+    const teamSnap = await teamRef.get();
+    const teamData = teamSnap.exists ? (teamSnap.data() || {}) : {};
+    const prevYear = Number(teamData.powerScoresSeasonYear) || null;
+
+    const mirrorUpdates = {
+      powerScoresSeasonYear: seasonYear,
+      [`powerScores${seasonYear}`]: yearProvisional.total,
+      powerScoresAll: allProvisional.total,
+      powerScoresUpdatedAt: Date.now(),
+    };
+
+    if (prevYear && prevYear !== seasonYear) {
+      mirrorUpdates[`powerScores${prevYear}`] = FieldValue.delete();
+    }
+
+    await teamRef.set(mirrorUpdates, {merge: true});
+
+
+    console.log(
+        `✅ Saved powerScores: team=${teamID} year=${seasonYear} 
+        (base=${yearBaseKey}) total=${yearProvisional.total}
+         allTotal=${allProvisional.total}`,
+    );
+  } catch (e) {
+    console.error("🚨 Failed to compute/save powerScores:", e);
+  }
+
+  // チームごとの統計処理の後、すべてのチームの統計統合が完了した後に呼び出す
+  console.log("now calculating advanced team stats...");
+  await calculateAdvancedTeamStats(teamID);
+
+  // 週次目標進捗確認タスクをエンキュー
+  await enqueueWeeklyGoalProgressTask(teamID);
+
+  await db.collection("teams").doc(teamID).set({
+    teamStatsLastRefreshedAt: Date.now(),
+  }, {merge: true});
+
+  console.log(`✅ Successfully processed stats for team ${teamID}`);
+}
+
+// ✅ 即時更新（Cloud Tasks から呼ばれる）
+export const refreshTeamStatsOnDemand = onRequest(
+    {
+      timeoutSeconds: 1800,
+    },
+    async (req, res) => {
+      try {
+        let body = req.body;
+
+        // Cloud Tasks 経由は base64 文字列の可能性があるので吸収
+        if (typeof body === "string") {
+          try {
+            body = JSON.parse(Buffer.from(body, "base64").toString());
+          } catch (e) {
+            // すでにJSON文字列だった場合など
+            try {
+              body = JSON.parse(body);
+            } catch (_) {
+              body = {};
+            }
+          }
+        }
+
+        const teamID = (body && (body.teamID || body.teamId)) || null;
+        if (!teamID) return res.status(400).send("Missing teamID");
+
+        const teamRef = db.collection("teams").doc(teamID);
+        const snap = await teamRef.get();
+        const data = snap.exists ? (snap.data() || {}) : {};
+
+        const requestedAtRaw = data.teamStatsRefreshRequestedAt || 0;
+        const refreshedAtRaw = data.teamStatsLastRefreshedAt || 0;
+
+        // Timestamp/number の両方を吸収
+        const requestedAt =
+          requestedAtRaw && typeof requestedAtRaw.toMillis === "function" ?
+            requestedAtRaw.toMillis() :
+            Number(requestedAtRaw) || 0;
+
+        const refreshedAt =
+          refreshedAtRaw && typeof refreshedAtRaw.toMillis === "function" ?
+            refreshedAtRaw.toMillis() :
+            Number(refreshedAtRaw) || 0;
+
+        // すでに最新要求を処理済みならスキップ
+        if (requestedAt > 0 && refreshedAt >= requestedAt) {
+          console.log(`⏭ Already refreshed (skip): team=${teamID}`);
+          return res.status(200).send("skip");
+        }
+
+        await runProcessTeamStats(teamID);
+        return res.status(200).send("ok");
+      } catch (e) {
+        console.error("🚨 refreshTeamStatsOnDemand error:", e);
+        return res.status(500).send("error");
+      }
+    },
+);
 
 /**
  * Firestore にバッチ保存を行う
@@ -2322,6 +2750,121 @@ function initializeStats() {
     totalBuntAttempts: 0,
     sacFlyDirectionCounts: {},
     totalHomeRunsAllowed: 0,
+  };
+}
+
+/**
+ * 0〜100 に丸める
+ * @param {number} v
+ * @return {number}
+ */
+function clamp0to100(v) {
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(100, v));
+}
+
+/**
+ * 線形スケール: [min,max] を [0,100] に変換
+ * @param {number} value
+ * @param {number} min
+ * @param {number} max
+ * @return {number}
+ */
+function scaleTo100(value, min, max) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return 0;
+  if (max <= min) return 0;
+  return clamp0to100(((v - min) / (max - min)) * 100);
+}
+
+/**
+ * 逆スケール: 小さいほど強い指標（ERA/失策率など）を [0,100]
+ * @param {number} value
+ * @param {number} min
+ * @param {number} max
+ * @return {number}
+ */
+function invertScaleTo100(value, min, max) {
+  return 100 - scaleTo100(value, min, max);
+}
+
+/**
+ * ✅ 固定基準の暫定スコア（まずは体感重視で“納得感”優先）
+ * - 打撃: OPS中心
+ * - 投手: ERA中心（低いほど良い）
+ * - 守備: 守備率中心 + エラー率（低いほど良い）を少し加味
+ *
+ * @param {Object} s - stats ドキュメント（results_stats_*）
+ * @return {{
+ *   batting:number,
+ *   pitching:number,
+ *   fielding:number,
+ *   total:number,
+ *   components:Object
+ * }}
+ */
+function computeProvisionalTeamPowerScores(s) {
+  const totalGames = Number(s.totalGames || 0);
+
+  // ---- Batting ----
+  const ops = Number(s.ops || 0);
+  const avg = Number(s.battingAverage || 0);
+
+  // 草野球想定のざっくり基準（まずは固定でOK）
+  const opsScore = scaleTo100(ops, 0.35, 1.05);
+  const avgScore = scaleTo100(avg, 0.15, 0.45);
+
+  // 試合数が少ないとブレるので軽く補正（0〜1）
+  const gamesFactorBat = Math.max(0.3, Math.min(1.0, totalGames / 10));
+  const batting =
+  clamp0to100((opsScore * 0.8 + avgScore * 0.2) * gamesFactorBat);
+
+  // ---- Pitching ----
+  const era = Number(s.era || 0);
+  const ip = Number(s.totalInningsPitched || 0);
+
+  // ERA: 0〜12 を [100..0] に（低いほど強い）
+  const eraScore = invertScaleTo100(era, 0.0, 12.0);
+  const inningsFactor = Math.max(0.3, Math.min(1.0, ip / 15));
+  const pitching = clamp0to100(eraScore * inningsFactor);
+
+  // ---- Fielding ----
+  const fp = Number(s.fieldingPercentage || 0);
+  const errors = Number(s.totalErrors || 0);
+
+  const fpScore = scaleTo100(fp, 0.85, 1.0);
+  const errPerGame = totalGames > 0 ? (errors / totalGames) : errors;
+  const errScore = invertScaleTo100(errPerGame, 0.0, 3.0);
+  const gamesFactorFld = Math.max(0.3, Math.min(1.0, totalGames / 10));
+  const fielding =
+  clamp0to100((fpScore * 0.8 + errScore * 0.2) * gamesFactorFld);
+
+  // ---- Total (まずは 40/40/20) ----
+  const total = clamp0to100(batting * 0.4 + pitching * 0.4 + fielding * 0.2);
+
+  return {
+    batting,
+    pitching,
+    fielding,
+    total,
+    components: {
+      totalGames,
+      ops,
+      avg,
+      era,
+      totalInningsPitched: ip,
+      fieldingPercentage: fp,
+      totalErrors: errors,
+      errPerGame,
+      opsScore,
+      avgScore,
+      eraScore,
+      fpScore,
+      errScore,
+      gamesFactorBat,
+      inningsFactor,
+      gamesFactorFld,
+    },
   };
 }
 
@@ -2497,226 +3040,231 @@ function aggregateStats(teamStats, userStats, isPitcher) {
 /**
  * チーム統計ドキュメントを対象に、高度なスタッツを計算し保存します。
  * 事前に aggregateStats() による統合が完了している必要があります。
+ *
+ * @param {string} teamId - 対象チームID
+ * @return {Promise<void>}
  */
-async function calculateAdvancedTeamStats() {
+async function calculateAdvancedTeamStats(teamId) {
   console.log("✅ calculateAdvancedTeamStats started");
-  const teamsSnapshot = await db.collection("teams").get();
 
-  for (const teamDoc of teamsSnapshot.docs) {
-    const teamId = teamDoc.id;
-    const statsSnapshot =
+  if (!teamId || typeof teamId !== "string") {
+    console.warn("⚠️ calculateAdvancedTeamStats: missing/invalid teamId");
+    return;
+  }
+
+  const statsSnapshot =
     await db.collection("teams").doc(teamId).collection("stats").get();
 
-    for (const statsDoc of statsSnapshot.docs) {
-      const stats = statsDoc.data() || {};
-      const adv = {};
+  for (const statsDoc of statsSnapshot.docs) {
+    const stats = statsDoc.data() || {};
+    const adv = {};
 
-      const hits = stats.hits || 0;
-      const totalBats = stats.totalBats || 0;
-      const totalStrikeouts = stats.totalStrikeouts || 0;
-      const totalOuts = stats.totalOuts || 0;
-      const totalGames = stats.totalGames || 0;
-      const totalPitchCount = stats.totalPitchCount || 0;
-      const totalInningsPitched = stats.totalInningsPitched || 0;
-      const totalBattersFaced = stats.totalBattersFaced || 0;
-      const runsAllowed = stats.totalRunsAllowed || 0;
-      const totalWalks = stats.totalWalks || 0;
-      const totalHitByPitch = stats.totalHitByPitch || 0;
-      const totalPStrikeouts = stats.totalPStrikeouts || 0;
-      const totalHitsAllowed = stats.totalHitsAllowed || 0;
-      const totalHomeRunsAllowed = stats.totalHomeRunsAllowed || 0;
-      const totalSteals = stats.totalSteals || 0;
-      const totalstealsAttempts = stats.totalstealsAttempts || 0;
-      const totalBuntAttempts = stats.totalBuntAttempts || 0;
-      const totalAllBuntSuccess = stats.totalAllBuntSuccess || 0;
-      const atBats = stats.atBats || 0;
-      const batterPitchCount = stats.batterPitchCount || 0;
-      const homeRuns = stats.totalHomeRuns || 0;
-      const sacrificeFly = stats.sacrificeFly || 0;
-      const totalFourBalls = stats.totalFourBalls || 0;
-      const totalHitByAPitch = stats.totalHitByPitch || 0;
-      const totalStrikeInterferences = stats.totalStrikeInterferences || 0;
-      const runs = stats.totalRuns || 0;
-      const swingCount = stats.swingCount || 0;
-      const missSwingCount = stats.missSwingCount || 0;
-      const firstPitchSwingCount = stats.firstPitchSwingCount || 0;
-      const firstPitchSwingHits = stats.firstPitchSwingHits || 0;
-      const totalBases = stats.totalBases || 0;
-      const totalStarts = stats.totalStarts || 0;
-      const qualifyingStarts = stats.qualifyingStarts || 0;
+    const hits = stats.hits || 0;
+    const totalBats = stats.totalBats || 0;
+    const totalStrikeouts = stats.totalStrikeouts || 0;
+    const totalOuts = stats.totalOuts || 0;
+    const totalGames = stats.totalGames || 0;
+    const totalPitchCount = stats.totalPitchCount || 0;
+    const totalInningsPitched = stats.totalInningsPitched || 0;
+    const totalBattersFaced = stats.totalBattersFaced || 0;
+    const runsAllowed = stats.totalRunsAllowed || 0;
+    const totalWalks = stats.totalWalks || 0;
+    const totalHitByPitch = stats.totalHitByPitch || 0;
+    const totalPStrikeouts = stats.totalPStrikeouts || 0;
+    const totalHitsAllowed = stats.totalHitsAllowed || 0;
+    const totalHomeRunsAllowed = stats.totalHomeRunsAllowed || 0;
+    const totalSteals = stats.totalSteals || 0;
+    const totalstealsAttempts = stats.totalstealsAttempts || 0;
+    const totalBuntAttempts = stats.totalBuntAttempts || 0;
+    const totalAllBuntSuccess = stats.totalAllBuntSuccess || 0;
+    const atBats = stats.atBats || 0;
+    const batterPitchCount = stats.batterPitchCount || 0;
+    const homeRuns = stats.totalHomeRuns || 0;
+    const sacrificeFly = stats.sacrificeFly || 0;
+    const totalFourBalls = stats.totalFourBalls || 0;
+    const totalHitByAPitch = stats.totalHitByPitch || 0;
+    const totalStrikeInterferences = stats.totalStrikeInterferences || 0;
+    const runs = stats.totalRuns || 0;
+    const swingCount = stats.swingCount || 0;
+    const missSwingCount = stats.missSwingCount || 0;
+    const firstPitchSwingCount = stats.firstPitchSwingCount || 0;
+    const firstPitchSwingHits = stats.firstPitchSwingHits || 0;
+    const totalBases = stats.totalBases || 0;
+    const totalStarts = stats.totalStarts || 0;
+    const qualifyingStarts = stats.qualifyingStarts || 0;
 
-      const directionCounts = stats.hitDirectionCounts || {};
-      const totalDirections =
+    const directionCounts = stats.hitDirectionCounts || {};
+    const totalDirections =
       Object.values(directionCounts).reduce((sum, val) => sum + val, 0);
-      const directionPercentages = {};
-      for (const [dir, count] of Object.entries(directionCounts)) {
-        directionPercentages[dir] =
+    const directionPercentages = {};
+    for (const [dir, count] of Object.entries(directionCounts)) {
+      directionPercentages[dir] =
         totalDirections > 0 ? count / totalDirections : 0;
-      }
+    }
 
-      adv.hitDirectionPercentage = directionPercentages;
-      adv.hitBreakdown = {
-        infieldHitsRate: hits > 0 ? stats.totalInfieldHits / hits : 0,
-        oneBaseHitsRate: hits > 0 ? stats.total1hits / hits : 0,
-        twoBaseHitsRate: hits > 0 ? stats.total2hits / hits : 0,
-        threeBaseHitsRate: hits > 0 ? stats.total3hits / hits : 0,
-        homeRunsRate: hits > 0 ? stats.totalHomeRuns / hits : 0,
-      };
+    adv.hitDirectionPercentage = directionPercentages;
+    adv.hitBreakdown = {
+      infieldHitsRate: hits > 0 ? stats.totalInfieldHits / hits : 0,
+      oneBaseHitsRate: hits > 0 ? stats.total1hits / hits : 0,
+      twoBaseHitsRate: hits > 0 ? stats.total2hits / hits : 0,
+      threeBaseHitsRate: hits > 0 ? stats.total3hits / hits : 0,
+      homeRunsRate: hits > 0 ? stats.totalHomeRuns / hits : 0,
+    };
 
-      adv.strikeoutBreakdown = {
-        swinging:
+    adv.strikeoutBreakdown = {
+      swinging:
         totalStrikeouts >
         0 ? stats.totalSwingingStrikeouts / totalStrikeouts : 0,
-        overlooking:
+      overlooking:
         totalStrikeouts >
         0 ? stats.totalOverlookStrikeouts / totalStrikeouts : 0,
-        swingAway:
+      swingAway:
         totalStrikeouts >
         0 ? stats.totalSwingAwayStrikeouts / totalStrikeouts : 0,
-        threeBuntFail:
+      threeBuntFail:
         totalStrikeouts >
         0 ? stats.totalThreeBuntFailures / totalStrikeouts : 0,
-      };
-      adv.outBreakdown = {
-        grounderRate: totalOuts > 0 ? stats.totalGrounders / totalOuts : 0,
-        linerRate: totalOuts > 0 ? stats.totalLiners / totalOuts : 0,
-        flyBallRate: totalOuts > 0 ? stats.totalFlyBalls / totalOuts : 0,
-        doublePlayRate: totalOuts > 0 ? stats.totalDoublePlays / totalOuts : 0,
-        errorReachRate: totalOuts > 0 ? stats.totalErrorReaches / totalOuts : 0,
-        interferenceRate: totalOuts > 0 ?
+    };
+    adv.outBreakdown = {
+      grounderRate: totalOuts > 0 ? stats.totalGrounders / totalOuts : 0,
+      linerRate: totalOuts > 0 ? stats.totalLiners / totalOuts : 0,
+      flyBallRate: totalOuts > 0 ? stats.totalFlyBalls / totalOuts : 0,
+      doublePlayRate: totalOuts > 0 ? stats.totalDoublePlays / totalOuts : 0,
+      errorReachRate: totalOuts > 0 ? stats.totalErrorReaches / totalOuts : 0,
+      interferenceRate: totalOuts > 0 ?
         stats.totalInterferences / totalOuts : 0,
-        buntOutsRate: totalOuts > 0 ? stats.totalBuntOuts / totalOuts : 0,
-      };
-      // 奪三振率１イニングあたり
-      adv.pitcherStrikeoutsPerInning = totalInningsPitched > 0 ?
+      buntOutsRate: totalOuts > 0 ? stats.totalBuntOuts / totalOuts : 0,
+    };
+    // 奪三振率１イニングあたり
+    adv.pitcherStrikeoutsPerInning = totalInningsPitched > 0 ?
         totalPStrikeouts / totalInningsPitched : 0;
-      // 奪三振率7イニングあたり
-      adv.strikeoutsPerNineInnings = totalInningsPitched > 0 ?
+    // 奪三振率7イニングあたり
+    adv.strikeoutsPerNineInnings = totalInningsPitched > 0 ?
         (totalPStrikeouts * 7) / totalInningsPitched : 0;
-      // 被打率 本来は(四球・死球・犠打などは除いた「打数」**で割るのが理想的。)
-      adv.battingAverageAllowed = totalBattersFaced > 0 ?
+    // 被打率 本来は(四球・死球・犠打などは除いた「打数」**で割るのが理想的。)
+    adv.battingAverageAllowed = totalBattersFaced > 0 ?
         totalHitsAllowed / totalBattersFaced : 0;
-      // WHIP
-      adv.whip = totalInningsPitched > 0 ?
+    // WHIP
+    adv.whip = totalInningsPitched > 0 ?
         (totalWalks + totalHitsAllowed) / totalInningsPitched : 0;
-      // QS
-      adv.qsRate = totalStarts > 0 ? qualifyingStarts / totalStarts : 0;
-      // 被本塁打率
-      adv.homeRunRate = totalInningsPitched > 0 ?
+    // QS
+    adv.qsRate = totalStarts > 0 ? qualifyingStarts / totalStarts : 0;
+    // 被本塁打率
+    adv.homeRunRate = totalInningsPitched > 0 ?
         (totalHomeRunsAllowed / totalInningsPitched) * 7 : 0;
-      // 平均球数（1人あたり）
-      adv.avgPitchesPerBatter = totalBattersFaced > 0 ?
+    // 平均球数（1人あたり）
+    adv.avgPitchesPerBatter = totalBattersFaced > 0 ?
         totalPitchCount / totalBattersFaced : 0;
-      // 平均球数（1試合あたり）
-      adv.avgPitchesPerGame =
+    // 平均球数（1試合あたり）
+    adv.avgPitchesPerGame =
         totalGames > 0 ? totalPitchCount / totalGames : 0;
 
-      // 1試合あたりの与死球・与四球
-      adv.avgHitByPitchPerGame = totalGames > 0 ?
+    // 1試合あたりの与死球・与四球
+    adv.avgHitByPitchPerGame = totalGames > 0 ?
         stats.totalHitByPitch / totalGames : 0;
-      adv.avgWalksPerGame = totalGames > 0 ? totalWalks / totalGames : 0;
+    adv.avgWalksPerGame = totalGames > 0 ? totalWalks / totalGames : 0;
 
-      // 1試合あたりの打者数
-      adv.avgBattersFacedPerGame = totalGames > 0 ?
+    // 1試合あたりの打者数
+    adv.avgBattersFacedPerGame = totalGames > 0 ?
         totalBattersFaced / totalGames : 0;
 
-      // 1試合あたりの失点
-      adv.avgRunsAllowedPerGame = totalGames >
+    // 1試合あたりの失点
+    adv.avgRunsAllowedPerGame = totalGames >
         0 ? runsAllowed / totalGames : 0;
 
-      // 投手：被打率（打者1人あたりの被安打率）
-      adv.battingAverageAllowed =
+    // 投手：被打率（打者1人あたりの被安打率）
+    adv.battingAverageAllowed =
       totalBattersFaced > 0 ? totalHitsAllowed / totalBattersFaced : 0;
 
-      // 試合平均の対戦打者数（投手のイニング消化力）
-      adv.avgBattersFacedPerGame =
+    // 試合平均の対戦打者数（投手のイニング消化力）
+    adv.avgBattersFacedPerGame =
       totalGames > 0 ? totalBattersFaced / totalGames : 0;
-      // 試合平均の失点（防御力の指標）
-      adv.avgRunsAllowedPerGame = totalGames > 0 ? runsAllowed / totalGames : 0;
+    // 試合平均の失点（防御力の指標）
+    adv.avgRunsAllowedPerGame = totalGames > 0 ? runsAllowed / totalGames : 0;
 
-      // LOB率：走者をどれだけ残塁させたか（＝失点を防げたか）
-      const runnersOnBase = totalHitsAllowed + totalWalks + totalHitByPitch;
-      const adjustedDenominator = runnersOnBase - (1.4 * totalHomeRunsAllowed);
-      adv.lobRate =
+    // LOB率：走者をどれだけ残塁させたか（＝失点を防げたか）
+    const runnersOnBase = totalHitsAllowed + totalWalks + totalHitByPitch;
+    const adjustedDenominator = runnersOnBase - (1.4 * totalHomeRunsAllowed);
+    adv.lobRate =
       adjustedDenominator > 0 ?
       (runnersOnBase - runsAllowed) / adjustedDenominator : 0;
 
-      // 打者1人あたりの投球数（球数の多さや無駄の指標）
-      adv.avgPitchesPerBatter =
+    // 打者1人あたりの投球数（球数の多さや無駄の指標）
+    adv.avgPitchesPerBatter =
       totalBattersFaced > 0 ? totalPitchCount / totalBattersFaced : 0;
-      // 試合あたりの平均投球数（スタミナ消費・球数管理）
-      adv.avgPitchesPerGame = totalGames > 0 ? totalPitchCount / totalGames : 0;
-      // 盗塁成功率（走塁の積極性と成功精度）
-      adv.stealSuccessRate =
+    // 試合あたりの平均投球数（スタミナ消費・球数管理）
+    adv.avgPitchesPerGame = totalGames > 0 ? totalPitchCount / totalGames : 0;
+    // 盗塁成功率（走塁の積極性と成功精度）
+    adv.stealSuccessRate =
       totalstealsAttempts > 0 ? totalSteals / totalstealsAttempts : 0;
-      // バント成功率（戦術実行力）
-      adv.buntSuccessRate =
+    // バント成功率（戦術実行力）
+    adv.buntSuccessRate =
       totalBuntAttempts > 0 ? totalAllBuntSuccess / totalBuntAttempts : 0;
-      // 三振率（打席あたりの三振の割合）
-      adv.strikeoutRate = atBats > 0 ? totalStrikeouts / atBats : 0;
+    // 三振率（打席あたりの三振の割合）
+    adv.strikeoutRate = atBats > 0 ? totalStrikeouts / atBats : 0;
 
-      // 1試合あたりの与死球・与四球
-      adv.avgHitByPitchPerGame = totalGames > 0 ?
+    // 1試合あたりの与死球・与四球
+    adv.avgHitByPitchPerGame = totalGames > 0 ?
         stats.totalHitByPitch / totalGames : 0;
-      adv.avgWalksPerGame = totalGames > 0 ? totalWalks / totalGames : 0;
+    adv.avgWalksPerGame = totalGames > 0 ? totalWalks / totalGames : 0;
 
-      // 被本塁打率
-      adv.homeRunRate = totalInningsPitched > 0 ?
+    // 被本塁打率
+    adv.homeRunRate = totalInningsPitched > 0 ?
         (totalHomeRunsAllowed / totalInningsPitched) * 7 : 0;
 
-      // 打者
-      // 平均球数
-      adv.avgPitchesPerAtBat = totalBats > 0 ? batterPitchCount / totalBats : 0;
-      // BABIP
-      adv.babip =
+    // 打者
+    // 平均球数
+    adv.avgPitchesPerAtBat = totalBats > 0 ? batterPitchCount / totalBats : 0;
+    // BABIP
+    adv.babip =
         (atBats - totalStrikeouts - homeRuns + sacrificeFly) > 0 ?
           (hits - homeRuns) /
           (atBats - totalStrikeouts - homeRuns + sacrificeFly) :
           0;
-      // BB/K
-      adv.bbPerK = totalStrikeouts > 0 ? totalFourBalls / totalStrikeouts : 0;
-      // ISO
-      adv.iso = atBats > 0 ? (totalBases / atBats) - (hits / atBats) : 0;
+    // BB/K
+    adv.bbPerK = totalStrikeouts > 0 ? totalFourBalls / totalStrikeouts : 0;
+    // ISO
+    adv.iso = atBats > 0 ? (totalBases / atBats) - (hits / atBats) : 0;
 
-      // 三振率
-      adv.strikeoutRate = atBats > 0 ? totalStrikeouts / atBats : 0;
-      // 出塁後得点率
-      const onBaseCount =
+    // 三振率
+    adv.strikeoutRate = atBats > 0 ? totalStrikeouts / atBats : 0;
+    // 出塁後得点率
+    const onBaseCount =
       hits + totalFourBalls + totalHitByAPitch + totalStrikeInterferences;
-      adv.runAfterOnBaseRate = onBaseCount > 0 ? runs / onBaseCount : 0;
-      // 初球スイング率
-      adv.firstPitchSwingRate =
+    adv.runAfterOnBaseRate = onBaseCount > 0 ? runs / onBaseCount : 0;
+    // 初球スイング率
+    adv.firstPitchSwingRate =
       totalBats > 0 ? firstPitchSwingCount / totalBats : 0;
-      // 初球打率成功率 (firstPitchSwingHitsがなければ0)
-      const safeFirstPitchSwingHits = firstPitchSwingHits || 0;
-      adv.firstPitchSwingSuccessRate =
+    // 初球打率成功率 (firstPitchSwingHitsがなければ0)
+    const safeFirstPitchSwingHits = firstPitchSwingHits || 0;
+    adv.firstPitchSwingSuccessRate =
       firstPitchSwingCount > 0 ?
       safeFirstPitchSwingHits / firstPitchSwingCount : 0;
-      // 初球ヒット率（firstPitchHitRate）: 全打席に対する初球ヒット割合
-      adv.firstPitchHitRate =
+    // 初球ヒット率（firstPitchHitRate）: 全打席に対する初球ヒット割合
+    adv.firstPitchHitRate =
       totalBats > 0 ? firstPitchSwingHits / totalBats : 0;
-      // バント成功率
-      adv.buntSuccessRate =
+    // バント成功率
+    adv.buntSuccessRate =
       totalBuntAttempts > 0 ? totalAllBuntSuccess / totalBuntAttempts : 0;
-      // スイング率
-      adv.swingRate = batterPitchCount > 0 ? swingCount / batterPitchCount : 0;
-      // 空振り率
-      adv.missSwingRate = swingCount > 0 ? missSwingCount / swingCount : 0;
+    // スイング率
+    adv.swingRate = batterPitchCount > 0 ? swingCount / batterPitchCount : 0;
+    // 空振り率
+    adv.missSwingRate = swingCount > 0 ? missSwingCount / swingCount : 0;
 
-      // 四球・死球の割合
-      adv.walkHitByPitchRate = {
-        fourBallsRate: totalBats > 0 ? stats.totalFourBalls / totalBats : 0,
-        hitByPitchRate: totalBats > 0 ? stats.totalHitByAPitch / totalBats : 0,
-      };
+    // 四球・死球の割合
+    adv.walkHitByPitchRate = {
+      fourBallsRate: totalBats > 0 ? stats.totalFourBalls / totalBats : 0,
+      hitByPitchRate: totalBats > 0 ? stats.totalHitByAPitch / totalBats : 0,
+    };
 
-      await db.collection("teams").doc(teamId)
-          .collection("stats").doc(statsDoc.id).update({
-            advancedStats: adv,
-          });
-      console.log(
-          `✅ saved advanced stats for team ${teamId}, doc ${statsDoc.id}`,
-      );
-    }
+
+    await db.collection("teams").doc(teamId)
+        .collection("stats").doc(statsDoc.id)
+        .update({advancedStats: adv});
+
+    console.log(
+        `✅ saved advanced stats for team ${teamId}, doc ${statsDoc.id}`,
+    );
   }
 }
 
@@ -3468,185 +4016,243 @@ async function scheduleTeamRankingProcessing(teamID) {
  * チームのランキング作成処理 (Cloud Tasks で呼び出し)
  */
 export const processTeamRankings = onRequest(
-    {
-      timeoutSeconds: 1800,
-    },
+    {timeoutSeconds: 1800},
     async (req, res) => {
-      const {teamID} = req.body;
-      console.log(`🚀 チームランキング作成開始: ${teamID}`);
+      let body = req.body;
+
+      // Cloud Tasks の base64 body / JSON string 対応
+      if (typeof body === "string") {
+        try {
+          body = JSON.parse(Buffer.from(body, "base64").toString());
+        } catch (e) {
+          body = JSON.parse(body);
+        }
+      }
+
+      const teamID = (body && (body.teamID || body.teamId)) || null;
+      if (!teamID) return res.status(400).send("Missing teamID");
 
       try {
-        const teamDoc = await db.collection("teams").doc(teamID).get();
-        const teamData = teamDoc.data();
-        if (!teamData) {
-          res.status(404).send(`チーム ${teamID} が見つかりません`);
-          return;
-        }
-
-        const userIDs = teamData.members || [];
-        if (userIDs.length === 0) {
-          console.log(`❌ チーム ${teamID} にメンバーがいないためスキップ`);
-          res.status(200).send(`No members to process for team ${teamID}`);
-          return;
-        }
-
-        console.log(`🚀 チーム ${teamID} のメンバー数: ${userIDs.length}`);
-
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        const gameTypes = ["練習試合", "公式戦"];
-        const periods = [
-          "results_stats_all",
-          `results_stats_${year}_${month}`,
-          `results_stats_${year}_all`,
-          ...gameTypes.flatMap((gameType) => [
-            `results_stats_${year}_${month}_${gameType}`,
-            `results_stats_${year}_${gameType}_all`,
-            `results_stats_${gameType}_all`,
-          ]),
-        ];
-
-
-        // 🔹 チームの統計データを取得
-        const teamStatsSnapshot =
-        await db.collection("teams").doc(teamID).collection("stats").get();
-        const teamStats = teamStatsSnapshot.docs.reduce((acc, doc) => {
-          acc[doc.id] = doc.data();
-          return acc;
-        }, {});
-
-        const rankings = {}; // 🔹 ランキングデータを格納するオブジェクト
-
-        for (const period of periods) {
-          rankings[period] = {batting: {}, pitching: {}};
-
-          // 🔹 チームの `totalGames` を取得
-          const totalGames =
-          (teamStats[period] && teamStats[period].totalGames) ?
-         teamStats[period].totalGames : 0;
-          const requiredTotalBats = totalGames * 1; // 規定打席
-          const requiredInnings = totalGames * 2; // 規定投球回
-
-          const playerStats = [];
-          const pitcherStats = [];
-
-          for (const userID of userIDs) {
-            const userDoc = await db.collection("users").doc(userID).get();
-            const userData = userDoc.data();
-            if (!userData) continue;
-
-            const statsDoc =
-            await db.collection("users").doc(userID)
-                .collection("stats").doc(period).get();
-            if (!statsDoc.exists) continue;
-
-            const stats = statsDoc.data();
-            const isPitcher =
-            userData.positions && userData.positions.includes("投手");
-
-
-            if (stats.totalBats) {
-              playerStats.push({
-                uid: userID,
-                name: userData.name || "名無し",
-                atBats: stats.atBats || 0,
-                hits: stats.hits || 0,
-                battingAverage: stats.battingAverage || 0,
-                onBasePercentage: stats.onBasePercentage || 0,
-                sluggingPercentage: stats.sluggingPercentage || 0,
-                totalHomeRuns: stats.totalHomeRuns || 0,
-                totalSteals: stats.totalSteals || 0,
-                totalRbis: stats.totalRbis || 0,
-                total1hits:
-                (stats.totalInfieldHits || 0) + (stats.total1hits || 0),
-                total2hits: stats.total2hits || 0,
-                total3hits: stats.total3hits || 0,
-                totalBats: stats.totalBats || 0,
-                requiredTotalBats,
-              });
-            }
-
-            if (isPitcher && stats.totalInningsPitched) {
-              pitcherStats.push({
-                uid: userID,
-                name: userData.name || "名無し",
-                totalInningsPitched: stats.totalInningsPitched || 0,
-                era: stats.era || 99.99,
-                winRate: stats.winRate || 0,
-                totalPStrikeouts: stats.totalPStrikeouts || 0,
-                totalSaves: stats.totalSaves || 0,
-                totalHoldPoints: stats.totalHoldPoints || 0,
-                totalAppearances: stats.totalAppearances || 0,
-                requiredInnings,
-              });
-            }
-          }
-
-          rankings[period].batting = {
-            battingAverage: createRanking(
-                playerStats, "battingAverage", "totalBats",
-                ["battingAverage", "atBats", "hits", "name", "rank"],
-                false, requiredTotalBats),
-            homeRuns: createRanking(playerStats, "totalHomeRuns", null,
-                ["totalHomeRuns", "name", "rank"]),
-            steals: createRanking(playerStats, "totalSteals", null,
-                ["totalSteals", "name", "rank"]),
-            rbis: createRanking(playerStats, "totalRbis", null,
-                ["totalRbis", "name", "rank"]),
-            sluggingPercentage: createRanking(
-                playerStats, "sluggingPercentage",
-                "totalBats",
-                ["sluggingPercentage", "totalHomeRuns",
-                  "total1hits", "total2hits",
-                  "total3hits", "name", "rank"],
-                false, requiredTotalBats),
-            onBasePercentage: createRanking(playerStats,
-                "onBasePercentage", "totalBats",
-                ["onBasePercentage", "totalBats", "name", "rank"],
-                false, requiredTotalBats),
-          };
-
-          rankings[period].pitching = {
-            era: createRanking(pitcherStats, "era", "totalInningsPitched",
-                ["era", "totalInningsPitched", "name", "rank"],
-                true, requiredInnings),
-            strikeouts: createRanking(pitcherStats, "totalPStrikeouts", null,
-                ["totalPStrikeouts", "name", "rank"]),
-            winRate: createRanking(pitcherStats, "winRate",
-                "totalInningsPitched",
-                ["winRate", "totalAppearances", "name", "rank"],
-                false, requiredInnings),
-            holds: createRanking(pitcherStats, "totalHoldPoints", null,
-                ["totalHoldPoints", "totalAppearances", "name", "rank"]),
-            saves: createRanking(pitcherStats, "totalSaves", null,
-                ["totalSaves", "totalAppearances", "name", "rank"]),
-          };
-          await batchWriteData(db, `teams/${teamID}/rankings`, rankings);
-        }
-
-        for (const period of periods) {
-          await db.collection("teams").doc(teamID)
-              .collection("rankings").doc(period).set(
-                  {
-                    rankings: rankings[period],
-                    updatedAt: Timestamp.now(),
-                  },
-                  {merge: true},
-              );
-        }
-
-
-        console.log(`✅ チーム ${teamID} のランキング保存完了`);
-        res.status(200).send(
-            `Successfully processed rankings for team ${teamID}`,
-        );
-      } catch (error) { // 🔹 **ここが必要！**
-        console.error("🚨 ランキング作成中にエラー発生:", error);
-        res.status(500).send("Failed to process rankings.");
+        await runProcessTeamRankings(teamID);
+        return res.status(200).send(`ok: ${teamID}`);
+      } catch (e) {
+        console.error("🚨 processTeamRankings failed:", e);
+        return res.status(500).send("failed");
       }
     },
 );
+
+/**
+ * チーム内ランキングを集計して teams/{teamID}/rankings/{period} に保存する
+ * NOTE: 純処理。HTTPレスポンス(res)は触らない。
+ *
+ * @param {string} teamID - チームID
+ * @param {Date} [now=new Date()] - 基準日時（テスト用に外部から渡せる）
+ * @return {Promise<void>}
+ */
+async function runProcessTeamRankings(teamID, now = new Date()) {
+  const teamDoc = await db.collection("teams").doc(teamID).get();
+  const teamData = teamDoc.data();
+  if (!teamData) throw new Error(`Team not found: ${teamID}`);
+
+  const userIDs = teamData.members || [];
+  if (userIDs.length === 0) {
+    console.log(`⏭ No members to process for team ${teamID}`);
+    return;
+  }
+
+  console.log(`🚀 チーム ${teamID} のメンバー数: ${userIDs.length}`);
+
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const gameTypes = ["練習試合", "公式戦"];
+
+  const periods = [
+    "results_stats_all",
+    `results_stats_${year}_${month}`,
+    `results_stats_${year}_all`,
+    ...gameTypes.flatMap((gameType) => [
+      `results_stats_${year}_${month}_${gameType}`,
+      `results_stats_${year}_${gameType}_all`,
+      `results_stats_${gameType}_all`,
+    ]),
+  ];
+
+  // 🔹 チームの統計データを取得（規定計算用）
+  const teamStatsSnapshot = await db
+      .collection("teams")
+      .doc(teamID)
+      .collection("stats")
+      .get();
+
+  const teamStats = teamStatsSnapshot.docs.reduce((acc, doc) => {
+    acc[doc.id] = doc.data();
+    return acc;
+  }, {});
+
+  const rankings = {};
+
+  for (const period of periods) {
+    rankings[period] = {batting: {}, pitching: {}};
+
+    // 🔹 チームの totalGames を取得して規定を作る
+    const totalGames =
+      teamStats &&
+      teamStats[period] &&
+      typeof teamStats[period].totalGames === "number" ?
+        teamStats[period].totalGames :
+        0;
+    const requiredTotalBats = totalGames * 1; // 規定打席（暫定）
+    const requiredInnings = totalGames * 2; // 規定投球回（暫定）
+
+    const playerStats = [];
+    const pitcherStats = [];
+
+    for (const userID of userIDs) {
+      const userDoc = await db.collection("users").doc(userID).get();
+      const userData = userDoc.data();
+      if (!userData) continue;
+
+      const statsDoc = await db
+          .collection("users")
+          .doc(userID)
+          .collection("stats")
+          .doc(period)
+          .get();
+      if (!statsDoc.exists) continue;
+
+      const stats = statsDoc.data() || {};
+      const isPitcher = userData.positions && userData.positions.includes("投手");
+
+      // ✅ 打撃
+      if (stats.totalBats) {
+        playerStats.push({
+          uid: userID,
+          name: userData.name || "名無し",
+          atBats: stats.atBats || 0,
+          hits: stats.hits || 0,
+          battingAverage: stats.battingAverage || 0,
+          onBasePercentage: stats.onBasePercentage || 0,
+          sluggingPercentage: stats.sluggingPercentage || 0,
+          totalHomeRuns: stats.totalHomeRuns || 0,
+          totalSteals: stats.totalSteals || 0,
+          totalRbis: stats.totalRbis || 0,
+          total1hits: (stats.totalInfieldHits || 0) + (stats.total1hits || 0),
+          total2hits: stats.total2hits || 0,
+          total3hits: stats.total3hits || 0,
+          totalBats: stats.totalBats || 0,
+          requiredTotalBats,
+        });
+      }
+
+      // ✅ 投手
+      if (isPitcher && stats.totalInningsPitched) {
+        pitcherStats.push({
+          uid: userID,
+          name: userData.name || "名無し",
+          totalInningsPitched: stats.totalInningsPitched || 0,
+          era: stats.era || 99.99,
+          winRate: stats.winRate || 0,
+          totalPStrikeouts: stats.totalPStrikeouts || 0,
+          totalSaves: stats.totalSaves || 0,
+          totalHoldPoints: stats.totalHoldPoints || 0,
+          totalAppearances: stats.totalAppearances || 0,
+          requiredInnings,
+        });
+      }
+    }
+
+    rankings[period].batting = {
+      battingAverage: createRanking(
+          playerStats,
+          "battingAverage",
+          "totalBats",
+          ["battingAverage", "atBats", "hits", "name", "rank"],
+          false,
+          requiredTotalBats,
+      ),
+      homeRuns: createRanking(
+          playerStats, "totalHomeRuns", null, ["totalHomeRuns", "name", "rank"],
+      ),
+      steals: createRanking(
+          playerStats, "totalSteals", null, ["totalSteals", "name", "rank"]),
+      rbis: createRanking(
+          playerStats, "totalRbis", null, ["totalRbis", "name", "rank"],
+      ),
+      sluggingPercentage: createRanking(
+          playerStats,
+          "sluggingPercentage",
+          "totalBats",
+          [
+            "sluggingPercentage",
+            "totalHomeRuns",
+            "total1hits",
+            "total2hits",
+            "total3hits",
+            "name",
+            "rank",
+          ],
+          false,
+          requiredTotalBats,
+      ),
+      onBasePercentage: createRanking(
+          playerStats,
+          "onBasePercentage",
+          "totalBats",
+          ["onBasePercentage", "totalBats", "name", "rank"],
+          false,
+          requiredTotalBats,
+      ),
+    };
+
+    rankings[period].pitching = {
+      era: createRanking(
+          pitcherStats,
+          "era",
+          "totalInningsPitched",
+          ["era", "totalInningsPitched", "name", "rank"],
+          true,
+          requiredInnings,
+      ),
+      strikeouts: createRanking(
+          pitcherStats, "totalPStrikeouts", null,
+          ["totalPStrikeouts", "name", "rank"],
+      ),
+      winRate: createRanking(
+          pitcherStats,
+          "winRate",
+          "totalInningsPitched",
+          ["winRate", "totalAppearances", "name", "rank"],
+          false,
+          requiredInnings,
+      ),
+      holds: createRanking(
+          pitcherStats, "totalHoldPoints", null,
+          ["totalHoldPoints", "totalAppearances", "name", "rank"],
+      ),
+      saves: createRanking(
+          pitcherStats, "totalSaves", null,
+          ["totalSaves", "totalAppearances", "name", "rank"],
+      ),
+    };
+  }
+
+  // ✅ 書き込みは最後に period ごとに1回だけ
+  for (const period of periods) {
+    await db
+        .collection("teams")
+        .doc(teamID)
+        .collection("rankings")
+        .doc(period)
+        .set(
+            {
+              rankings: rankings[period], updatedAt: Timestamp.now(),
+            }, {merge: true},
+        );
+  }
+
+  console.log(`✅ チーム ${teamID} のランキング保存完了`);
+}
 
 /**
  * プレイヤーの統計データを元にランキングを作成する関数。
@@ -3729,36 +4335,6 @@ function createRanking(
   return [...rankedPlayers, ...unrankedPlayers];
 }
 
-
-/**
- * Firestore にデータをバッチ書き込みする
- * @param {FirebaseFirestore.Firestore} db Firestore インスタンス
- * @param {string} collectionPath Firestore のコレクションパス
- * @param {Object} data 書き込むデータ
- */
-async function batchWriteData(db, collectionPath, data) {
-  const batchSize = 500;
-  let batch = db.batch();
-  let batchCounter = 0;
-
-  for (const [docID, docData] of Object.entries(data)) {
-    const docRef = db.collection(collectionPath).doc(docID);
-    batch.set(docRef, {rankings: docData, updatedAt:
-      Timestamp.now()}, {merge: true});
-
-    batchCounter++;
-    if (batchCounter >= batchSize) {
-      await batch.commit();
-      batch = db.batch();
-      batchCounter = 0;
-    }
-  }
-
-  if (batchCounter > 0) {
-    await batch.commit();
-  }
-}
-
 /**
  * 年齢から年齢グループ（例: '30_39'）を返す
  * @param {number} age - ユーザーの年齢
@@ -3778,11 +4354,11 @@ function getAgeGroup(age) {
 }
 
 /**
-   * 月一にプレイヤーランキングを作成する
-   */
+ * 月一にプレイヤーランキングを作成する
+ */
 export const createPrayerRanking = onSchedule(
     {
-      schedule: "30 1 1 * *",
+      schedule: "30 1 * * 1", // 毎週月曜日 1:30 実行
       timeZone: "Asia/Tokyo",
       timeoutSeconds: 1800,
     },

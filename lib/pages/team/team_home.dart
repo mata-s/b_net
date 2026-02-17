@@ -1,5 +1,6 @@
 import 'package:b_net/pages/team/ranking/national_team_ranking.dart';
 import 'package:b_net/pages/team/ranking/prefecture_team_ranking.dart';
+import 'package:b_net/pages/team/team_analysis_page.dart';
 import 'package:b_net/pages/team/team_calender_tab.dart';
 import 'package:b_net/pages/team/team_performance_home.dart';
 import 'package:b_net/pages/team/team_profile.dart';
@@ -75,16 +76,35 @@ void initState() {
 
 Future<void> _init() async {
   try {
-    await _fetchTeamData();            // チーム情報（都道府県など）
+    // このページを開いたタイミングを記録（最近動きがあるチーム判定用）
+    await _updateTeamLastLoginAt();
+
+    await _fetchTeamData(); // チーム情報（都道府県など）
     await _checkTeamSubscriptionStatus(); // サブスク情報（gold / platina）
     await _checkOngoingTeamGoals();
-    _initializePages();                // ← ここで初めてページを組み立てる
+    _initializePages(); // ← ここで初めてページを組み立てる
   } finally {
+    if (!mounted) return;
     setState(() {
       isLoading = false;
     });
   }
 }
+
+  Future<void> _updateTeamLastLoginAt() async {
+    final teamId = widget.team['teamId'] as String?;
+    if (teamId == null || teamId.trim().isEmpty) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(teamId)
+          .set({'lastLoginAt': Timestamp.now()}, SetOptions(merge: true));
+    } catch (e) {
+      // 失敗しても画面表示に影響させない
+      print('❌ teams/{teamId}.lastLoginAt の更新に失敗: $e');
+    }
+  }
 
   Future<void> _fetchTeamData() async {
     try {
@@ -538,6 +558,19 @@ Future<void> _init() async {
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (context) => TeamAnnualResultsPage(
+                          teamId: widget.team['teamId'],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                menuTile(
+                  icon: Icons.analytics,
+                  title: '分析',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => TeamAnalysisPage(
                           teamId: widget.team['teamId'],
                         ),
                       ),

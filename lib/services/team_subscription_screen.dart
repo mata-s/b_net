@@ -17,7 +17,8 @@ class TeamSubscriptionScreen extends StatefulWidget {
   State<TeamSubscriptionScreen> createState() => _TeamSubscriptionScreenState();
 }
 
-class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
+class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen>
+    with SingleTickerProviderStateMixin {
   List<Package> _packages = [];
   bool _isLoading = true;
   // ignore: unused_field
@@ -28,6 +29,7 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
   List<_TeamMember> _teamMembers = [];
   Map<String, dynamic>? _teamSub;
   bool _loadingTeamSub = true;
+  bool _isPlanPanelExpanded = false;
 
 //デバックしたい時に true
   static const bool _billingDebugLog =  false;
@@ -44,32 +46,416 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
   }
 
   String _planNameFromProductId(String productId) {
-    final id = productId.trim();
+    final idLower = productId.trim().toLowerCase();
 
-    switch (id) {
-      // --- Gold (Monthly) ---
-      case 'com.sk.bNet.teamGold.monthly': // 新 iOS（月額）
-      case 'com.sk.bnet.team:gold-monthly': // Android（月額）
-        return 'ゴールドプラン';
-
-      // --- Gold (Yearly) ---
-      case 'com.sk.bNet.teamGold.yearly': // 新 iOS（年額）
-      case 'com.sk.bnet.team:gold-yearly': // Android（年額）
-        return 'ゴールドプラン';
-
-      // --- Platina (Monthly) ---
-      case 'com.sk.bNet.teamPlatina.monthly': //iOS（月額）
-      case 'com.sk.bnet.team:platina-monthly': // Android（月額）
-        return 'プラチナプラン';
-
-      // --- Platina (Yearly) ---
-      case 'com.sk.bNet.teamPlatina.yearly': // 新 iOS（年額）
-      case 'com.sk.bnet.team:platina-yearly': // Android（年額）
-        return 'プラチナプラン';
-
-      default:
-        return '不明なプラン';
+    // Gold (Monthly)
+    if (idLower == 'com.sk.bnet.teamgold.monthly' ||
+        idLower == 'com.sk.bnet.team:gold-monthly') {
+      return 'ゴールドプラン';
     }
+
+    // Gold (Yearly)
+    if (idLower == 'com.sk.bnet.teamgold.yearly' ||
+        idLower == 'com.sk.bnet.team:gold-yearly') {
+      return 'ゴールドプラン';
+    }
+
+    // Platina (Monthly)
+    if (idLower == 'com.sk.bnet.teamplatina.monthly' ||
+        idLower == 'com.sk.bnet.team:platina-monthly') {
+      return 'プラチナプラン';
+    }
+
+    // Platina (Yearly)
+    if (idLower == 'com.sk.bnet.teamplatina.yearly' ||
+        idLower == 'com.sk.bnet.team:platina-yearly') {
+      return 'プラチナプラン';
+    }
+
+    // フォールバック（IDに含まれていれば判定）
+    final isPlatina = idLower.contains('platina');
+    final isGold = idLower.contains('gold');
+    if (isPlatina) return 'プラチナプラン';
+    if (isGold) return 'ゴールドプラン';
+
+    return '不明なプラン';
+  }
+
+  bool _isYearlyProductId(String productId) {
+    final idLower = productId.trim().toLowerCase();
+    return idLower.contains('12month') || idLower.contains('yearly');
+  }
+
+  // 料金（表示は固定でこの値にする）
+  String _overridePriceLabel(String productId) {
+    final idLower = productId.trim().toLowerCase();
+    final isPlatina = idLower.contains('platina');
+    final isGold = idLower.contains('gold');
+    final isYearly = _isYearlyProductId(productId);
+
+    if (isGold && !isYearly) return '1000円/月';
+    if (isGold && isYearly) return '10000円/年';
+    if (isPlatina && !isYearly) return '1500円/月';
+    if (isPlatina && isYearly) return '13000円/年';
+
+    return '';
+  }
+
+  String? _badgeLabelForProduct(String productId) {
+    final idLower = productId.trim().toLowerCase();
+    final isPlatina = idLower.contains('platina');
+    final isGold = idLower.contains('gold');
+    final isYearly = _isYearlyProductId(productId);
+
+    if (!isYearly) return null;
+
+    // 年額のお得バッジ（固定）
+    if (isGold) return '年間2000円お得';
+    if (isPlatina) return '年間5000円お得';
+    return 'お得';
+  }
+
+  String _monthlyEquivalentLabel(String productId) {
+    final idLower = productId.trim().toLowerCase();
+    final isPlatina = idLower.contains('platina');
+    final isGold = idLower.contains('gold');
+    final isYearly = _isYearlyProductId(productId);
+
+    if (!isYearly) return '';
+
+    // 年額 -> 月換算（四捨五入）
+    if (isGold) return '${(10000 / 12).round()}円/月';
+    if (isPlatina) return '${(13000 / 12).round()}円/月';
+    return '';
+  }
+
+  double _collapsedPlanListHeight() => 0;
+
+  double _expandedPlanListHeight(BuildContext context) {
+    final h = MediaQuery.of(context).size.height;
+
+    // できるだけ「全プランが見える」高さを確保する（端末高さに合わせて上限あり）
+    // 目安：1カードあたりの高さ + 間隔で必要高さを概算
+    final int n = _packages.isEmpty ? 4 : _packages.length;
+    const double tileH = 120.0; // optionTile の概算高さ（端末差を吸収するため少し余裕）
+    const double gap = 10.0; // optionTile の bottom padding
+    final needed = (n * tileH) + ((n - 1) * gap);
+
+    // 画面を覆い過ぎない上限（ただし今の 450 上限だと4件が少し隠れることがあるので緩める）
+    final maxH = (h * 0.62).clamp(340.0, 560.0);
+
+    // ここで必要高さに寄せつつ、上限を超えない
+    return needed.clamp(300.0, maxH);
+  }
+
+  double _bottomPanelTotalHeight(BuildContext context) {
+    // Header/handle/title/paddings roughly
+    const headerChrome = 92.0;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+    final listH = _isPlanPanelExpanded
+        ? _expandedPlanListHeight(context)
+        : _collapsedPlanListHeight();
+    return headerChrome + listH + safeBottom;
+  }
+
+  Widget _buildPlanOptionsBottomPanel() {
+    final String activeProductIdRaw =
+        (_teamSub?['productId'] ?? '').toString().trim();
+    final String activeProductIdLower = activeProductIdRaw.toLowerCase();
+    final bool isTeamActive =
+        (_teamSub?['status'] ?? '').toString().trim() == 'active';
+
+    final listHeight = _isPlanPanelExpanded
+        ? _expandedPlanListHeight(context)
+        : _collapsedPlanListHeight();
+
+    Widget optionTile(Package p) {
+      final id = p.storeProduct.identifier.trim();
+      final idLower = id.toLowerCase();
+
+      final isPlatina = idLower.contains('platina');
+      final baseName = isPlatina ? 'プラチナ' : 'ゴールド';
+      final isYearly = _isYearlyProductId(id);
+
+      final priceMain = _overridePriceLabel(id).isNotEmpty
+          ? _overridePriceLabel(id)
+          : p.storeProduct.priceString;
+
+      final badge = _badgeLabelForProduct(id);
+      final priceSub = isYearly ? _monthlyEquivalentLabel(id) : '';
+
+      final isSubscribed =
+          isTeamActive && activeProductIdLower.isNotEmpty && activeProductIdLower == idLower;
+      final disabled = isSubscribed || !_isSubscriptionOwner;
+
+      // Any.do風：行全体が選択肢。説明は出さず、バッジだけ。
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: disabled
+                ? null
+                : () async {
+                    await _buy(p);
+                  },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: isPlatina
+                    ? const Color(0xFFEDE7F6) // プラチナ：上品なラベンダー
+                    : const Color(0xFFFFF8E1), // ゴールド：やわらかいゴールド
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isSubscribed ? Colors.deepPurple : Colors.grey.shade200,
+                  width: isSubscribed ? 2 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // バッジ（縦並び：年額/月額 + お得）
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isYearly
+                                    ? Colors.deepPurple.shade50
+                                    : Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                isYearly ? '年額' : '月額',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: isYearly
+                                      ? Colors.deepPurple
+                                      : Colors.blue,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            if (badge != null) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade200,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  badge,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                        Text(
+                          '$baseNameプラン',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        priceMain,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      if (priceSub.isNotEmpty)
+                        Text(
+                          priceSub,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                            height: 1.2,
+                          ),
+                        ),
+                    ],
+                  ),
+                          ],
+                        ),
+                        if (isSubscribed) ...[
+                          const SizedBox(height: 6),
+                          const Text(
+                            '登録中',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.deepPurple,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ] else if (!_isSubscriptionOwner) ...[
+                          const SizedBox(height: 6),
+                          const Text(
+                            '購入不可（支払い担当のみ）',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.chevron_right,
+                    color: disabled ? Colors.grey.shade400 : Colors.black54,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return ColoredBox(
+      color: Colors.grey.shade100,
+      child: SafeArea(
+        top: false,
+        // bottom: false,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            const Text(
+                              '料金プラン',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(width: 8),
+                            if (isTeamActive && activeProductIdRaw.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.deepPurple.shade50,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  '現在：${_planNameFromProductId(activeProductIdRaw)}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.deepPurple,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: _isPlanPanelExpanded ? '閉じる' : '開く',
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          setState(() {
+                            _isPlanPanelExpanded = !_isPlanPanelExpanded;
+                          });
+                        },
+                        icon: AnimatedRotation(
+                          turns: _isPlanPanelExpanded ? 0.0 : 0.5,
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          child: const Icon(
+                            Icons.keyboard_arrow_down,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (_packages.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(child: Text('プラン情報を取得できませんでした。')),
+                    )
+                  else
+                    // 下の領域だけスクロール（背面説明は別でスクロールできる）
+                    ClipRect(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOutCubic,
+                        height: listHeight,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          opacity: _isPlanPanelExpanded ? 1 : 0,
+                          child: AnimatedSlide(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutCubic,
+                            offset: _isPlanPanelExpanded
+                                ? Offset.zero
+                                : const Offset(0, 0.04),
+                            child: ListView(
+                              padding: EdgeInsets.only(
+                                bottom: 12 + MediaQuery.of(context).padding.bottom,
+                              ),
+                              physics: const BouncingScrollPhysics(),
+                              children: _packages.map(optionTile).toList(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -277,7 +663,21 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
       context: context,
       builder: (context) {
         return SimpleDialog(
-          title: const Text('支払い担当を選択'),
+          title: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '支払い担当を選択',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                splashRadius: 20,
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
           children: [
             if (_teamMembers.isEmpty)
               const Padding(
@@ -533,6 +933,11 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
   }
 
   @override
+  void dispose() {
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -556,225 +961,179 @@ class _TeamSubscriptionScreenState extends State<TeamSubscriptionScreen> {
                 final horizontalPadding = isIpad ? 20.0 : 16.0;
                 final maxContentWidth = isIpad ? 720.0 : double.infinity;
 
-                return Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: maxContentWidth),
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: horizontalPadding,
-                        vertical: 16,
-                      ),
-                      child: Column(
-                        children: [
-                  // --- ヒーロー（説明） ---
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.grey.shade200),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.06),
-                          blurRadius: 14,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
-                              Text(
-                                "チームを、もう一段強く。",
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.15,
-                                ),
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                "プランを選んで、使える機能をチーム全員で最大化しよう。\n分析・ランキング・MVP・スケジュール管理まで、勝ちに近づく仕組みをまとめて強化。",
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.black87,
-                                  height: 1.45,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // --- 支払い担当表示 & 変更 ---
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: _loadingOwner
-                        ? const Row(
-                            children: [
-                              SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                              SizedBox(width: 10),
-                              Text('支払い担当を確認中…'),
-                            ],
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                '支払い担当',
-                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                _subscriptionOwnerUid == null
-                                    ? '未設定（代表者が設定してください）'
-                                    : (_isSubscriptionOwner
-                                        ? 'あなた（$_subscriptionOwnerName）'
-                                        : _subscriptionOwnerName),
-                                style: const TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '支払い担当はチーム代表者が変更できます。',
-                                style: const TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
-                              ),
-                              const SizedBox(height: 8),
-                              if (!_loadingTeamSub)
-                                Text(
-                                  (_teamSub != null && (_teamSub?['status'] ?? '') == 'active')
-                                      ? '現在のチームプラン：${_planNameFromProductId((_teamSub?['productId'] ?? '').toString())}'
-                                      : '現在のチームプラン：未登録',
-                                  style: const TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
-                                ),
-                              if (_loadingTeamSub)
-                                const Text(
-                                  '現在のチームプラン：確認中…',
-                                  style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
-                                ),
-                              const SizedBox(height: 10),
-                              if (!_isSubscriptionOwner)
-                                const Text(
-                                  '※ 購入は「支払い担当」に設定されたユーザーのみ可能です。',
-                                  style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
-                                ),
-                              if (_isTeamOwner) ...[
-                                const SizedBox(height: 10),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: TextButton.icon(
-                                    onPressed: _showChangeSubscriptionOwnerDialog,
-                                    icon: const Icon(Icons.manage_accounts, size: 18),
-                                    label: const Text('支払い担当を変更'),
+                final bottomPanelHeight = _bottomPanelTotalHeight(context);
+
+                return Column(
+                  children: [
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: maxContentWidth),
+                          child: SingleChildScrollView(
+                            physics: const BouncingScrollPhysics(),
+                            padding: EdgeInsets.only(
+                              left: horizontalPadding,
+                              right: horizontalPadding,
+                              top: 16,
+                              bottom: _isPlanPanelExpanded
+                                  ? (bottomPanelHeight * 0.60).clamp(40.0, 120.0)
+                                  : 8 + (bottomPanelHeight * 0.05),
+                            ),
+                            child: Column(
+                              children: [
+                                // --- ヒーロー（説明） ---
+                                Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.only(bottom: 16),
+                                  padding: const EdgeInsets.all(18),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: Colors.grey.shade200),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.06),
+                                        blurRadius: 14,
+                                        offset: const Offset(0, 6),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: const [
+                                            Text(
+                                              "チームを、もう一段強く。",
+                                              style: TextStyle(
+                                                fontSize: 24,
+                                                fontWeight: FontWeight.w800,
+                                                height: 1.15,
+                                              ),
+                                            ),
+                                            SizedBox(height: 8),
+                                            Text(
+                                              "プランを選んで、使える機能をチーム全員で最大化しよう。\n分析・ランキング・MVP・スケジュール管理まで、勝ちに近づく仕組みをまとめて強化。",
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                color: Colors.black87,
+                                                height: 1.45,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ] else ...[
-                                const SizedBox(height: 10),
-                                const Text(
-                                  '※ 支払い担当の変更はチーム代表者のみ可能です。',
-                                  style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                // --- 支払い担当表示 & 変更 ---
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(14),
+                                  margin: const EdgeInsets.only(bottom: 16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade50,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.grey.shade200),
+                                  ),
+                                  child: _loadingOwner
+                                      ? const Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                            ),
+                                            SizedBox(width: 10),
+                                            Text('支払い担当を確認中…'),
+                                          ],
+                                        )
+                                      : Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              '支払い担当',
+                                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              _subscriptionOwnerUid == null
+                                                  ? '未設定（代表者が設定してください）'
+                                                  : (_isSubscriptionOwner
+                                                      ? 'あなた（$_subscriptionOwnerName）'
+                                                      : _subscriptionOwnerName),
+                                              style: const TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
+                                            ),
+                                            const SizedBox(height: 6),
+                                            const Text(
+                                              '支払い担当はチーム代表者が変更できます。',
+                                              style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            if (!_loadingTeamSub)
+                                              Text(
+                                                (_teamSub != null && (_teamSub?['status'] ?? '') == 'active')
+                                                    ? '現在のチームプラン：${_planNameFromProductId((_teamSub?['productId'] ?? '').toString())}'
+                                                    : '現在のチームプラン：未登録',
+                                                style: const TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                              ),
+                                            if (_loadingTeamSub)
+                                              const Text(
+                                                '現在のチームプラン：確認中…',
+                                                style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                              ),
+                                            const SizedBox(height: 10),
+                                            if (!_isSubscriptionOwner)
+                                              const Text(
+                                                '※ 購入は「支払い担当」に設定されたユーザーのみ可能です。',
+                                                style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                              ),
+                                            if (_isTeamOwner) ...[
+                                              const SizedBox(height: 10),
+                                              Align(
+                                                alignment: Alignment.centerRight,
+                                                child: TextButton.icon(
+                                                  onPressed: _showChangeSubscriptionOwnerDialog,
+                                                  icon: const Icon(Icons.manage_accounts, size: 18),
+                                                  label: const Text('支払い担当を変更'),
+                                                ),
+                                              ),
+                                            ] else ...[
+                                              const SizedBox(height: 10),
+                                              const Text(
+                                                '※ 支払い担当の変更はチーム代表者のみ可能です。',
+                                                style: TextStyle(fontSize: 11, color: Colors.black54, height: 1.4),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
                                 ),
+                                const SizedBox(height: 24),
+                                const PlanComparisonTable(),
+                                const SizedBox(height: 24),
+                                const TeamFeaturesSection(),
+                                const SizedBox(height: 24),
+                                TeamSubscriptionLegalSection(
+                                  isPlanPanelExpanded: _isPlanPanelExpanded,
+                                ),
+                                const SizedBox(height: 4),
                               ],
-                            ],
+                            ),
                           ),
-                  ),
-                  ..._packages.map((package) {
-                    final id = package.storeProduct.identifier.trim();
-                    final idLower = id.toLowerCase();
-
-                    final isPlatina = idLower.contains('platina');
-                    final isGold = idLower.contains('gold');
-                    // used for selecting card images/styles
-                    final _ = isGold;
-
-                    // iOS: 12month / 1month, Android: yearly / monthly
-                    final isYearly = idLower.contains('12month') || idLower.contains('yearly');
-                    final isMonthly = !isYearly;
-
-                    // If neither matches (unexpected product id), fall back to gold style.
-                    final imagePath = isPlatina
-                        ? (isMonthly
-                            ? 'assets/Subscription_teamPlatina.png'
-                            : 'assets/Subscription_teamPlatina12month.png')
-                        : (isGold
-                            ? (isMonthly
-                                ? 'assets/Subscription_teamGold.png'
-                                : 'assets/Subscription_teamGold12month.png')
-                            : (isMonthly
-                                ? 'assets/Subscription_teamGold.png'
-                                : 'assets/Subscription_teamGold12month.png'));
-                    final baseName = _planNameFromProductId(id);
-                    final title = isMonthly
-                        ? '$baseName（月額）'
-                        : '$baseName（年額）';
-                    final description = isPlatina
-                        ? (isMonthly
-                            ? 'プラチナ限定特典付き。\n月額課金でいつでも解約可能。'
-                            : '1年間まとめて支払い。\n月額よりもお得な価格設定です。')
-                        : (isMonthly
-                            ? '月額課金でいつでもキャンセル可能。'
-                            : '1年間まとめて支払い。\n月額よりもお得な価格設定です。');
-
-                    // ✅ teams/{teamId}/subscription/{platform} を正として「登録中」を判定
-                    final teamStatus = (_teamSub?['status'] ?? '').toString();
-                    final teamProductIdRaw = (_teamSub?['productId'] ?? '').toString();
-                    // ignore: unused_local_variable
-                    final teamExpiry = _teamSub?['expiryDate'];
-
-                    final isTeamActive = teamStatus == 'active';
-                    final teamProductId = teamProductIdRaw.trim().toLowerCase();
-                    final cardProductId = id.trim().toLowerCase();
-                    final isSubscribed = isTeamActive && teamProductId.isNotEmpty && teamProductId == cardProductId;
-
-                    _log(
-                      '🧾 [team-card] id=$id teamProductId=$teamProductIdRaw status=$teamStatus isSubscribed=$isSubscribed',
-                    );
-                    // ignore: unused_local_variable
-                    final isNeverPurchased = !(isTeamActive) || teamProductId.isEmpty;
-
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      child: SubscriptionPlanCard(
-                        imagePath: imagePath,
-                        title: title,
-                        description: description,
-                        badge: null,
-                        disabled: isSubscribed || !_isSubscriptionOwner,
-                        onPressed: (isSubscribed || !_isSubscriptionOwner) ? null : () => _buy(package),
-                        priceText: isSubscribed
-                            ? '登録中'
-                            : (_isSubscriptionOwner ? '購入' : '購入不可'),
-                      ),
-                    );
-                  }),
-                  const SizedBox(height: 24),
-                  const PlanComparisonTable(),
-                  const SizedBox(height: 24),
-                  const TeamFeaturesSection(),
-                  const SizedBox(height: 24),
-                  const TeamSubscriptionLegalSection(),
-                          const SizedBox(height: 32),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
+
+                    // 固定の下部プラン（Any.do風）
+                    Material(
+                      elevation: 18,
+                      color: Colors.transparent,
+                      child: _buildPlanOptionsBottomPanel(),
+                    ),
+                  ],
                 );
               },
             ),
@@ -1188,7 +1547,7 @@ class PlanComparisonTable extends StatelessWidget {
               Expanded(
                 child: Center(
                   child: Text(
-                    "150円",
+                    "100円",
                     style: cellStyle,
                   ),
                 ),
@@ -1196,7 +1555,7 @@ class PlanComparisonTable extends StatelessWidget {
               Expanded(
                 child: Center(
                   child: Text(
-                    "180円",
+                    "150円",
                     style: cellStyle,
                   ),
                 ),
@@ -1211,7 +1570,7 @@ class PlanComparisonTable extends StatelessWidget {
               Expanded(
                 child: Center(
                   child: Text(
-                    "約133円",
+                    "約83円",
                     style: cellStyle,
                   ),
                 ),
@@ -1219,7 +1578,7 @@ class PlanComparisonTable extends StatelessWidget {
               Expanded(
                 child: Center(
                   child: Text(
-                    "約162円",
+                    "約108円",
                     style: cellStyle),
                   ),
               ),
@@ -1232,7 +1591,12 @@ class PlanComparisonTable extends StatelessWidget {
 }
 
 class TeamSubscriptionLegalSection extends StatelessWidget {
-  const TeamSubscriptionLegalSection({super.key});
+  final bool isPlanPanelExpanded;
+
+  const TeamSubscriptionLegalSection({
+    super.key,
+    required this.isPlanPanelExpanded,
+  });
 
   Future<void> _openUrl(BuildContext context, String url) async {
     final uri = Uri.parse(url);
@@ -1283,8 +1647,8 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
           // --- 審査向け：購読に関する詳細案内 ---
           Text(
             '■ 料金の請求について\n'
-            '・購入確定時に、ご利用のストアアカウントに代金が請求されます。\n'
-            '・支払いは、ご利用のストアを通じて処理されます。',
+            '・購入確定時に、Apple ID / Google アカウントに代金が請求されます。\n'
+            '・支払いは各ストア（App Store / Google Play）を通じて処理されます。',
             style: textStyle,
           ),
           const SizedBox(height: 10),
@@ -1300,8 +1664,9 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
 
         Text(
             '■ 解約（自動更新の停止）・プラン変更\n'
-            '・解約/プラン変更は、アプリ内ではなく、ご利用のストアのサブスクリプション管理画面から行えます。\n'
-            '・解約しても、現在の請求期間が終了するまでは機能を利用できます。',
+            '・解約/プラン変更は、アプリ内ではなく App Store / Google Play のサブスクリプション管理から行えます。解約しても、現在の請求期間が終了するまでは利用できます。\n'
+            '・（iOS）設定アプリ ＞ Apple ID ＞ サブスクリプション\n'
+            '・（Android）Google Play ＞ お支払いと定期購入 ＞ 定期購入',
             style: textStyle,
           ),
           const SizedBox(height: 10),
@@ -1309,8 +1674,8 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
 
           Text(
             '■ 返金について\n'
-            '・購入後の返金可否や手続きは、各ストアのポリシーに従います。\n'
-            '・返金を希望する場合は、ご利用のストアのサポート窓口からお手続きください。',
+            '・購入後の返金可否や手続きは、App Store / Google Play のポリシーに従います。\n'
+            '・返金を希望する場合は、各ストアのサポート窓口からお手続きください。',
             style: textStyle,
           ),
           const SizedBox(height: 10),
@@ -1336,13 +1701,14 @@ class TeamSubscriptionLegalSection extends StatelessWidget {
                 onTap: () => _openUrl(context, termsUrl),
                 child: Text('利用規約', style: linkStyle),
               ),
-              if (Theme.of(context).platform == TargetPlatform.iOS)
-                GestureDetector(
-                  onTap: () => _openUrl(context, appleEulaUrl),
-                  child: Text('Apple 標準利用規約 (EULA)', style: linkStyle),
-                ),
+              GestureDetector(
+                onTap: () => _openUrl(context, appleEulaUrl),
+                child: Text('Apple 標準利用規約 (EULA)', style: linkStyle),
+              ),
             ],
           ),
+          // ✅ パネルを開いている時だけ、下に余白を足してリンクまでスクロールしやすくする
+          SizedBox(height: isPlanPanelExpanded ? 0 : 0),
         ],
       ),
     );

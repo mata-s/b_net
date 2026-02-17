@@ -171,6 +171,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
       'reporterUserId': widget.currentUserUid,
       'reason': reason,
       'details': details,
+      'status': 'open',
       'createdAt': Timestamp.now(),
     });
 
@@ -211,6 +212,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
       'reporterUserId': widget.currentUserUid,
       'reason': 'blocked_user',
       'details': targetUserName,
+      'status': 'open',
       'createdAt': Timestamp.now(),
     });
 

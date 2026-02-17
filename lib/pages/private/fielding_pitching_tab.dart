@@ -158,7 +158,7 @@ class FieldingPitchingTab extends StatelessWidget {
                                 Row(
                                   children: [
                                     Text(
-                                      '${stats['totalGames']} 試合',
+                                      '${stats['totalGames'] ?? 0} 試合',
                                       style: const TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.bold,
@@ -173,7 +173,7 @@ class FieldingPitchingTab extends StatelessWidget {
                                       ),
                                     ),
                                     Text(
-                                      '${stats['totalAppearances']}',
+                                      '${stats['totalAppearances'] ?? 0}',
                                       style: const TextStyle(
                                         fontSize: 17,
                                         fontWeight: FontWeight.bold,
@@ -188,7 +188,7 @@ class FieldingPitchingTab extends StatelessWidget {
                                       ),
                                     ),
                                     Text(
-                                      '${stats['totalInningsPitched'].toStringAsFixed(1)}',
+                                      '${(stats['totalInningsPitched'] as num?)?.toStringAsFixed(1) ?? '--'}',
                                       style: const TextStyle(
                                         fontSize: 17,
                                         fontWeight: FontWeight.bold,
@@ -221,7 +221,7 @@ class FieldingPitchingTab extends StatelessWidget {
                                             children: [
                                               TextSpan(
                                                 text:
-                                                    '${formatPercentageEra(stats['era'])}',
+                                                    '${stats['era'] != null ? formatPercentageEra(stats['era']) : '--'}',
                                                 style: const TextStyle(
                                                   fontSize: 22,
                                                   fontWeight: FontWeight.bold,
@@ -251,7 +251,7 @@ class FieldingPitchingTab extends StatelessWidget {
                                         ),
                                         const SizedBox(width: 2),
                                         Text(
-                                          '${stats['totalEarnedRuns']}',
+                                          '${stats['totalEarnedRuns'] ?? 0}',
                                           style: const TextStyle(
                                             fontSize: 22,
                                             fontWeight: FontWeight.bold,
@@ -278,7 +278,7 @@ class FieldingPitchingTab extends StatelessWidget {
                                         ),
                                         const SizedBox(width: 2),
                                         Text(
-                                          '${stats['totalPStrikeouts']}',
+                                          '${stats['totalPStrikeouts'] ?? 0}',
                                           style: const TextStyle(
                                             fontSize: 22,
                                             fontWeight: FontWeight.bold,
@@ -307,13 +307,13 @@ class FieldingPitchingTab extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn(
-                                        '被安打', '${stats['totalHitsAllowed']}', 60),
+                                        '被安打', '${stats['totalHitsAllowed'] ?? 0}', 60),
                                     buildStatColumn('被本塁打',
-                                        '${stats['totalHomeRunsAllowed']}', 60),
+                                        '${stats['totalHomeRunsAllowed'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '与四球', '${stats['totalWalks']}', 60),
+                                        '与四球', '${stats['totalWalks'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '与死球', '${stats['totalHitByPitch']}', 60),
+                                        '与死球', '${stats['totalHitByPitch'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
@@ -321,13 +321,13 @@ class FieldingPitchingTab extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn(
-                                        '失点', '${stats['totalRunsAllowed']}', 60),
+                                        '失点', '${stats['totalRunsAllowed'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '打者', '${stats['totalBattersFaced']}', 60),
+                                        '打者', '${stats['totalBattersFaced'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '先発', '${stats['totalStarts']}', 60),
+                                        '先発', '${stats['totalStarts'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '中継ぎ', '${stats['totalReliefs']}', 60),
+                                        '中継ぎ', '${stats['totalReliefs'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
@@ -335,13 +335,13 @@ class FieldingPitchingTab extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn(
-                                        '抑え', '${stats['totalClosures']}', 60),
+                                        '抑え', '${stats['totalClosures'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '完投', '${stats['totalCompleteGames']}', 60),
+                                        '完投', '${stats['totalCompleteGames'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '完封', '${stats['totalShutouts']}', 60),
+                                        '完封', '${stats['totalShutouts'] ?? 0}', 60),
                                     buildStatColumn(
-                                        'ホールド', '${stats['totalHolds']}', 60),
+                                        'ホールド', '${stats['totalHolds'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
@@ -349,10 +349,10 @@ class FieldingPitchingTab extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     buildStatColumn(
-                                        'セーブ', '${stats['totalSaves']}', 60),
+                                        'セーブ', '${stats['totalSaves'] ?? 0}', 60),
                                     SizedBox(width: 30),
                                     buildStatColumn(
-                                        '救援勝利', '${stats['totalReliefWins']}', 60),
+                                        '救援勝利', '${stats['totalReliefWins'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
@@ -360,9 +360,9 @@ class FieldingPitchingTab extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn(
-                                        '勝利', '${stats['totalWins']}', 60),
+                                        '勝利', '${stats['totalWins'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '敗北', '${stats['totalLosses']}', 60),
+                                        '敗北', '${stats['totalLosses'] ?? 0}', 60),
                                     buildStatColumn('勝率',
                                         '${formatPercentage(stats['winRate'])}', 60),
                                   ],
@@ -387,7 +387,7 @@ class FieldingPitchingTab extends StatelessWidget {
                               Row(
                                 children: [
                                   Text(
-                                    '${stats['totalGames']} 試合',
+                                    '${stats['totalGames'] ?? 0} 試合',
                                     style: const TextStyle(
                                         fontSize: 20, fontWeight: FontWeight.bold),
                                   ),
@@ -408,11 +408,11 @@ class FieldingPitchingTab extends StatelessWidget {
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   buildStatColumn(
-                                      '刺殺', '${stats['totalPutouts']}', 60),
+                                      '刺殺', '${stats['totalPutouts'] ?? 0}', 60),
                                   buildStatColumn(
-                                      '捕殺', '${stats['totalAssists']}', 60),
+                                      '捕殺', '${stats['totalAssists'] ?? 0}', 60),
                                   buildStatColumn(
-                                      '失策', '${stats['totalErrors']}', 60),
+                                      '失策', '${stats['totalErrors'] ?? 0}', 60),
                                 ],
                               ),
                               if (stats['isCatcher'] == true) ...[
@@ -421,9 +421,9 @@ class FieldingPitchingTab extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn('盗塁企図',
-                                        '${stats['totalStolenBaseAttempts']}', 60),
+                                        '${stats['totalStolenBaseAttempts'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '盗塁刺', '${stats['totalCaughtStealing']}', 60),
+                                        '盗塁刺', '${stats['totalCaughtStealing'] ?? 0}', 60),
                                     buildStatColumn(
                                         '阻止率',
                                         '${formatPercentage(stats['catcherStealingRate'])}',
@@ -461,15 +461,17 @@ class FieldingPitchingTab extends StatelessWidget {
   }
 }
 
-String formatPercentage(num value) {
-  double doubleValue = value.toDouble(); // intをdoubleに変換
+String formatPercentage(num? value) {
+  if (value == null) return '--';
+  double doubleValue = value.toDouble();
   String formatted = doubleValue.toStringAsFixed(3);
   return formatted.startsWith("0")
       ? formatted.replaceFirst("0", "")
-      : formatted; // 先頭の0を削除
+      : formatted;
 }
 
-String formatPercentageEra(num value) {
-  double doubleValue = value.toDouble(); // num を double に変換
-  return doubleValue.toStringAsFixed(2); // 小数点第2位までフォーマット
+String formatPercentageEra(num? value) {
+  if (value == null) return '--';
+  double doubleValue = value.toDouble();
+  return doubleValue.toStringAsFixed(2);
 }

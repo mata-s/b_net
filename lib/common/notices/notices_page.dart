@@ -200,8 +200,10 @@ class _NoticesPageState extends State<NoticesPage> {
                                   child: const Text(
                                     "重要",
                                     style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold),
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                               Expanded(

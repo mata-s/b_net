@@ -20,7 +20,7 @@ class _TeamGradeDetailHomeState extends State<TeamGradeDetailHome>
     with SingleTickerProviderStateMixin {
   List<int> _availableYears = [];
   late TabController _tabController;
-  String selectedPeriodFilter = '通算'; // 期間フィルタ
+  String selectedPeriodFilter = '今年'; // 期間フィルタ
   String selectedGameTypeFilter = '全試合'; // 試合タイプフィルタ
   late DateTime _startDate; // フィルタ開始日
   late DateTime _endDate; // フィルタ終了日
@@ -81,6 +81,13 @@ class _TeamGradeDetailHomeState extends State<TeamGradeDetailHome>
 
     setState(() {
       _availableYears = years;
+
+      // 今年が存在しない（＝今年データ0件）なら通算に自動切替
+      final currentYear = DateTime.now().year;
+      if (!years.contains(currentYear)) {
+        selectedPeriodFilter = '通算';
+        _setFilterDates();
+      }
     });
   }
 

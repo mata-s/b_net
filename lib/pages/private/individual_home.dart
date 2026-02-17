@@ -20,7 +20,7 @@ class IndividualHome extends StatefulWidget {
 class _IndividualHomeState extends State<IndividualHome>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  String selectedPeriodFilter = '通算'; // 期間フィルタ
+  String selectedPeriodFilter = '今年'; // 期間フィルタ（デフォは今年。データ0件なら通算に自動切替）
   String selectedGameTypeFilter = '全試合'; // 試合タイプフィルタ
   late DateTime _startDate; // フィルタ開始日
   late DateTime _endDate; // フィルタ終了日
@@ -58,8 +58,17 @@ class _IndividualHomeState extends State<IndividualHome>
         .toList()
       ..sort((a, b) => b.compareTo(a)); // 降順にソート
 
+    // ✅ 今年デフォ。ただし「今年のstatsが存在しない（0件）」なら通算に自動切替
+    final currentYear = DateTime.now().year;
+    final shouldFallbackToCareer = years.isEmpty || !years.contains(currentYear);
+
     setState(() {
       _availableYears = years;
+
+      if (shouldFallbackToCareer && selectedPeriodFilter == '今年') {
+        selectedPeriodFilter = '通算';
+        _setFilterDates();
+      }
     });
   }
 

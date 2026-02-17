@@ -402,7 +402,7 @@ class _TeamPricingSection extends StatelessWidget {
             Expanded(
               child: _PlanCard(
                 title: 'ゴールド',
-                price: '¥1,500 / 月',
+                price: '¥1,000 / 月',
                 badgeText: 'スタンダード',
                 description:
                     'チーム内ランキング・目標設定・\nチーム全体の詳細・チーム別/球場別成績が使えます。',
@@ -412,7 +412,7 @@ class _TeamPricingSection extends StatelessWidget {
             Expanded(
               child: _PlanCard(
                 title: 'プラチナ',
-                price: '¥1,800 / 月',
+                price: '¥1,500 / 月',
                 badgeText: 'フルアクセス',
                 description:
                     'ゴールドの内容に加えて、\n全国の強豪チーム比較やMVP投票など\nすべてのチーム機能が解放されます。',

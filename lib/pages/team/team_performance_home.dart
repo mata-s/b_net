@@ -32,7 +32,7 @@ class TeamPerformanceHome extends StatefulWidget {
 class _TeamPerformanceHomeState extends State<TeamPerformanceHome>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  String selectedPeriodFilter = '通算';
+  String selectedPeriodFilter = '今年';
   String selectedGameTypeFilter = '全試合';
   late DateTime startDate;
   late DateTime endDate;
@@ -49,6 +49,7 @@ class _TeamPerformanceHomeState extends State<TeamPerformanceHome>
     _tabController = TabController(length: 2, vsync: this);
     _setFilterDates();
     fetchAvailableYears();
+    _autoFallbackToCareerIfNoThisYearData();
   }
 
   @override
@@ -93,6 +94,48 @@ class _TeamPerformanceHomeState extends State<TeamPerformanceHome>
         startDate = DateTime(2000, 1, 1);
         endDate = now;
         break;
+    }
+  }
+
+  /// 今年がデフォルト。ただし今年のチームstatsが無い/実質0なら通算へ自動切替。
+  Future<void> _autoFallbackToCareerIfNoThisYearData() async {
+    // ユーザーが既に別の期間を選んでいる場合は触らない
+    if (selectedPeriodFilter != '今年') return;
+
+    final now = DateTime.now();
+    final thisYearDocId = 'results_stats_${now.year}_all';
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(widget.teamId)
+          .collection('stats')
+          .doc(thisYearDocId)
+          .get();
+
+      if (!doc.exists) {
+        if (!mounted) return;
+        setState(() {
+          selectedPeriodFilter = '通算';
+          _setFilterDates();
+        });
+        return;
+      }
+
+      final data = doc.data();
+      final totalGamesRaw = data?['totalGames'];
+      final totalGames = (totalGamesRaw is num) ? totalGamesRaw.toInt() : 0;
+
+      // 今年データが「実質0」なら通算へ
+      if (totalGames <= 0) {
+        if (!mounted) return;
+        setState(() {
+          selectedPeriodFilter = '通算';
+          _setFilterDates();
+        });
+      }
+    } catch (_) {
+      // 失敗時はそのまま（今年）でOK
     }
   }
 
@@ -571,7 +614,7 @@ class _TeamPerformanceHomeState extends State<TeamPerformanceHome>
             child: TabBarView(
               controller: _tabController,
               children: [
-                // ✅ TeamPerformancePage（デフォルト: 通算）
+                // ✅ TeamPerformancePage（デフォルト: 今年 / 0件なら通算へ自動切替）
                 TeamPerformancePage(
                   teamId: widget.teamId,
                   selectedPeriodFilter: selectedPeriodFilter,

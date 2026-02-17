@@ -89,6 +89,8 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
   int? selectedIndex;
 
   Set<int> _expandedAtBatIndexes = {};
+  final ScrollController _scrollController = ScrollController();
+  bool _isDragging = false;
 
   @override
   void initState() {
@@ -657,10 +659,44 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 40),
+      body: Listener(
+        onPointerMove: (event) {
+          // Only auto-scroll while dragging (pointer pressed)
+          if (!_isDragging) return;
+          
+          if (!_scrollController.hasClients) return;
+
+          final position = event.position.dy;
+          final mediaQuery = MediaQuery.of(context);
+          final screenHeight = mediaQuery.size.height;
+
+          const edgeThreshold = 100; // distance from edge to trigger scroll
+          const scrollSpeed = 15.0;
+
+          // Start the top auto-scroll zone below status bar + (potential) AppBar height
+          final topTriggerY = mediaQuery.padding.top + kToolbarHeight;
+          // End the bottom auto-scroll zone above the bottom safe area
+          final bottomTriggerY = screenHeight - mediaQuery.padding.bottom;
+
+          if (position < topTriggerY + edgeThreshold) {
+            // Scroll up
+            _scrollController.jumpTo(
+              (_scrollController.offset - scrollSpeed)
+                  .clamp(0.0, _scrollController.position.maxScrollExtent),
+            );
+          } else if (position > bottomTriggerY - edgeThreshold) {
+            // Scroll down
+            _scrollController.jumpTo(
+              (_scrollController.offset + scrollSpeed)
+                  .clamp(0.0, _scrollController.position.maxScrollExtent),
+            );
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.only(bottom: 40),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -721,6 +757,15 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                                       Expanded(
                                          child: LongPressDraggable<Map<String, dynamic>>(
                                           data: assigned,
+                                          onDragStarted: () {
+                                            _isDragging = true;
+                                          },
+                                          onDragEnd: (_) {
+                                            _isDragging = false;
+                                          },
+                                          onDraggableCanceled: (_, __) {
+                                            _isDragging = false;
+                                          },
                                           feedback: Material(
                                             color: Colors.transparent,
                                             child: Container(
@@ -990,6 +1035,15 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                         final name = member['name'] ?? '名前未設定';
                         return Draggable<Map<String, dynamic>>(
                           data: member,
+                          onDragStarted: () {
+                            _isDragging = true;
+                          },
+                          onDragEnd: (_) {
+                            _isDragging = false;
+                          },
+                          onDraggableCanceled: (_, __) {
+                            _isDragging = false;
+                          },
                           feedback: Material(
                             color: Colors.transparent,
                             child: Chip(
@@ -1077,7 +1131,8 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Future<void> _saveTentativeData() async {
