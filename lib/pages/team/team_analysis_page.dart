@@ -51,26 +51,66 @@ class TeamAnalysisPage extends StatelessWidget {
     return 'D';
   }
 
-  String _autoComment(num? bat, num? pit, num? fld) {
-    final b = bat ?? 0;
-    final p = pit ?? 0;
-    final f = fld ?? 0;
+String _autoComment(num? bat, num? pit, num? fld) {
+  final b = (bat ?? 0).toDouble();
+  final p = (pit ?? 0).toDouble();
+  final f = (fld ?? 0).toDouble();
 
-    final maxVal = [b, p, f].reduce(math.max);
-
-    if (maxVal == 0) {
-      return 'まだデータが少ないため分析できません';
-    }
-
-    if (maxVal == b) {
-      return '打撃力が強みのチームです';
-    } else if (maxVal == p) {
-      return '投手力が強みのチームです';
-    } else {
-      return '守備力が強みのチームです';
-    }
+  if (b == 0 && p == 0 && f == 0) {
+    return 'まだデータが少ないため分析できません';
   }
 
+  // ===== 総合評価 =====
+  final avg = (b + p + f) / 3.0;
+
+  String overall;
+  if (avg >= 85) {
+    overall = '総合的にはトップクラスのチームです。';
+  } else if (avg >= 70) {
+    overall = '総合的にかなり力のあるチームです。';
+  } else if (avg >= 55) {
+    overall = '総合的には平均以上のチームです。';
+  } else if (avg >= 40) {
+    overall = '総合的には平均前後で、伸ばせる余地がまだ多くあります。';
+  } else {
+    overall = '現状では課題が多く、これからの伸びに期待できるチームです。';
+  }
+
+  // ===== 強み判定（70点以上を強み扱い） =====
+  final strengths = <String>[];
+  if (b >= 70) strengths.add('打撃');
+  if (p >= 70) strengths.add('投手');
+  if (f >= 70) strengths.add('守備');
+
+  String strengthText;
+  if (strengths.length == 3) {
+    strengthText = '打撃・投手・守備すべてが高水準です。';
+  } else if (strengths.length == 2) {
+    strengthText = '${strengths[0]}と${strengths[1]}が大きな強みです。';
+  } else if (strengths.length == 1) {
+    strengthText = '${strengths[0]}がチームの武器になっています。';
+  } else {
+    strengthText = '突出した強みはこれから作っていけそうです。';
+  }
+
+  // ===== 課題判定（40点未満なら課題） =====
+  final weaknesses = <String>[];
+  if (b < 40) weaknesses.add('打撃');
+  if (p < 40) weaknesses.add('投手');
+  if (f < 40) weaknesses.add('守備');
+
+  String weaknessText = '';
+  if (weaknesses.isNotEmpty) {
+    weaknessText =
+        '一方で${weaknesses.join('・')}にはまだ課題があり、ここを伸ばせるとさらに強くなれそうです。';
+  }
+
+  return [
+    overall,
+    strengthText,
+    if (weaknessText.isNotEmpty) weaknessText,
+  ].join('\n');
+}
   Widget _scoreCard({
     required String title,
     required AsyncSnapshot<DocumentSnapshot<Map<String, dynamic>>> snap,
@@ -290,13 +330,14 @@ class TeamAnalysisPage extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: Colors.grey.withOpacity(0.18)),
           ),
-          child: Text(
-            '''※スコアの計算（暫定）
-・打撃：OPS を 0〜100 に換算（opsScore）し、試合数が少ないほど控えめにする係数（gamesFactorBat）を掛けます。
-・投手：防御率（ERA）を 0〜100 に換算（eraScore）し、投球回が少ないほど控えめにする係数（inningsFactor）を掛けます。
-・守備：失策/試合（errPerGame→errScore）と守備率（fieldingPercentage→fpScore）を 0〜100 に換算し、試合数係数（gamesFactorFld）を掛けます。
-・総合：打撃/投手/守備 のバランスを見やすくするための合算（provisional.total）です。
-※サンプルが少ない時期でも暴れにくいよう、試合数・投球回の係数で“信頼度補正”しています。
+        child: Text(
+            '''※スコアの考え方
+・打撃：出塁＋長打の合計（OPS）をもとに「どれだけ打てているか」を 0〜100 点でスコア化しています。試合数が少ないうちは、点数が出すぎないよう少し控えめにしています。
+・投手：防御率（ERA／自責点の少なさ）から「どれだけ失点を防げているか」を 0〜100 点にしています。投球回が少ないうちは、こちらも点数を抑えめにしています。
+・守備：1 試合あたりのエラーの少なさと守備率から「どれだけ安定して守れているか」を 0〜100 点にしています。試合数が増えるほど、より本来の力に近いスコアになります。
+・総合：打撃・投手・守備の 3 つをまとめた、チーム全体のバランススコアです。
+
+※シーズン序盤などデータが少ない時期は、たまたまの好不調で数字が暴れすぎないよう、自動で「控えめ補正」がかかるようになっています。
 ''',
             style: TextStyle(
               fontSize: 12,

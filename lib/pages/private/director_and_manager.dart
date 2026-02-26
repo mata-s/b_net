@@ -298,8 +298,8 @@ class _DirectorAndManagerPageState extends State<DirectorAndManagerPage> {
     borderRadius: BorderRadius.circular(16),
     child: InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ViewMemoPage(
@@ -309,6 +309,7 @@ class _DirectorAndManagerPageState extends State<DirectorAndManagerPage> {
             ),
           ),
         );
+        _loadMemosForSelectedMonth();
       },
       child: Container(
         decoration: BoxDecoration(
@@ -461,8 +462,8 @@ class _DirectorAndManagerPageState extends State<DirectorAndManagerPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
+        onPressed: () async {
+          await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => InputMemoPage(
@@ -471,6 +472,7 @@ class _DirectorAndManagerPageState extends State<DirectorAndManagerPage> {
               ),
             ),
           );
+          _loadMemosForSelectedMonth();
         },
         child: Icon(Icons.add),
       ),

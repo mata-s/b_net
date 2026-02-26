@@ -600,7 +600,7 @@ Future<Widget> _getInitialPage() async {
   if (user != null) {
     await _setupMessagingForUser(user.uid);
 
-    // Update only the user's lastLoginAt field in Firestore
+  // Update only the user's lastLoginAt field in Firestore
     await FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
@@ -610,6 +610,7 @@ Future<Widget> _getInitialPage() async {
       },
       SetOptions(merge: true),
     );
+
 
     try {
       final userDoc = await FirebaseFirestore.instance

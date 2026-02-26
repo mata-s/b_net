@@ -2208,8 +2208,14 @@ export const saveTeamGameData = onCall(async (request) => {
               updatedStats.gameDate = Timestamp.fromDate(gameDateJST);
             }
 
-            updatedStats.winRate = updatedStats.totalWins /
-              (updatedStats.totalGames - updatedStats.totalDraws || 1);
+            // 勝率は「勝敗がついた試合（勝利＋敗北）」のみを分母にする
+            const gamesForWinRate =
+              updatedStats.totalWins + updatedStats.totalLosses;
+
+            updatedStats.winRate =
+              gamesForWinRate > 0 ?
+                updatedStats.totalWins / gamesForWinRate :
+                0;
 
             transaction.set(statsDocRef, updatedStats, {merge: true});
           });
@@ -2302,8 +2308,15 @@ onRequest(async (req, res) => {
               .collection("summary_stats").doc(`${base}_${key}`);
 
           const stats = statsMap[key];
+
+          const gamesForWinRate =
+        (stats.totalWins || 0) + (stats.totalLosses || 0);
+
           stats.winRate =
-          stats.totalWins / (stats.totalGames - stats.totalDraws || 1);
+        gamesForWinRate > 0 ?
+          stats.totalWins / gamesForWinRate :
+          0;
+
 
           await ref.set(stats, {merge: true});
         }
@@ -2509,12 +2522,26 @@ async function runProcessTeamStats(teamID) {
     const yearKey = `results_stats_${seasonYear}_all`;
     const yearBaseKey = teamStats[yearKey] ? yearKey : "results_stats_all";
     const yearBaseStats = teamStats[yearBaseKey] || initializeStats();
-    const yearProvisional = computeProvisionalTeamPowerScores(yearBaseStats);
 
     // 通算（results_stats_all を必ず使う）
     const allBaseKey = "results_stats_all";
     const allBaseStats = teamStats[allBaseKey] || initializeStats();
-    const allProvisional = computeProvisionalTeamPowerScores(allBaseStats);
+
+    // 👉 試合数は「チーム stats ドキュメント」に保存されている totalGames を見る
+    const [yearStatsSnap, allStatsSnap] = await Promise.all([
+      teamStatsCollectionRef.doc(yearBaseKey).get(),
+      teamStatsCollectionRef.doc(allBaseKey).get(),
+    ]);
+
+    const yearGames =
+      yearStatsSnap.exists ? Number(yearStatsSnap.data().totalGames || 0) : 0;
+    const allGames =
+      allStatsSnap.exists ? Number(allStatsSnap.data().totalGames || 0) : 0;
+
+    const yearProvisional =
+      computeProvisionalTeamPowerScores(yearBaseStats, yearGames);
+    const allProvisional =
+      computeProvisionalTeamPowerScores(allBaseStats, allGames);
 
     const teamRef = db.collection("teams").doc(teamID);
     const powerScoresCol = teamRef.collection("powerScores");
@@ -2557,7 +2584,6 @@ async function runProcessTeamStats(teamID) {
     }
 
     await teamRef.set(mirrorUpdates, {merge: true});
-
 
     console.log(
         `✅ Saved powerScores: team=${teamID} year=${seasonYear} 
@@ -2789,12 +2815,40 @@ function invertScaleTo100(value, min, max) {
 }
 
 /**
+ * 投手の raw stats から K/7 と WHIP を計算する共通ヘルパー
+ *
+ * @param {Object} s stats / teamStats ドキュメント
+ * @return {{kPer7: (number|null), whip: (number|null)}} K/7 と WHIP をまとめた結果
+ *
+ * メモ:
+ * - totalInningsPitched が 0 の場合は「投げていない」扱いにしたいので
+ *   K/7 / WHIP ともに null を返す。
+ * - スコアリング側では totalInningsPitched を見て投手スコアを 0 にする。
+ */
+function computePitchingKPer7AndWhip(s) {
+  const ip = Number(s.totalInningsPitched || 0);
+  const pKs = Number(s.totalPStrikeouts || 0);
+  const walks = Number(s.totalWalks || 0);
+  const hitsAllowed = Number(s.totalHitsAllowed || 0);
+
+  if (ip <= 0) {
+    return {kPer7: null, whip: null};
+  }
+
+  const kPer7 = (pKs * 7) / ip;
+  const whip = (walks + hitsAllowed) / ip;
+
+  return {kPer7, whip};
+}
+
+/**
  * ✅ 固定基準の暫定スコア（まずは体感重視で“納得感”優先）
  * - 打撃: OPS中心
  * - 投手: ERA中心（低いほど良い）
  * - 守備: 守備率中心 + エラー率（低いほど良い）を少し加味
  *
  * @param {Object} s - stats ドキュメント（results_stats_*）
+ * @param {number} teamGames - チームの総試合数（DBから取得した totalGames）
  * @return {{
  *   batting:number,
  *   pitching:number,
@@ -2803,41 +2857,73 @@ function invertScaleTo100(value, min, max) {
  *   components:Object
  * }}
  */
-function computeProvisionalTeamPowerScores(s) {
-  const totalGames = Number(s.totalGames || 0);
+function computeProvisionalTeamPowerScores(s, teamGames) {
+  const totalGamesRaw = Number(s.totalGames || 0);
+  const totalGames = Number.isFinite(teamGames) ?
+    Number(teamGames || 0) :
+    totalGamesRaw;
 
   // ---- Batting ----
   const ops = Number(s.ops || 0);
   const avg = Number(s.battingAverage || 0);
 
   // 草野球想定のざっくり基準（まずは固定でOK）
-  const opsScore = scaleTo100(ops, 0.35, 1.05);
-  const avgScore = scaleTo100(avg, 0.15, 0.45);
+  const opsScore = scaleTo100(ops, 0.40, 1.00);
+  const avgScore = scaleTo100(avg, 0.18, 0.33);
 
-  // 試合数が少ないとブレるので軽く補正（0〜1）
-  const gamesFactorBat = Math.max(0.3, Math.min(1.0, totalGames / 10));
+  // 試合数が少ないとブレるので軽く補正（0.5〜1.0）
+  // 4試合で係数0.5、8試合で1.0 になるイメージ
+  const gamesFactorBat =
+    totalGames > 0 ? Math.max(0.5, Math.min(1.0, totalGames / 8)) : 0;
   const batting =
-  clamp0to100((opsScore * 0.8 + avgScore * 0.2) * gamesFactorBat);
+    clamp0to100((opsScore * 0.7 + avgScore * 0.3) * gamesFactorBat);
 
   // ---- Pitching ----
   const era = Number(s.era || 0);
   const ip = Number(s.totalInningsPitched || 0);
 
+  // 共通ヘルパーで K/7・WHIP を算出
+  const {kPer7, whip} = computePitchingKPer7AndWhip(s);
+
   // ERA: 0〜12 を [100..0] に（低いほど強い）
   const eraScore = invertScaleTo100(era, 0.0, 12.0);
-  const inningsFactor = Math.max(0.3, Math.min(1.0, ip / 15));
-  const pitching = clamp0to100(eraScore * inningsFactor);
+  // WHIP: 0.8〜3.0 を [100..0] に（低いほど強い想定）
+  const whipScore = invertScaleTo100(whip, 0.8, 3.0);
+  // K/7: 0〜9 くらいを [0..100]
+  const kPer7Score = scaleTo100(kPer7, 0.0, 9.0);
+
+  // イニングが 0 の場合は投手スコア自体を 0 扱いにする（最強にならないように）
+  const inningsFactor =
+    ip > 0 ? Math.max(0.3, Math.min(1.0, ip / 15)) : 0;
+
+  // 投手トータルのベーススコア（ERA 50%, WHIP 25%, K/7 25%）
+  const pitchingBase =
+    eraScore * 0.5 +
+    whipScore * 0.25 +
+    kPer7Score * 0.25;
+
+  const pitching = clamp0to100(pitchingBase * inningsFactor);
 
   // ---- Fielding ----
   const fp = Number(s.fieldingPercentage || 0);
   const errors = Number(s.totalErrors || 0);
 
-  const fpScore = scaleTo100(fp, 0.85, 1.0);
+  // 守備率は 0.80〜1.000 を 0〜100 にスケール（草野球寄りに緩和）
+  const fpScore = scaleTo100(fp, 0.80, 1.0);
+
+  // 1試合あたり失策数
   const errPerGame = totalGames > 0 ? (errors / totalGames) : errors;
+
+  // 0〜3エラー/試合 を 100〜0 に逆スケール
   const errScore = invertScaleTo100(errPerGame, 0.0, 3.0);
-  const gamesFactorFld = Math.max(0.3, Math.min(1.0, totalGames / 10));
+
+  // 試合数補正（5試合で0.5、10試合で1.0のイメージ）
+  const gamesFactorFld =
+    totalGames > 0 ? Math.max(0.5, Math.min(1.0, totalGames / 10)) : 0;
+
+  // 守備率60%、エラー率40%に変更
   const fielding =
-  clamp0to100((fpScore * 0.8 + errScore * 0.2) * gamesFactorFld);
+    clamp0to100((fpScore * 0.6 + errScore * 0.4) * gamesFactorFld);
 
   // ---- Total (まずは 40/40/20) ----
   const total = clamp0to100(batting * 0.4 + pitching * 0.4 + fielding * 0.2);
@@ -2864,6 +2950,12 @@ function computeProvisionalTeamPowerScores(s) {
       gamesFactorBat,
       inningsFactor,
       gamesFactorFld,
+      // 投手指標
+      kPer7,
+      whip,
+      kPer7Score,
+      whipScore,
+      pitchingBase,
     },
   };
 }
@@ -2916,6 +3008,10 @@ function aggregateStats(teamStats, userStats, isPitcher) {
     totalBases / teamStats.atBats :
     0;
 
+  teamStats.totalAssists += userStats.totalAssists || 0;
+  teamStats.totalPutouts += userStats.totalPutouts || 0;
+  teamStats.totalErrors += userStats.totalErrors || 0;
+
   const totalChances =
     teamStats.totalPutouts + teamStats.totalAssists +
     teamStats.totalErrors;
@@ -2923,9 +3019,6 @@ function aggregateStats(teamStats, userStats, isPitcher) {
     (teamStats.totalPutouts + teamStats.totalAssists) / totalChances :
     0;
 
-  teamStats.totalAssists += userStats.totalAssists || 0;
-  teamStats.totalPutouts += userStats.totalPutouts || 0;
-  teamStats.totalErrors += userStats.totalErrors || 0;
   teamStats.totalSwingingStrikeouts += userStats.totalSwingingStrikeouts || 0;
   teamStats.totalOverlookStrikeouts += userStats.totalOverlookStrikeouts || 0;
   teamStats.totalSwingAwayStrikeouts += userStats.totalSwingAwayStrikeouts || 0;
@@ -3136,17 +3229,18 @@ async function calculateAdvancedTeamStats(teamId) {
       buntOutsRate: totalOuts > 0 ? stats.totalBuntOuts / totalOuts : 0,
     };
     // 奪三振率１イニングあたり
-    adv.pitcherStrikeoutsPerInning = totalInningsPitched > 0 ?
-        totalPStrikeouts / totalInningsPitched : 0;
+    adv.pitcherStrikeoutsPerInning =
+      totalInningsPitched > 0 ? totalPStrikeouts / totalInningsPitched : 0;
+
+    // 共通ヘルパーから K/7・WHIP を取得
+    const {kPer7, whip} = computePitchingKPer7AndWhip(stats);
     // 奪三振率7イニングあたり
-    adv.strikeoutsPerNineInnings = totalInningsPitched > 0 ?
-        (totalPStrikeouts * 7) / totalInningsPitched : 0;
+    adv.strikeoutsPerNineInnings = kPer7;
     // 被打率 本来は(四球・死球・犠打などは除いた「打数」**で割るのが理想的。)
-    adv.battingAverageAllowed = totalBattersFaced > 0 ?
-        totalHitsAllowed / totalBattersFaced : 0;
+    adv.battingAverageAllowed =
+      totalBattersFaced > 0 ? totalHitsAllowed / totalBattersFaced : 0;
     // WHIP
-    adv.whip = totalInningsPitched > 0 ?
-        (totalWalks + totalHitsAllowed) / totalInningsPitched : 0;
+    adv.whip = whip;
     // QS
     adv.qsRate = totalStarts > 0 ? qualifyingStarts / totalStarts : 0;
     // 被本塁打率

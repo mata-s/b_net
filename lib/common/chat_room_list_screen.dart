@@ -251,17 +251,23 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
               return FutureBuilder<Map<String, dynamic>?>(
                 future: _getOtherUserData(participants),
                 builder: (context, userSnapshot) {
-                  if (!userSnapshot.hasData) {
+                  // まだロード中のときだけ「ロード中…」を表示
+                  if (userSnapshot.connectionState == ConnectionState.waiting) {
                     return const ListTile(
                       title: Text('ロード中...'),
                     );
                   }
 
-                  var otherUserData = userSnapshot.data!;
-                  String displayName = otherUserData['name'] ?? '匿名ユーザー';
-                  String displayProfileImageUrl =
-                      otherUserData['profileImage'] ?? '';
+                  // ロードは完了したが、ユーザーデータが取れなかった（削除済みなど）の場合は
+                  // このチャットルーム自体を表示しない
+                  if (!userSnapshot.hasData || userSnapshot.data == null) {
+                    return const SizedBox.shrink();
+                  }
 
+                  final otherUserData = userSnapshot.data!;
+                  String displayName = otherUserData['name'] ?? '匿名ユーザー';
+                  String displayProfileImageUrl = otherUserData['profileImage'] ?? '';
+                  // 以下は元の処理をそのまま残す
                   // 自分の未読メッセージ数を取得
                   String userId = _user!.uid;
                   int unreadCount = room['unreadCounts']?[userId] ?? 0;

@@ -701,58 +701,64 @@ class _SignUpPageState extends State<SignUpPage> {
                   },
                 ),
                 const SizedBox(height: 16),
-          CheckboxListTile(
-            value: _acceptedTerms,
-            onChanged: (value) {
-              setState(() {
-                _acceptedTerms = value ?? false;
-              });
-            },
-            controlAffinity: ListTileControlAffinity.leading,
-            contentPadding: EdgeInsets.zero,
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  onTap: () => _openUrl('https://baseball-net.vercel.app/terms'),
-                  child: Text(
-                    '利用規約',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontSize: 13,
-                      decoration: TextDecoration.underline,
-                      decorationColor: Colors.blue,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Checkbox(
+                value: _acceptedTerms,
+                onChanged: (value) {
+                  setState(() {
+                    _acceptedTerms = value ?? false;
+                  });
+                },
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _openUrl('https://baseball-net.vercel.app/terms'),
+                      child: const Text(
+                        '利用規約',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontSize: 13,
+                          decoration: TextDecoration.underline,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Text(
-                  '・',
-                  style: TextStyle(fontSize: 13),
-                ),
-                GestureDetector(
-                  onTap: () => _openUrl('https://baseball-net.vercel.app/privacy'),
-                  child: Text(
-                    'プライバシーポリシー',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontSize: 13,
-                      decoration: TextDecoration.underline,
-                      decorationColor: Colors.blue,
+                    const Text(
+                      '・',
+                      style: TextStyle(fontSize: 13),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _openUrl('https://baseball-net.vercel.app/privacy'),
+                      child: const Text(
+                        'プライバシーポリシー',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontSize: 13,
+                          decoration: TextDecoration.underline,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Text(
+                      'に同意します',
+                      style: TextStyle(fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-                const Text(
-                  'に同意します',
-                  style: TextStyle(fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
                 const SizedBox(height: 16),
                 _isLoading

@@ -258,6 +258,20 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     return false;
   }
 
+  // Helper: 初回無料バッジを表示するかどうか（過去に月額プラン購入済み or 現在購読中/トライアル中なら非表示）
+  bool _shouldShowMonthlyIntroBadge({
+    required bool isMonthlySubscribed,
+    required bool isYearlySubscribed,
+    required bool hasEverPurchasedMonthly,
+    required bool isTrial,
+  }) {
+    // 一度でも月額プランを購入済み、もしくは現在購読中/トライアル中ならバッジは出さない
+    if (isMonthlySubscribed || isYearlySubscribed || hasEverPurchasedMonthly || isTrial) {
+      return false;
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
@@ -335,11 +349,14 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                       _PlanSelectTile(
                         titleLeft: '月額プラン',
                         subtitleLeft: null,
-                        badgeText: isMonthlySubscribed
-                            ? null
-                            : (isTrial
-                                ? '初月無料'
-                                : (hasEverPurchasedMonthly ? null : '初回無料')),
+                        badgeText: _shouldShowMonthlyIntroBadge(
+                          isMonthlySubscribed: isMonthlySubscribed,
+                          isYearlySubscribed: isYearlySubscribed,
+                          hasEverPurchasedMonthly: hasEverPurchasedMonthly,
+                          isTrial: isTrial,
+                        )
+                            ? '初回無料'
+                            : null,
                         priceRight: '${monthlyPrice}円/月',
                         subPriceRight: null,
                         isSubscribed: isMonthlySubscribed,
@@ -848,10 +865,34 @@ class _PlanSelectTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final disabled = isSubscribed || onTap == null;
+    // 1) Remove disabled variable
+
+    // 2) Visual state variables
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    Color backgroundColor;
+    Color borderColor;
+    Color titleColor;
+    Color priceColor;
+    Color subtitleColor;
+
+    if (isSubscribed) {
+      backgroundColor = Colors.white;
+      borderColor = primary;
+      titleColor = primary;
+      priceColor = primary;
+      subtitleColor = Colors.black54;
+    } else {
+      backgroundColor = primary;
+      borderColor = Colors.transparent;
+      titleColor = Colors.white;
+      priceColor = Colors.white;
+      subtitleColor = Colors.white70;
+    }
 
     return Material(
-      color: disabled ? Colors.grey.shade200 : Theme.of(context).colorScheme.primary,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -859,6 +900,14 @@ class _PlanSelectTile extends StatelessWidget {
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: borderColor,
+              width: isSubscribed ? 2 : 0,
+            ),
+          ),
           child: Row(
             children: [
               Expanded(
@@ -873,7 +922,7 @@ class _PlanSelectTile extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: disabled ? Colors.black87 : Colors.white,
+                              color: titleColor,
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
                             ),
@@ -884,7 +933,7 @@ class _PlanSelectTile extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(disabled ? 0.8 : 0.95),
+                              color: Colors.white.withOpacity(0.95),
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
@@ -904,7 +953,7 @@ class _PlanSelectTile extends StatelessWidget {
                       Text(
                         subtitleLeft!,
                         style: TextStyle(
-                          color: disabled ? Colors.black54 : Colors.white70,
+                          color: subtitleColor,
                           fontSize: 12,
                           height: 1.2,
                         ),
@@ -914,13 +963,14 @@ class _PlanSelectTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
+              // 4) Right side: price and badge for isSubscribed
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    isSubscribed ? '登録中' : priceRight,
+                    priceRight,
                     style: TextStyle(
-                      color: disabled ? Colors.black87 : Colors.white,
+                      color: priceColor,
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
                     ),
@@ -930,19 +980,37 @@ class _PlanSelectTile extends StatelessWidget {
                     Text(
                       subPriceRight!,
                       style: TextStyle(
-                        color: disabled ? Colors.black54 : Colors.white70,
+                        color: subtitleColor,
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ] else if (isSubscribed) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: primary.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '登録中',
+                        style: TextStyle(
+                          color: primary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
                 ],
               ),
               const SizedBox(width: 10),
+              // 5) Chevron only for not subscribed
               if (!isSubscribed)
                 Icon(
                   Icons.chevron_right,
-                  color: disabled ? Colors.black45 : Colors.white,
+                  color: Colors.white,
                 ),
             ],
           ),
