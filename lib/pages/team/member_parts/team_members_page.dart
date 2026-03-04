@@ -83,21 +83,31 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
                 return ListView.builder(
                   itemCount: members.length,
                   itemBuilder: (context, index) {
-                    var member = members[index].data() as Map<String, dynamic>;
-                    var memberId = members[index].id; // ✅ 現在の管理者かどうか
-                    // ignore: unused_local_variable
-                    bool isAdmin = memberId == _adminId;
+                    final member = members[index].data() as Map<String, dynamic>;
+                    final memberId = members[index].id;
+
+                    // ✅ 現在の管理者かどうか
+                    final bool isAdmin = memberId == _adminId;
+
+                    // ✅ 「このページで登録した選手」は責任者に任命できない
+                    //    登録時に users に `isTeamMemberOnly: true` を保存している前提
+                    final bool isTeamMemberOnly = (member['isTeamMemberOnly'] == true);
 
                     return ListTile(
                       title: Text(member['name'] ?? '名前不明'),
+                      subtitle: Text(
+                        isAdmin
+                            ? '管理者'
+                            : (isTeamMemberOnly ? '登録選手（管理者に任命不可）' : ''),
+                      ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (_adminId == _currentUserId &&
-                              memberId != _adminId) // ✅ 管理者が他のメンバーを管理者に変更可能
+                              memberId != _adminId &&
+                              !isTeamMemberOnly) // ✅ 登録選手（isTeamMemberOnly）は責任者に任命不可
                             IconButton(
-                              icon: const Icon(Icons.admin_panel_settings,
-                                  color: Colors.blue),
+                              icon: const Icon(Icons.admin_panel_settings, color: Colors.blue),
                               onPressed: () {
                                 _confirmChangeAdmin(memberId);
                               },

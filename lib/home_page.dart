@@ -315,12 +315,12 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-     final hasTeam = (widget.userTeamId != null && widget.userTeamId!.trim().isNotEmpty);
+    final hasTeam = (widget.userTeamId != null && widget.userTeamId!.trim().isNotEmpty);
     return Scaffold(
       appBar: AppBar(
         title: Image.asset(
           'assets/logo.png',
-          height: 40, // 画像の高さを調整
+          height: 40,
           fit: BoxFit.contain,
         ),
         actions: [
@@ -704,9 +704,84 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
-      body: _pages.isNotEmpty
-          ? _pages[_currentIndex]
-          : const Center(child: CircularProgressIndicator()),
+      body: Column(
+        children: [
+          if ((widget.userPosition.contains('監督') ||
+                  widget.userPosition.contains('マネージャー')) &&
+              !(widget.userTeamId != null &&
+                  widget.userTeamId!.trim().isNotEmpty))
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CreateTeamAccountPage(
+                      userUid: widget.userUid,
+                      accountName: widget.accountName,
+                      userPrefecture: widget.userPrefecture,
+                      userPosition: widget.userPosition,
+                      userTeamId: widget.userTeamId,
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE3F2FD),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF90CAF9)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.groups, color: Color(0xFF1565C0)),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'まずはチームを作成しましょう',
+                            style: TextStyle(
+                              color: Color(0xFF0D47A1),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        Icon(Icons.chevron_right, color: Color(0xFF1565C0)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '🏟 チームを作成すると出来ること',
+                      style: TextStyle(
+                        color: Color(0xFF0D47A1),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '・試合スコア管理\n・チーム成績\n・個人成績',
+                      style: TextStyle(
+                        color: const Color(0xFF0D47A1).withOpacity(0.9),
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: _pages.isNotEmpty
+                ? _pages[_currentIndex]
+                : const Center(child: CircularProgressIndicator()),
+          ),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: Colors.blueGrey,
         selectedItemColor: Colors.blue,

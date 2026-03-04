@@ -4,6 +4,7 @@ import 'package:b_net/pages/team/team_analysis_page.dart';
 import 'package:b_net/pages/team/team_calender_tab.dart';
 import 'package:b_net/pages/team/team_performance_home.dart';
 import 'package:b_net/pages/team/team_profile.dart';
+import 'package:b_net/pages/team/team_register_member.dart';
 import 'package:b_net/pages/team/team_schedule_calendar.dart';
 import 'package:b_net/pages/team/team_mission_page.dart';
 import 'package:b_net/pages/team/team_mvp_vote_page.dart';
@@ -529,10 +530,27 @@ Future<void> _init() async {
                   icon: Icons.emoji_people_outlined,
                   title: 'チームメンバー一覧',
                   onTap: () {
+                    // 先にドロワーを閉じてから遷移（遷移時の見た目を安定させる）
+                    Navigator.of(context).pop();
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (context) =>
-                            TeamMembersPage(teamId: widget.team['teamId']),
+                        builder: (context) => TeamMembersPage(teamId: widget.team['teamId']),
+                      ),
+                    );
+                  },
+                ),
+                menuTile(
+                  icon: Icons.person_add_alt_1,
+                  title: '選手を登録する',
+                  onTap: () {
+                    // 先にドロワーを閉じてから遷移（遷移時の見た目を安定させる）
+                    Navigator.of(context).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => TeamRegisterMemberPage(
+                          teamId: (widget.team['teamId'] ?? '').toString(),
+                          teamPrefecture: teamPrefecture,
+                        ),
                       ),
                     );
                   },
