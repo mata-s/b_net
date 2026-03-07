@@ -8366,64 +8366,177 @@ async function batchWriteWithTeamRank(collectionPath, teams) {
 
 
 // チーム平均年齢
+/**
+ * チームの平均年齢を再計算して teams/{teamId}.averageAge を更新する
+ * - 監督・マネージャーは平均年齢から除外
+ *
+ * @param {string} teamId - チームID
+ * @return {Promise<void>}
+ */
+async function recalculateTeamAverageAge(teamId) {
+  if (!teamId) return;
+
+  const teamSnap = await db.collection("teams").doc(teamId).get();
+  if (!teamSnap.exists) {
+    console.log(`⚠️ チーム ${teamId} が存在しません`);
+    return;
+  }
+
+  const teamData = teamSnap.data() || {};
+  const members = Array.isArray(teamData.members) ? teamData.members : [];
+
+  if (members.length === 0) {
+    console.log(`⚠️ チーム ${teamId} にメンバーがいません`);
+    await db.collection("teams").doc(teamId).update({averageAge: null});
+    return;
+  }
+
+  const userDocs = await Promise.all(
+      members.map((uid) => db.collection("users").doc(uid).get()),
+  );
+
+  const today = new Date();
+
+  const eligibleBirthDates = userDocs
+      .map((doc) => {
+        const data = doc.data() || {};
+        const positions = Array.isArray(data.positions) ? data.positions : [];
+        const role = typeof data.role === "string" ? data.role : "";
+
+        const isNonPlayer =
+        positions.includes("監督") ||
+        positions.includes("マネージャー") ||
+        role === "監督" ||
+        role === "マネージャー";
+
+        if (isNonPlayer) return null;
+
+        const birthday = data.birthday;
+        return birthday instanceof Timestamp ? birthday.toDate() : null;
+      })
+      .filter((date) => date instanceof Date);
+
+  const ages = eligibleBirthDates.map((birthday) => {
+    const age = today.getFullYear() - birthday.getFullYear();
+    const hasHadBirthdayThisYear =
+      today.getMonth() > birthday.getMonth() ||
+      (today.getMonth() === birthday.getMonth() &&
+        today.getDate() >= birthday.getDate());
+    return hasHadBirthdayThisYear ? age : age - 1;
+  });
+
+  const averageAge =
+    ages.length > 0 ?
+      parseFloat((ages.reduce((a, b) => a + b, 0) / ages.length).toFixed(1)) :
+      null;
+
+  await db.collection("teams").doc(teamId).update({averageAge});
+
+  console.log(
+      `✅ チーム ${teamId} の平均年齢を更新: 
+      ${(averageAge || averageAge === 0) ? averageAge : "なし"}歳`,
+  );
+}
+
 export const updateTeamAverageAge = onDocumentWritten(
     {
       document: "teams/{teamId}",
-      region: "asia-northeast1", // 必要に応じて変更
+      region: "asia-northeast1",
     },
     async (event) => {
       const teamId = event.params.teamId;
-      const snapshot = event.data && event.data.after;
+      const beforeSnap = event.data && event.data.before;
+      const afterSnap = event.data && event.data.after;
 
-      if (!snapshot || !snapshot.exists) {
+      if (!afterSnap || !afterSnap.exists) {
         console.log("⚠️ チームドキュメントが削除されました");
         return;
       }
 
-      const members = Array.isArray(snapshot.data().members) ?
-  snapshot.data().members :
-  [];
-      if (members.length === 0) {
-        console.log(`⚠️ チーム ${teamId} にメンバーがいません`);
-        await db.collection("teams").doc(teamId).update({averageAge: null});
+      const beforeData =
+      beforeSnap && beforeSnap.exists ? beforeSnap.data() || {} : {};
+      const afterData = afterSnap.data() || {};
+
+      const beforeMembers =
+      Array.isArray(beforeData.members) ? beforeData.members : [];
+      const afterMembers =
+      Array.isArray(afterData.members) ? afterData.members : [];
+
+      const beforeSorted = [...beforeMembers].sort();
+      const afterSorted = [...afterMembers].sort();
+      const membersChanged =
+      JSON.stringify(beforeSorted) !== JSON.stringify(afterSorted);
+
+      if (!membersChanged) {
+        console.log(`ℹ️ チーム ${teamId} の members に変化なし。平均年齢更新をスキップ`);
         return;
       }
 
-      const userDocs = await Promise.all(
-          members.map((uid) => db.collection("users").doc(uid).get()),
-      );
+      await recalculateTeamAverageAge(teamId);
+    },
+);
 
-      const today = new Date();
+export const updateAverageAgeOnBirthdayChanged = onDocumentWritten(
+    {
+      document: "users/{userId}",
+      region: "asia-northeast1",
+    },
+    async (event) => {
+      const userId = event.params.userId;
+      const beforeSnap = event.data && event.data.before;
+      const afterSnap = event.data && event.data.after;
 
-      const birthDates = userDocs
-          .map((doc) => {
-            const data = doc.data();
-            const birthday = data && data.birthday;
-            return birthday instanceof Timestamp ? birthday.toDate() : null;
-          })
-          .filter((date) => date instanceof Date);
+      if (!afterSnap || !afterSnap.exists) {
+        return;
+      }
 
-      const ages = birthDates.map((birthday) => {
-        const age = today.getFullYear() - birthday.getFullYear();
-        const hasHadBirthdayThisYear =
-        today.getMonth() > birthday.getMonth() ||
-        (today.getMonth() === birthday.getMonth() &&
-        today.getDate() >= birthday.getDate());
-        return hasHadBirthdayThisYear ? age : age - 1;
-      });
+      const beforeData =
+      beforeSnap && beforeSnap.exists ? beforeSnap.data() || {} : {};
+      const afterData = afterSnap.data() || {};
 
-      const averageAge =
-      ages.length > 0 ?
-        parseFloat((ages.reduce((a, b) => a + b, 0) / ages.length).toFixed(1)) :
+      const beforeBirthday = beforeData.birthday;
+      const afterBirthday = afterData.birthday;
+
+      const beforeBirthdayMs =
+      beforeBirthday && typeof beforeBirthday.toMillis === "function" ?
+        beforeBirthday.toMillis() :
+        null;
+      const afterBirthdayMs =
+      afterBirthday && typeof afterBirthday.toMillis === "function" ?
+        afterBirthday.toMillis() :
         null;
 
-      await db.collection("teams").doc(teamId).update({
-        averageAge: averageAge,
-      });
+      const beforePositions =
+      Array.isArray(beforeData.positions) ?
+      beforeData.positions.slice().sort() : [];
+      const afterPositions =
+      Array.isArray(afterData.positions) ?
+      afterData.positions.slice().sort() : [];
+      const beforeRole =
+      typeof beforeData.role === "string" ? beforeData.role : "";
+      const afterRole =
+      typeof afterData.role === "string" ? afterData.role : "";
 
-      console.log(
-          `✅ チーム ${teamId} の平均年齢を更新: 
-    ${(averageAge || averageAge === 0) ? averageAge : "なし"}歳,`,
+      const birthdayChanged = beforeBirthdayMs !== afterBirthdayMs;
+      const positionsChanged =
+      JSON.stringify(beforePositions) !== JSON.stringify(afterPositions);
+      const roleChanged = beforeRole !== afterRole;
+
+      if (!birthdayChanged && !positionsChanged && !roleChanged) {
+        return;
+      }
+
+      const teamIds = Array.isArray(afterData.teams) ? afterData.teams : [];
+      if (teamIds.length === 0) {
+        console.log(`ℹ️ user ${userId} は所属チームなし。平均年齢更新をスキップ`);
+        return;
+      }
+
+      await Promise.all(
+          teamIds
+              .filter((teamId) =>
+                typeof teamId === "string" && teamId.trim() !== "")
+              .map((teamId) => recalculateTeamAverageAge(teamId)),
       );
     },
 );
@@ -10167,20 +10280,102 @@ export const onTeamGoalCreated = onDocumentCreated(
     },
 );
 
+// ================= チーム招待通知 =================
+export const onTeamInviteCreated = onDocumentCreated(
+    "users/{userId}/teamInvites/{inviteId}",
+    async (event) => {
+      const snap = event.data;
+      if (!snap) {
+        console.log("onTeamInviteCreated: no snapshot");
+        return;
+      }
+
+      const inviteData = snap.data() || {};
+      const userId = event.params.userId;
+      const inviteId = event.params.inviteId;
+      const teamId = inviteData.teamId || null;
+
+      if (!teamId) {
+        console.log("onTeamInviteCreated: missing teamId", {userId, inviteId});
+        return;
+      }
+
+      // チーム名取得
+      const teamSnap = await db.collection("teams").doc(teamId).get();
+      if (!teamSnap.exists) {
+        console.log(
+            "onTeamInviteCreated: team not found", {teamId, userId, inviteId},
+        );
+        return;
+      }
+
+      const teamData = teamSnap.data() || {};
+      const teamName = teamData.teamName || "チーム";
+
+      // 招待された本人の通知トークン取得
+      const tokens = await getFcmTokensForUsers([userId]);
+      if (!tokens.length) {
+        console.log("onTeamInviteCreated: no FCM tokens for user", userId);
+        return;
+      }
+
+      const message = {
+        notification: {
+          title: `${teamName} から招待が届きました`,
+          body: "チームに参加しますか？",
+        },
+        tokens,
+        data: {
+          type: "team_invite",
+          teamId: String(teamId),
+          inviteId: String(inviteId),
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+        },
+        android: {
+          priority: "high",
+          notification: {
+            sound: "default",
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+            },
+          },
+        },
+      };
+
+      try {
+        const res = await messaging.sendEachForMulticast(message);
+        console.log("✅ Team invite notification sent", {
+          userId,
+          inviteId,
+          teamId,
+          success: res.successCount,
+          failure: res.failureCount,
+        });
+      } catch (err) {
+        console.error("🚨 onTeamInviteCreated send error", err);
+      }
+    },
+);
+
 // ================= チーム加入通知 =================
 export const onUserJoinedTeam = onDocumentWritten(
     "users/{userId}",
     async (event) => {
       const before = event.data && event.data.before ?
-  event.data.before.data() || {} :
-  {};
+        event.data.before.data() || {} :
+        {};
 
       const after = event.data && event.data.after ?
-  event.data.after.data() || {} :
-  {};
+        event.data.after.data() || {} :
+        {};
 
-      const beforeTeams = before.teams || [];
-      const afterTeams = after.teams || [];
+      const beforeTeams = Array.isArray(before.teams) ? before.teams : [];
+      const afterTeams = Array.isArray(after.teams) ? after.teams : [];
 
       // 新しく追加されたチームIDを検出
       const addedTeams = afterTeams.filter((t) => !beforeTeams.includes(t));
@@ -10189,6 +10384,7 @@ export const onUserJoinedTeam = onDocumentWritten(
       }
 
       const joinedTeamId = addedTeams[0];
+      const joinedUserId = event.params.userId;
 
       // チームデータ取得
       const teamSnap = await db.collection("teams").doc(joinedTeamId).get();
@@ -10196,39 +10392,75 @@ export const onUserJoinedTeam = onDocumentWritten(
 
       const teamData = teamSnap.data() || {};
       const teamName = teamData.teamName || "チーム";
+      const members = Array.isArray(teamData.members) ? teamData.members : [];
 
-      // ユーザー情報取得
-      const userId = event.params.userId;
-      const userSnap = await db.collection("users").doc(userId).get();
-      const userData = userSnap.data() || {};
-      const tokens = userData.fcmTokens || [];
+      // 参加した本人の表示名を取得
+      const joinedUserSnap =
+      await db.collection("users").doc(joinedUserId).get();
+      const joinedUserData = joinedUserSnap.data() || {};
+      const joinedUserName =
+        joinedUserData.name ||
+        joinedUserData.username ||
+        "新しいメンバー";
 
-      if (!tokens.length) {
-        console.log("No FCM tokens for user:", userId);
+      // 通知先は「参加した本人を除く」チームメンバー
+      const targetUserIds =
+      members.filter((uid) => uid && uid !== joinedUserId);
+      if (!targetUserIds.length) {
+        console.log("onUserJoinedTeam: no target team members", {
+          joinedTeamId,
+          joinedUserId,
+        });
         return;
       }
 
-      // 通知メッセージ
+      const tokens = await getFcmTokensForUsers(targetUserIds);
+      if (!tokens.length) {
+        console.log("onUserJoinedTeam: no FCM tokens for team members", {
+          joinedTeamId,
+          joinedUserId,
+          targetCount: targetUserIds.length,
+        });
+        return;
+      }
+
+      // 通知メッセージ（サイレント: soundなし）
       const message = {
         notification: {
-          title: "チーム参加完了",
-          body: `${teamName} に参加しました！`,
+          title: `${teamName} に新しいメンバーが参加しました`,
+          body: `${joinedUserName} さんがチームに参加しました！`,
         },
         tokens,
         data: {
-          type: "joined_team",
-          teamId: joinedTeamId,
+          type: "team_member_joined",
+          teamId: String(joinedTeamId),
+          joinedUserId: String(joinedUserId),
         },
         android: {
           priority: "high",
-          notification: {sound: "default"},
+          notification: {
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          },
         },
         apns: {
-          payload: {aps: {sound: "default"}},
+          payload: {
+            aps: {},
+          },
         },
       };
 
-      await messaging.sendEachForMulticast(message);
+      try {
+        const res = await messaging.sendEachForMulticast(message);
+        console.log("✅ Team member joined notification sent", {
+          joinedTeamId,
+          joinedUserId,
+          success: res.successCount,
+          failure: res.failureCount,
+          targetCount: targetUserIds.length,
+        });
+      } catch (err) {
+        console.error("🚨 onUserJoinedTeam send error", err);
+      }
     },
 );
 

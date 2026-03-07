@@ -13,8 +13,8 @@ class InviteMemberPage extends StatefulWidget {
 class _InviteMemberPageState extends State<InviteMemberPage> {
   final TextEditingController _nameController = TextEditingController();
   bool _isLoading = false;
-  List<DocumentSnapshot> _searchResults = [];
-  DocumentSnapshot? _selectedUser; // 選択されたユーザー
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _searchResults = [];
+  QueryDocumentSnapshot<Map<String, dynamic>>? _selectedUser; // 選択されたユーザー
   bool _hasSearched = false; // 検索が実行されたかどうかを判断するフラグ
 
   String _normalizeName(String input) {
@@ -91,8 +91,8 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
     }
   }
 
-  // 選択されたユーザーをチームに追加
-  Future<void> _addUserToTeam() async {
+  // 選択されたユーザーに「招待」を送る（承認されるまで members/teams は更新しない）
+  Future<void> _inviteUserToTeam() async {
     if (_selectedUser == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('ユーザーを選択してください')),
@@ -105,24 +105,62 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
     });
 
     try {
-      String userId = _selectedUser!.id;
+      final String teamId = (widget.team['teamId'] ?? '').toString();
+      if (teamId.isEmpty) {
+        throw Exception('teamId が取得できませんでした');
+      }
 
-      // チームにユーザーを追加
-      await FirebaseFirestore.instance
+      final String inviteeUid = _selectedUser!.id;
+
+      // チーム責任者など「入れてはいけない」ケースがあるならここで弾く
+      // （例）招待対象がすでに members に入っている場合はスキップ
+      final List<dynamic> currentMembers = (widget.team['members'] ?? []) as List<dynamic>;
+      if (currentMembers.map((e) => e.toString()).contains(inviteeUid)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('すでにチームメンバーです')),
+        );
+        return;
+      }
+
+      final now = FieldValue.serverTimestamp();
+
+      // ① チーム側: 招待一覧（teams/{teamId}/invites/{inviteeUid}）
+      final teamInviteRef = FirebaseFirestore.instance
           .collection('teams')
-          .doc(widget.team['teamId'])
-          .update({
-        'members': FieldValue.arrayUnion([userId]),
-      });
+          .doc(teamId)
+          .collection('invites')
+          .doc(inviteeUid);
 
-      // ユーザーの `teams` フィールドにチームIDを追加
-      await FirebaseFirestore.instance.collection('users').doc(userId).update({
-        'teams': FieldValue.arrayUnion([widget.team['teamId']]),
-      });
+      await teamInviteRef.set({
+        'teamId': teamId,
+        'inviteeUid': inviteeUid,
+        'status': 'pending', // pending / accepted / rejected
+        'createdAt': now,
+        // 送り主など必要なら追加（例: invitedByUid）
+      }, SetOptions(merge: true));
+
+      // ② ユーザー側: 受信招待（users/{uid}/teamInvites/{teamId}）
+      final userInviteRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(inviteeUid)
+          .collection('teamInvites')
+          .doc(teamId);
+
+      await userInviteRef.set({
+        'teamId': teamId,
+        'inviteeUid': inviteeUid,
+        'status': 'pending',
+        'createdAt': now,
+      }, SetOptions(merge: true));
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ユーザーがチームに追加されました')),
+        const SnackBar(content: Text('招待を送信しました（相手の承認待ち）')),
       );
+
+      // 招待を送ったら選択解除（連続招待しやすく）
+      setState(() {
+        _selectedUser = null;
+      });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('エラーが発生しました: $e')),
@@ -140,8 +178,8 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
     super.dispose();
   }
 
-  Widget _buildUserListTile(DocumentSnapshot userDoc) {
-    var user = userDoc.data() as Map<String, dynamic>;
+  Widget _buildUserListTile(QueryDocumentSnapshot<Map<String, dynamic>> userDoc) {
+    final user = userDoc.data();
     String name = user['name'] ?? '名前不明';
     String? profileImageUrl = user['profileImage']; // プロフィール画像のURLはnullの可能性あり
     String? prefecture = user['prefecture']; // 都道府県もnullの可能性あり
@@ -189,8 +227,8 @@ class _InviteMemberPageState extends State<InviteMemberPage> {
         ),
         if (_selectedUser == userDoc) // 選択されたユーザーのタイルの下にボタンを表示
           ElevatedButton(
-            onPressed: _addUserToTeam,
-            child: const Text('チームに追加'),
+            onPressed: _inviteUserToTeam,
+            child: const Text('招待を送る'),
           ),
       ],
     );

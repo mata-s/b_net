@@ -13,6 +13,7 @@ import 'package:b_net/pages/private/private_calendar_tab.dart';
 import 'package:b_net/pages/private/ranking/ranking_page.dart';
 import 'package:b_net/pages/private/setting.dart';
 import 'package:b_net/pages/team/create_team.dart';
+import 'package:b_net/pages/team/member_parts/team_invite_identify_member_page.dart';
 import 'package:b_net/pages/team/team_account.dart';
 import 'package:b_net/services/subscription_screen.dart';
 import 'package:flutter/material.dart';
@@ -59,6 +60,9 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<QuerySnapshot>? _chatRoomsSubscription;
   StreamSubscription<QuerySnapshot>? _announcementsSubscription;
   StreamSubscription<QuerySnapshot>? _goalsSubscription;
+  // --- team invites
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _teamInvitesSubscription;
+  QueryDocumentSnapshot<Map<String, dynamic>>? _pendingInviteDoc;
 
   @override
   void initState() {
@@ -66,6 +70,7 @@ class _HomePageState extends State<HomePage> {
     _checkUnreadNotices();
     _fetchUnreadMessageCount();
     _listenOngoingGoals();
+    _listenPendingTeamInvites();
     _checkSubscriptionStatus().then((_) {
       _initializePages();
     });
@@ -146,6 +151,194 @@ class _HomePageState extends State<HomePage> {
       },
       onError: (error) {
         debugPrint('goals snapshots error: $error');
+      },
+    );
+  }
+
+  /// teamInvites の pending を監視（チーム所属中でも表示）
+  void _listenPendingTeamInvites() {
+    final uid = widget.userUid;
+    if (uid.isEmpty) return;
+
+    _teamInvitesSubscription?.cancel();
+
+    _teamInvitesSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('teamInvites')
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen(
+      (snapshot) {
+        if (!mounted) return;
+
+        if (snapshot.docs.isEmpty) {
+          // 0件になっても一瞬で消えるのが気になる場合は、ここを即nullにせずに
+          // 例えば数秒ディレイで消すなども可能。まずは素直に反映。
+          setState(() {
+            _pendingInviteDoc = null;
+          });
+          return;
+        }
+
+        // createdAt があれば最新を選ぶ（無い場合は先頭）
+        QueryDocumentSnapshot<Map<String, dynamic>> latest = snapshot.docs.first;
+        for (final d in snapshot.docs) {
+          final a = latest.data()['createdAt'];
+          final b = d.data()['createdAt'];
+          if (a is Timestamp && b is Timestamp) {
+            if (b.compareTo(a) > 0) latest = d;
+          } else if (a is! Timestamp && b is Timestamp) {
+            // latest に createdAt が無くて d にあるなら d を優先
+            latest = d;
+          }
+        }
+
+        setState(() {
+          _pendingInviteDoc = latest;
+        });
+      },
+      onError: (error) {
+        // エラー時に一瞬で消えるのを防ぐため、直前の表示は維持してログだけ出す
+        debugPrint('teamInvites snapshots error: $error');
+      },
+    );
+  }
+
+  Future<void> _respondToTeamInvite({
+    required QueryDocumentSnapshot<Map<String, dynamic>> inviteDoc,
+    required bool accept,
+  }) async {
+    final uid = widget.userUid;
+    if (uid.isEmpty) return;
+
+    final data = inviteDoc.data();
+    final String teamId = (data['teamId'] as String?)?.trim() ?? '';
+    if (teamId.isEmpty) return;
+
+    // ✅ 参加する場合は「あなたはいますか？」画面へ進める（ここではまだ teams/members は更新しない）
+    if (accept) {
+      final String teamName = (data['teamName'] as String?)?.trim() ?? '';
+
+      if (!mounted) return;
+      final selectedMemberUid = await Navigator.of(context).push<String?>(
+        MaterialPageRoute(
+          builder: (_) => TeamInviteIdentifyMemberPage(
+            currentUserUid: uid,
+            teamId: teamId,
+            inviteDocId: inviteDoc.id,
+            teamName: teamName,
+          ),
+        ),
+      );
+
+      // ここでは「③ 選択」まで。選択結果を招待ドキュメントへ保存（次のステップで統合処理に使う）
+      if (selectedMemberUid != null) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .collection('teamInvites')
+              .doc(inviteDoc.id)
+              .set(
+            {
+              'selectedMemberUid': selectedMemberUid,
+              'step': 'member_selected',
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('選択しました。次の手順へ進めます')),
+          );
+        } catch (e) {
+          debugPrint('save selected member error: $e');
+        }
+      }
+
+      return;
+    }
+
+    // ✅ 参加しない（辞退）は従来どおり status 更新
+    try {
+      final inviteRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('teamInvites')
+          .doc(inviteDoc.id);
+
+      await inviteRef.set(
+        {
+          'status': 'declined',
+          'respondedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('招待を辞退しました')),
+      );
+    } catch (e) {
+      debugPrint('team invite decline error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('処理に失敗しました: $e')),
+      );
+    }
+  }
+
+  Future<void> _showTeamInviteDialog({
+    required String teamName,
+    required QueryDocumentSnapshot<Map<String, dynamic>> inviteDoc,
+  }) async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          titlePadding: const EdgeInsets.fromLTRB(24, 16, 12, 0),
+          contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          title: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'チーム招待',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              IconButton(
+                tooltip: '閉じる',
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                },
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+          content: Text('$teamName から招待が届いています。\n参加しますか？'),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _respondToTeamInvite(inviteDoc: inviteDoc, accept: false);
+              },
+              child: const Text('参加しない'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _respondToTeamInvite(inviteDoc: inviteDoc, accept: true);
+              },
+              child: const Text('参加する'),
+            ),
+          ],
+        );
       },
     );
   }
@@ -310,6 +503,7 @@ class _HomePageState extends State<HomePage> {
     _chatRoomsSubscription?.cancel();
     _announcementsSubscription?.cancel();
     _goalsSubscription?.cancel();
+    _teamInvitesSubscription?.cancel();
     super.dispose();
   }
 
@@ -774,6 +968,70 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
               ),
+            ),
+          // 招待が届いていれば案内を表示（全ユーザー対象・チーム所属中でも表示）
+          if (_pendingInviteDoc != null)
+            Builder(
+              builder: (context) {
+                final invite = _pendingInviteDoc!.data();
+                final String teamId = (invite['teamId'] as String?)?.trim() ?? '';
+                final String teamNameFromInvite =
+                    (invite['teamName'] as String?)?.trim() ?? '';
+
+                return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: teamId.isNotEmpty
+                      ? FirebaseFirestore.instance.collection('teams').doc(teamId).snapshots()
+                      : const Stream.empty(),
+                  builder: (context, teamSnap) {
+                    final teamNameFromTeamDoc =
+                        (teamSnap.data?.data()?['teamName'] as String?)?.trim() ??
+                        (teamSnap.data?.data()?['name'] as String?)?.trim() ??
+                        '';
+
+                    final String teamName = teamNameFromInvite.isNotEmpty
+                        ? teamNameFromInvite
+                        : (teamNameFromTeamDoc.isNotEmpty ? teamNameFromTeamDoc : 'チーム');
+
+                    return GestureDetector(
+                      onTap: () {
+                        _showTeamInviteDialog(
+                          teamName: teamName,
+                          inviteDoc: _pendingInviteDoc!,
+                        );
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF8E1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFFE082)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.mail, color: Color(0xFFF57F17)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '$teamName から招待が届いています',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF5D4037),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right, color: Color(0xFFF57F17)),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
             ),
           Expanded(
             child: _pages.isNotEmpty

@@ -29,6 +29,7 @@ class _TeamRegisterMemberPageState extends State<TeamRegisterMemberPage> {
   final _nameController = TextEditingController();
 
   bool _saving = false;
+  DateTime? _birthday;
 
   // この画面で登録したメンバー名を表示する
   final List<String> _registeredMemberNames = <String>[];
@@ -54,6 +55,22 @@ class _TeamRegisterMemberPageState extends State<TeamRegisterMemberPage> {
     super.dispose();
   }
 
+  Future<void> _pickBirthday() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 20),
+      firstDate: DateTime(1950),
+      lastDate: now,
+    );
+
+    if (picked != null) {
+      setState(() {
+        _birthday = picked;
+      });
+    }
+  }
+
   Future<void> _registerMember() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
@@ -77,6 +94,7 @@ class _TeamRegisterMemberPageState extends State<TeamRegisterMemberPage> {
         'positions': _selectedPositions.toList(),
         'prefecture': widget.teamPrefecture,
         'isTeamMemberOnly': true,
+        'birthday': _birthday != null ? Timestamp.fromDate(_birthday!) : null,
         // 便利なので付けておく（不要なら削除OK）
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -100,6 +118,7 @@ class _TeamRegisterMemberPageState extends State<TeamRegisterMemberPage> {
         _registeredMemberNames.insert(0, name);
         _nameController.clear();
         _selectedPositions.clear();
+        _birthday = null;
       });
 
       // キーボードを閉じる
@@ -179,6 +198,49 @@ class _TeamRegisterMemberPageState extends State<TeamRegisterMemberPage> {
                   },
                 );
               }).toList(),
+            ),
+
+            const SizedBox(height: 16),
+
+            // 誕生日（任意）
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '誕生日（任意）',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'チーム平均年齢の計算に役立ちます（わかる場合のみでOK）',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: _pickBirthday,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.black26),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.cake_outlined, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _birthday == null
+                                ? '誕生日を選択'
+                                : '${_birthday!.year}年${_birthday!.month}月${_birthday!.day}日',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 16),

@@ -105,6 +105,39 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
                         children: [
                           if (_adminId == _currentUserId &&
                               memberId != _adminId &&
+                              isTeamMemberOnly)
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.black54),
+                              onPressed: () {
+                                final name = (member['name'] ?? '').toString();
+                                final positions = (member['positions'] is List)
+                                    ? List<String>.from(member['positions'] ?? const <String>[])
+                                    : <String>[];
+
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => TeamEditRegisteredMemberPage(
+                                      memberId: memberId,
+                                      initialName: name,
+                                      initialPositions: positions,
+                                      onSaved: (newName, newPositions, birthday) async {
+                                        await _updateRegisteredMember(memberId, newName, newPositions);
+
+                                        if (birthday != null) {
+                                          await FirebaseFirestore.instance
+                                              .collection('users')
+                                              .doc(memberId)
+                                              .update({'birthday': Timestamp.fromDate(birthday)});
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          if (_adminId == _currentUserId &&
+                              memberId != _adminId &&
                               !isTeamMemberOnly) // ✅ 登録選手（isTeamMemberOnly）は責任者に任命不可
                             IconButton(
                               icon: const Icon(Icons.admin_panel_settings, color: Colors.blue),
@@ -241,5 +274,182 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
         SnackBar(content: Text('メンバーの削除中にエラーが発生しました: $e')),
       );
     }
+  }
+
+  /// 🔹 **登録選手の情報を更新**
+  Future<void> _updateRegisteredMember(
+    String memberId,
+    String newName,
+    List<String> newPositions,
+  ) async {
+    try {
+      final updateData = <String, dynamic>{
+        'positions': newPositions,
+      };
+
+      // 名前が空なら上書きしない（事故防止）
+      if (newName.isNotEmpty) {
+        updateData['name'] = newName;
+      }
+
+      await FirebaseFirestore.instance.collection('users').doc(memberId).update(updateData);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('メンバー情報を更新しました')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('更新に失敗しました: $e')),
+      );
+    }
+  }
+}
+
+class TeamEditRegisteredMemberPage extends StatefulWidget {
+  final String memberId;
+  final String initialName;
+  final List<String> initialPositions;
+  final Future<void> Function(String newName, List<String> newPositions, DateTime? birthday) onSaved;
+
+  const TeamEditRegisteredMemberPage({
+    super.key,
+    required this.memberId,
+    required this.initialName,
+    required this.initialPositions,
+    required this.onSaved,
+  });
+
+  @override
+  State<TeamEditRegisteredMemberPage> createState() => _TeamEditRegisteredMemberPageState();
+}
+
+class _TeamEditRegisteredMemberPageState extends State<TeamEditRegisteredMemberPage> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _positionsController;
+  bool _saving = false;
+  DateTime? _birthday;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _positionsController = TextEditingController(text: widget.initialPositions.join(', '));
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _positionsController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    final newName = _nameController.text.trim();
+    final newPositions = _positionsController.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+
+    try {
+      await widget.onSaved(newName, newPositions, _birthday);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('メンバー情報を更新しました')),
+      );
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('更新に失敗しました: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('登録メンバーを編集'),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('保存', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: '名前',
+              hintText: '例）山田 太郎',
+              border: OutlineInputBorder(),
+            ),
+            textInputAction: TextInputAction.next,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _positionsController,
+            decoration: const InputDecoration(
+              labelText: 'ポジション（カンマ区切り）',
+              hintText: '例）投手, 捕手, 一塁手',
+              border: OutlineInputBorder(),
+            ),
+            minLines: 1,
+            maxLines: 3,
+          ),
+          const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('誕生日（任意）'),
+            subtitle: Text(
+              _birthday == null
+                  ? '未設定'
+                  : '${_birthday!.year}年${_birthday!.month}月${_birthday!.day}日',
+            ),
+            trailing: const Icon(Icons.cake_outlined),
+            onTap: () async {
+              final now = DateTime.now();
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: DateTime(now.year - 20),
+                firstDate: DateTime(1940),
+                lastDate: now,
+              );
+
+              if (picked != null) {
+                setState(() {
+                  _birthday = picked;
+                });
+              }
+            },
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            '※この編集は「登録選手」のみ可能です',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _saving ? null : _save,
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
   }
 }

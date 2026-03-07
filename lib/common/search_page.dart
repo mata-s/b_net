@@ -114,76 +114,80 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     setState(() {
-      _searchResults = querySnapshot.docs.map((doc) {
-        var data = doc.data() as Map<String, dynamic>;
+  _searchResults = querySnapshot.docs
+      .map<Map<String, dynamic>?>((doc) {
+    final data = doc.data() as Map<String, dynamic>;
 
-        if (_searchType == 'ユーザー名') {
-          return {
-            'id': doc.id,
-            'name': data['name'] ?? '不明',
-            'profileImage': (data['profileImage'] ?? data['photoURL'] ?? '').toString(),
-            'sub': Column(
-              // 🔹 都道府県 & 守備位置を表示
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (data['prefecture'] != null)
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on, size: 16, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          data['prefecture'].toString(),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+    if (_searchType == 'ユーザー名') {
+      // ✅ チームメンバー登録のみユーザーは検索に出さない
+      final isTeamMemberOnly = (data['isTeamMemberOnly'] == true);
+      if (isTeamMemberOnly) return null;
+
+      return {
+        'id': doc.id,
+        'name': data['name'] ?? '不明',
+        'profileImage': (data['profileImage'] ?? data['photoURL'] ?? '').toString(),
+        'sub': Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (data['prefecture'] != null)
+              Row(
+                children: [
+                  const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      data['prefecture'].toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                if (data['positions'] != null &&
-                    (data['positions'] as List).isNotEmpty)
-                  Row(
-                    children: [
-                      const Text('ポジション:'),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          (data['positions'] as List).join(', '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          softWrap: false,
-                        ),
-                      ),
-                    ],
+                ],
+              ),
+            if (data['positions'] != null && (data['positions'] as List).isNotEmpty)
+              Row(
+                children: [
+                  const Text('ポジション:'),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      (data['positions'] as List).join(', '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                    ),
                   ),
-              ],
+                ],
+              ),
+          ],
+        ),
+        'isTeam': false,
+      };
+    } else {
+      return {
+        'id': doc.id,
+        'name': data['teamName'] ?? '不明',
+        'profileImage': data['profileImage'],
+        'sub': Row(
+          children: [
+            const Icon(Icons.location_on, size: 16, color: Colors.grey),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                (data['prefecture'] ?? '不明').toString(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            'isTeam': false,
-          };
-        } else {
-          return {
-            'id': doc.id,
-            'name': data['teamName'] ?? '不明',
-            'profileImage': data['profileImage'],
-            'sub': Row(
-              // 🔹 チームの所在地をアイコンで表示
-              children: [
-                const Icon(Icons.location_on, size: 16, color: Colors.grey),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    (data['prefecture'] ?? '不明').toString(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            'isTeam': true,
-          };
-        }
-      }).toList();
-    });
+          ],
+        ),
+        'isTeam': true,
+      };
+    }
+  })
+      .whereType<Map<String, dynamic>>() // ✅ null を除外
+      .toList();
+});
   }
 
   Future<void> _loadMyPrefectureAndRecommend() async {

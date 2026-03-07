@@ -3,13 +3,26 @@ import 'package:flutter/cupertino.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
+class ManagerGameInputFieldingController {
+  Future<void> Function({bool showSnackbar})? _save;
+
+  Future<void> save({bool showSnackbar = true}) async {
+    final save = _save;
+    if (save != null) {
+      await save(showSnackbar: showSnackbar);
+    }
+  }
+}
 
 class ManagerGameInputFielding extends StatefulWidget {
   final String userUid;
   final String teamId;
   final List<Map<String, dynamic>> members;
   final int matchIndex;
+  final ManagerGameInputFieldingController? controller;
 
   const ManagerGameInputFielding({
     Key? key,
@@ -17,6 +30,7 @@ class ManagerGameInputFielding extends StatefulWidget {
     required this.teamId,
     required this.members,
     required this.matchIndex,
+    this.controller,
   }) : super(key: key);
 
   @override
@@ -44,6 +58,7 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
 
   final ScrollController _scrollController = ScrollController();
   bool _isDragging = false;
+  Offset? _dragStartGlobalPosition;
 
   // --- Controllers for input fields ---
   late List<TextEditingController> _putoutsControllers;
@@ -190,7 +205,28 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
     }
   }
 
-    @override
+  Future<void> _saveTentativeData({bool showSnackbar = true}) async {
+    final gameId = 'match_${widget.matchIndex}';
+    await saveAllTentativeData(
+      members: widget.members,
+      playerPositions: widget.members
+          .map((member) => memberPositions[member['uid']] ?? const Offset(-1, -1))
+          .toList(),
+      gameId: gameId,
+      matchIndex: widget.matchIndex,
+    );
+
+    if (showSnackbar && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('成績を仮保存しました'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
@@ -249,6 +285,7 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
         await _loadFieldingDataFromPrefs(i, uid);
       }
     });
+    widget.controller?._save = _saveTentativeData;
   }
 
   /// Save all fielding data for a given member (index, uid) to SharedPreferences.
@@ -984,12 +1021,13 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
               // Only auto-scroll while dragging
               if (!_isDragging) return;
 
-              final position = event.position.dy;
+              final currentY = event.position.dy;
               final mediaQuery = MediaQuery.of(context);
               final screenHeight = mediaQuery.size.height;
 
               const edgeThreshold = 100; // distance from edge to trigger scroll
               const scrollSpeed = 15.0;
+              const dragActivationDistance = 200.0; // 少し大きめに動くまでは自動スクロールしない
 
               // Start the top auto-scroll zone below status bar + (potential) AppBar height
               final topTriggerY = mediaQuery.padding.top + kToolbarHeight;
@@ -999,12 +1037,20 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
 
               if (!_scrollController.hasClients) return;
 
-              if (position < topTriggerY + edgeThreshold) {
+              final startY = _dragStartGlobalPosition?.dy;
+              if (startY == null) return;
+
+              final movedEnough =
+                  (currentY - startY).abs() >= dragActivationDistance;
+
+              if (!movedEnough) return;
+
+              if (currentY < topTriggerY + edgeThreshold) {
                 // Scroll up
                 final target = (_scrollController.offset - scrollSpeed)
                     .clamp(0.0, _scrollController.position.maxScrollExtent);
                 _scrollController.jumpTo(target);
-              } else if (position > bottomTriggerY - edgeThreshold) {
+              } else if (currentY > bottomTriggerY - edgeThreshold) {
                 // Scroll down
                 final target = (_scrollController.offset + scrollSpeed)
                     .clamp(0.0, _scrollController.position.maxScrollExtent);
@@ -1044,38 +1090,36 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                             onWillAccept: (data) => true,
                             onAccept: (data) {
                               setState(() {
-                                String? overlappingUid;
-                                final draggedRect = Rect.fromLTWH(
-                                    left, top, rectWidth, rectHeight);
+                                final previousOffset = memberPositions[data];
 
-                                for (final entry in memberPositions.entries) {
-                                  if (entry.key == data) continue;
-                                  final otherOffset = entry.value;
-                                  final otherRect = Rect.fromLTWH(
-                                      otherOffset.dx * fieldWidth,
-                                      otherOffset.dy * fieldHeight,
-                                      rectWidth,
-                                      rectHeight);
-                                  if (draggedRect.overlaps(otherRect)) {
-                                    overlappingUid = entry.key;
+                                final centerOffset = Offset(
+                                  left + rectWidth / 2,
+                                  top + rectHeight / 2,
+                                );
+                                final targetOffset = Offset(
+                                  centerOffset.dx / fieldWidth,
+                                  centerOffset.dy / fieldHeight,
+                                );
+
+                                // すでにその守備位置にいる選手を探す
+                                String? occupyingUid;
+                                for (final posEntry in memberPositions.entries) {
+                                  if (posEntry.key == data) continue;
+                                  final otherOffset = posEntry.value;
+                                  if ((otherOffset.dx - targetOffset.dx).abs() < 0.0001 &&
+                                      (otherOffset.dy - targetOffset.dy).abs() < 0.0001) {
+                                    occupyingUid = posEntry.key;
                                     break;
                                   }
                                 }
 
-                                if (overlappingUid != null) {
-                                  final previousOffset = memberPositions[data];
-                                  if (previousOffset != null) {
-                                    memberPositions[overlappingUid] =
-                                        previousOffset;
-                                  }
+                                // 入れ替え
+                                if (occupyingUid != null && previousOffset != null) {
+                                  memberPositions[occupyingUid] = previousOffset;
                                 }
 
-                                final centerOffset = Offset(
-                                    left + rectWidth / 2, top + rectHeight / 2);
-                                final dxRatio = centerOffset.dx / fieldWidth;
-                                final dyRatio = centerOffset.dy / fieldHeight;
-                                memberPositions[data] =
-                                    Offset(dxRatio, dyRatio);
+                                // ドラッグ中の選手を新しい守備位置へ
+                                memberPositions[data] = targetOffset;
                               });
                               saveMemberPositions();
                             },
@@ -1110,44 +1154,75 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                           top: dy - rectHeight / 2,
                           width: rectWidth,
                           height: rectHeight,
-                          child: Center(
-                            child: GestureDetector(
-                              onTap: () {
-                                _showTentativeInputDialog(
-                                    uid, name, widget.matchIndex);
-                              },
-                              child: Draggable<String>(
-                                data: uid,
-                                onDragStarted: () {
-                                  _isDragging = true;
-                                },
-                                onDragEnd: (_) {
-                                  _isDragging = false;
-                                },
-                                onDraggableCanceled: (_, __) {
-                                  _isDragging = false;
-                                },
-                                feedback: Material(
-                                  type: MaterialType.transparency,
-                                  child: Chip(
-                                    label: Text(name,
-                                        style: const TextStyle(fontSize: 12)),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 4, vertical: 2),
+                          child: DragTarget<String>(
+                            onWillAccept: (draggedUid) => draggedUid != null && draggedUid != uid,
+                            onAccept: (draggedUid) {
+                              setState(() {
+                                final draggedPreviousOffset = memberPositions[draggedUid];
+                                final currentOffset = memberPositions[uid];
+
+                                if (draggedPreviousOffset != null && currentOffset != null) {
+                                  memberPositions[draggedUid] = currentOffset;
+                                  memberPositions[uid] = draggedPreviousOffset;
+                                }
+                              });
+                              saveMemberPositions();
+                            },
+                            builder: (context, candidateData, rejectedData) {
+                              final highlight = candidateData.isNotEmpty;
+                              return Center(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    _showTentativeInputDialog(
+                                        uid, name, widget.matchIndex);
+                                  },
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 120),
+                                    decoration: BoxDecoration(
+                                      color: highlight ? Colors.blue.withOpacity(0.12) : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                                    child: Draggable<String>(
+                                      data: uid,
+                                      onDragStarted: () {
+                                        _isDragging = true;
+                                        _dragStartGlobalPosition = null;
+                                      },
+                                      onDragUpdate: (details) {
+                                        _dragStartGlobalPosition ??= details.globalPosition;
+                                      },
+                                      onDragEnd: (_) {
+                                        _isDragging = false;
+                                        _dragStartGlobalPosition = null;
+                                      },
+                                      onDraggableCanceled: (_, __) {
+                                        _isDragging = false;
+                                        _dragStartGlobalPosition = null;
+                                      },
+                                      feedback: Material(
+                                        type: MaterialType.transparency,
+                                        child: Chip(
+                                          label: Text(name, style: const TextStyle(fontSize: 12)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                          backgroundColor: Colors.orange[200],
+                                        ),
+                                      ),
+                                      childWhenDragging: Container(),
+                                      child: Material(
+                                        type: MaterialType.transparency,
+                                        child: Chip(
+                                          label: Text(name,
+                                              style: const TextStyle(fontSize: 12)),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 4, vertical: 2),
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                                childWhenDragging: Container(),
-                                child: Material(
-                                  type: MaterialType.transparency,
-                                  child: Chip(
-                                    label: Text(name,
-                                        style: const TextStyle(fontSize: 12)),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 4, vertical: 2),
-                                  ),
-                                ),
-                              ),
-                            ),
+                              );
+                            },
                           ),
                         );
                       }),
@@ -1193,19 +1268,26 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                               data: uid,
                               onDragStarted: () {
                                 _isDragging = true;
+                                _dragStartGlobalPosition = null;
+                              },
+                              onDragUpdate: (details) {
+                                _dragStartGlobalPosition ??= details.globalPosition;
                               },
                               onDragEnd: (_) {
                                 _isDragging = false;
+                                _dragStartGlobalPosition = null;
                               },
                               onDraggableCanceled: (_, __) {
                                 _isDragging = false;
+                                _dragStartGlobalPosition = null;
                               },
                               feedback: Material(
                                 color: Colors.transparent,
                                 child: Chip(
-                                    label: Text(name,
-                                        style: const TextStyle(fontSize: 12)),
-                                    elevation: 6),
+                                  label: Text(name, style: const TextStyle(fontSize: 12)),
+                                  elevation: 6,
+                                  backgroundColor: Colors.orange[200],
+                                ),
                               ),
                               childWhenDragging: Opacity(
                                 opacity: 0.5,
@@ -1235,25 +1317,8 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                 const SizedBox(height: 48),
                 // 保存ボタン
                 ElevatedButton(
-                  onPressed: () async {
-                    // Use matchIndex to generate a default gameId
-                    final gameId = 'match_${widget.matchIndex}';
-                    await saveAllTentativeData(
-                      members: widget.members,
-                      playerPositions: [], // 必要に応じて渡す
-                      gameId: gameId,
-                      matchIndex: widget.matchIndex,
-                    );
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('成績を仮保存しました'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  },
-                  child: Text('メンバーの成績を仮保存する'),
+                  onPressed: null,
+                  child: const Text('上部の保存ボタンからまとめて保存'),
                 ),
                 const SizedBox(height: 16),
                 // リセットボタン
@@ -1596,9 +1661,11 @@ class _PositionedDraggableChipState extends State<PositionedDraggableChip> {
         feedback: Material(
           color: Colors.transparent,
           child: Chip(
-              key: _chipKey,
-              label: Text(widget.name, style: const TextStyle(fontSize: 12)),
-              elevation: 6),
+            key: _chipKey,
+            label: Text(widget.name, style: const TextStyle(fontSize: 12)),
+            elevation: 6,
+            backgroundColor: Colors.orange[200],
+          ),
         ),
         childWhenDragging: Opacity(
           opacity: 0.5,

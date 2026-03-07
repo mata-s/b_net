@@ -4,11 +4,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+class ManagerGameInputBattingController {
+  Future<void> Function({bool showSnackbar})? _save;
+
+  Future<void> save({bool showSnackbar = true}) async {
+    final save = _save;
+    if (save != null) {
+      await save(showSnackbar: showSnackbar);
+    }
+  }
+}
+
 class ManagerGameInputBatting extends StatefulWidget {
   final int matchIndex;
   final String userUid;
   final String teamId;
   final List<Map<String, dynamic>> members;
+  final ManagerGameInputBattingController? controller;
 
   const ManagerGameInputBatting({
     Key? key,
@@ -16,6 +28,7 @@ class ManagerGameInputBatting extends StatefulWidget {
     required this.userUid,
     required this.teamId,
     required this.members,
+    this.controller,
   }) : super(key: key);
 
   @override
@@ -91,12 +104,14 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
   Set<int> _expandedAtBatIndexes = {};
   final ScrollController _scrollController = ScrollController();
   bool _isDragging = false;
+  Offset? _dragStartGlobalPosition;
 
   @override
   void initState() {
     super.initState();
     _loadBattingOrder();
     _loadFormData();
+    widget.controller?._save = _saveTentativeData;
   }
 
   Future<void> _saveFormData() async {
@@ -663,28 +678,35 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
         onPointerMove: (event) {
           // Only auto-scroll while dragging (pointer pressed)
           if (!_isDragging) return;
-          
+
           if (!_scrollController.hasClients) return;
 
-          final position = event.position.dy;
+          final currentY = event.position.dy;
           final mediaQuery = MediaQuery.of(context);
           final screenHeight = mediaQuery.size.height;
 
           const edgeThreshold = 100; // distance from edge to trigger scroll
           const scrollSpeed = 15.0;
+          const dragActivationDistance =100.0; // 少し動くまでは自動スクロールしない
 
           // Start the top auto-scroll zone below status bar + (potential) AppBar height
           final topTriggerY = mediaQuery.padding.top + kToolbarHeight;
           // End the bottom auto-scroll zone above the bottom safe area
           final bottomTriggerY = screenHeight - mediaQuery.padding.bottom;
 
-          if (position < topTriggerY + edgeThreshold) {
+          final startY = _dragStartGlobalPosition?.dy;
+          final movedEnough =
+              startY == null || (currentY - startY).abs() >= dragActivationDistance;
+
+          if (!movedEnough) return;
+
+          if (currentY < topTriggerY + edgeThreshold) {
             // Scroll up
             _scrollController.jumpTo(
               (_scrollController.offset - scrollSpeed)
                   .clamp(0.0, _scrollController.position.maxScrollExtent),
             );
-          } else if (position > bottomTriggerY - edgeThreshold) {
+          } else if (currentY > bottomTriggerY - edgeThreshold) {
             // Scroll down
             _scrollController.jumpTo(
               (_scrollController.offset + scrollSpeed)
@@ -726,20 +748,21 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                         Expanded(
                           child: DragTarget<Map<String, dynamic>>(
                             onAccept: (member) {
-                              setState(() {
-                                // Remove the member from any previous slot
-                                for (int i = 0;
-                                    i < battingOrderMembers.length;
-                                    i++) {
-                                  if (battingOrderMembers[i]?['uid'] ==
-                                      member['uid']) {
-                                    battingOrderMembers[i] = null;
-                                  }
-                                }
-                                battingOrderMembers[index] = member;
-                              });
-                              _saveBattingOrder();
-                            },
+  setState(() {
+    final fromIndex = battingOrderMembers.indexWhere(
+      (m) => m?['uid'] == member['uid'],
+    );
+
+    if (fromIndex != -1) {
+      final temp = battingOrderMembers[index];
+      battingOrderMembers[index] = member;
+      battingOrderMembers[fromIndex] = temp;
+    } else {
+      battingOrderMembers[index] = member;
+    }
+  });
+  _saveBattingOrder();
+},
                             builder: (context, candidateData, rejectedData) {
                               return Container(
                                 height: 48,
@@ -759,12 +782,18 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                                           data: assigned,
                                           onDragStarted: () {
                                             _isDragging = true;
+                                            _dragStartGlobalPosition = null;
+                                          },
+                                          onDragUpdate: (details) {
+                                            _dragStartGlobalPosition ??= details.globalPosition;
                                           },
                                           onDragEnd: (_) {
                                             _isDragging = false;
+                                            _dragStartGlobalPosition = null;
                                           },
                                           onDraggableCanceled: (_, __) {
                                             _isDragging = false;
+                                            _dragStartGlobalPosition = null;
                                           },
                                           feedback: Material(
                                             color: Colors.transparent,
@@ -1037,19 +1066,27 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                           data: member,
                           onDragStarted: () {
                             _isDragging = true;
+                            _dragStartGlobalPosition = null;
+                          },
+                          onDragUpdate: (details) {
+                            _dragStartGlobalPosition ??= details.globalPosition;
                           },
                           onDragEnd: (_) {
                             _isDragging = false;
+                            _dragStartGlobalPosition = null;
                           },
                           onDraggableCanceled: (_, __) {
                             _isDragging = false;
+                            _dragStartGlobalPosition = null;
                           },
                           feedback: Material(
                             color: Colors.transparent,
                             child: Chip(
                                 label: Text(name,
                                     style: const TextStyle(fontSize: 12)),
-                                elevation: 6),
+                                elevation: 6,
+                                backgroundColor: Colors.orange[200], 
+                            ),
                           ),
                           childWhenDragging: Opacity(
                             opacity: 0.5,
@@ -1135,7 +1172,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
   );
   }
 
-  Future<void> _saveTentativeData() async {
+  Future<void> _saveTentativeData({bool showSnackbar = true}) async {
     for (int i = 0; i < battingOrderMembers.length; i++) {
       final member = battingOrderMembers[i];
       if (member == null) continue;
@@ -1153,9 +1190,11 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
           .orderBy('updatedAt', descending: true)
           .limit(1)
           .get();
-      if (querySnapshot.docs.isEmpty) continue;
 
-      final docRef = collectionRef.doc(querySnapshot.docs.first.id);
+      final DocumentReference<Map<String, dynamic>> docRef =
+          querySnapshot.docs.isNotEmpty
+              ? collectionRef.doc(querySnapshot.docs.first.id)
+              : collectionRef.doc();
 
       List<Map<String, dynamic>> atBats = [];
       for (int j = 0; j < atBatList[i]; j++) {
@@ -1174,33 +1213,46 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
 
       // --- PATCH: update atBats and extra stats as top-level fields in games array ---
       final snapshot = await docRef.get();
-      final games = (snapshot.data()?['data']['games'] ?? []) as List<dynamic>;
+      final data = snapshot.data();
+      final existingGamesDynamic = (data != null && data['data'] is Map<String, dynamic>)
+          ? ((data['data']['games'] ?? []) as List<dynamic>)
+          : <dynamic>[];
 
-      if (widget.matchIndex < games.length) {
-        final updatedGames = [...games];
-        final currentGame =
-            Map<String, dynamic>.from(games[widget.matchIndex] ?? {});
-        currentGame['atBats'] = atBats;
-        currentGame['rbis'] = int.tryParse(_rbisControllers[i][0].text) ?? 0;
-        currentGame['runs'] = int.tryParse(_runsControllers[i][0].text) ?? 0;
-        currentGame['stealsAttempts'] =
-            int.tryParse(_stealsAttemptsControllers[i][0].text) ?? 0;
-        currentGame['steals'] =
-            int.tryParse(_stealsControllers[i][0].text) ?? 0;
-        currentGame['caughtStealingByRunner'] =
-            int.tryParse(_caughtStealingByRunnerControllers[i][0].text) ?? 0;
-        updatedGames[widget.matchIndex] = currentGame;
-
-        await docRef.update({
-          'data.games': updatedGames,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+      final updatedGames = List<dynamic>.from(existingGamesDynamic);
+      while (updatedGames.length <= widget.matchIndex) {
+        updatedGames.add({});
       }
+
+      final currentGame =
+          Map<String, dynamic>.from(updatedGames[widget.matchIndex] ?? {});
+      currentGame['atBats'] = atBats;
+      currentGame['rbis'] = int.tryParse(_rbisControllers[i][0].text) ?? 0;
+      currentGame['runs'] = int.tryParse(_runsControllers[i][0].text) ?? 0;
+      currentGame['stealsAttempts'] =
+          int.tryParse(_stealsAttemptsControllers[i][0].text) ?? 0;
+      currentGame['steals'] =
+          int.tryParse(_stealsControllers[i][0].text) ?? 0;
+      currentGame['caughtStealingByRunner'] =
+          int.tryParse(_caughtStealingByRunnerControllers[i][0].text) ?? 0;
+      updatedGames[widget.matchIndex] = currentGame;
+
+      await docRef.set({
+        'uid': uid,
+        'savedAt': data != null && data['savedAt'] != null
+            ? data['savedAt']
+            : FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'data': {
+          'games': updatedGames,
+        },
+      }, SetOptions(merge: true));
       // --- END PATCH ---
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('仮保存しました')),
-    );
+        if (showSnackbar && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('仮保存しました')),
+      );
+    }
   }
 }

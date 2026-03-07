@@ -333,8 +333,8 @@ Future<void> _handleMessageNavigation(RemoteMessage message) async {
     return;
   }
 
-  // 🔔 重要なお知らせの通知（type == 'announcement'）は HomePage へ遷移
-  if (type == 'announcement') {
+  // 🔔 チーム招待通知・重要なお知らせの通知は HomePage へ遷移
+  if (type == 'team_invite' || type == 'announcement') {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       nav.pushAndRemoveUntil(
