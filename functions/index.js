@@ -2068,28 +2068,12 @@ export const saveTeamGameData = onCall(async (request) => {
 
     console.log("Firestore references initialized");
 
-    // バッチ書き込みにおける処理分割
-    const writeBatchWithLimit = async (batchOps) => {
-      let batch = firestore.batch();
-      let operationCount = 0;
+    let gameBatch = firestore.batch();
+    let gameBatchCount = 0;
 
-      for (const op of batchOps) {
-        op(batch);
-        operationCount++;
-
-        if (operationCount === 500) {
-          await batch.commit();
-          batch = firestore.batch();
-          operationCount = 0;
-        }
-      }
-
-      if (operationCount > 0) {
-        await batch.commit();
-      }
-    };
-
-    const batchOps = [];
+    const statsAccum = {};
+    let latestGameDateJST = null;
+    let latestGameResult = "";
 
     // 各ゲームデータをFirestoreに追加
     for (const game of games) {
@@ -2112,47 +2096,30 @@ export const saveTeamGameData = onCall(async (request) => {
       console.log("JST Date:", gameDateJST);
       console.log("UTC Date:", gameDateUTC);
 
-      // --- Win streak tracking per game ---
-      // Inserted win streak logic here (per instructions)
-      const teamDocRef = firestore.collection("teams").doc(teamId);
-      const teamDoc = await teamDocRef.get();
-      const teamData = teamDoc.exists ? teamDoc.data() : {};
-      let currentStreak = teamData.currentWinStreak || 0;
-      let maxStreak = teamData.maxWinStreak || 0;
-      let maxStreakYear = teamData.maxWinStreakYear || null;
+      const normalizedScore = typeof game.score === "object" ?
+        parseInt(game.score.value || 0) :
+        Number(game.score) || 0;
+      const normalizedRunsAllowed =
+        typeof game.runs_allowed === "object" ?
+          parseInt(game.runs_allowed.value || 0) :
+          Number(game.runs_allowed) || 0;
 
-      if (game.result === "勝利") {
-        currentStreak += 1;
-      } else {
-        if (currentStreak > maxStreak) {
-          maxStreak = currentStreak;
-          maxStreakYear = gameDateJST.getFullYear();
-        }
-        currentStreak = 0;
-      }
-
-      await teamDocRef.set({
-        currentWinStreak: currentStreak,
-        maxWinStreak: maxStreak,
-        maxWinStreakYear: maxStreakYear,
-      }, {merge: true});
-      // --- End win streak tracking per game ---
-
-      batchOps.push((batch) => {
-        batch.set(gameRef, {
-          game_date: Timestamp.fromDate(gameDateUTC),
-          location: game.location || "",
-          opponent: game.opponent || "",
-          game_type: game.game_type || "",
-          score: typeof game.score === "object" ?
-            parseInt(game.score.value || 0) :
-            Number(game.score) || 0,
-          runs_allowed: typeof game.runs_allowed === "object" ?
-            parseInt(game.runs_allowed.value || 0) :
-            Number(game.runs_allowed) || 0,
-          result: game.result || "",
-        });
+      gameBatch.set(gameRef, {
+        game_date: Timestamp.fromDate(gameDateUTC),
+        location: game.location || "",
+        opponent: game.opponent || "",
+        game_type: game.game_type || "",
+        score: normalizedScore,
+        runs_allowed: normalizedRunsAllowed,
+        result: game.result || "",
       });
+      gameBatchCount++;
+
+      if (gameBatchCount === 500) {
+        await gameBatch.commit();
+        gameBatch = firestore.batch();
+        gameBatchCount = 0;
+      }
 
       const year = gameDateJST.getFullYear();
       const month = gameDateJST.getMonth() + 1;
@@ -2168,63 +2135,122 @@ export const saveTeamGameData = onCall(async (request) => {
       ];
 
       for (const categoryPath of categories) {
-        const statsDocRef = statsRef.doc(categoryPath);
+        if (!statsAccum[categoryPath]) {
+          statsAccum[categoryPath] = {
+            totalGames: 0,
+            totalWins: 0,
+            totalLosses: 0,
+            totalDraws: 0,
+            totalScore: 0,
+            totalRunsAllowed: 0,
+            gameDate: Timestamp.fromDate(gameDateJST),
+          };
+        }
 
-        batchOps.push(async (batch) => {
-          await firestore.runTransaction(async (transaction) => {
-            const statsDoc = await transaction.get(statsDocRef);
-            const currentStats = statsDoc.exists ? statsDoc.data() : {};
+        statsAccum[categoryPath].totalGames += 1;
+        statsAccum[categoryPath].totalWins += game.result === "勝利" ? 1 : 0;
+        statsAccum[categoryPath].totalLosses += game.result === "敗北" ? 1 : 0;
+        statsAccum[categoryPath].totalDraws += game.result === "引き分け" ? 1 : 0;
+        statsAccum[categoryPath].totalScore += normalizedScore;
+        statsAccum[categoryPath].totalRunsAllowed += normalizedRunsAllowed;
 
-            const normalizedScore = typeof game.score === "object" ?
-              parseInt(game.score.value || 0) :
-              Number(game.score) || 0;
-            const normalizedRunsAllowed =
-            typeof game.runs_allowed === "object" ?
-              parseInt(game.runs_allowed.value || 0) :
-              Number(game.runs_allowed) || 0;
+        const currentLatest = statsAccum[categoryPath].gameDate;
+        if (!currentLatest || currentLatest.toDate() < gameDateJST) {
+          statsAccum[categoryPath].gameDate = Timestamp.fromDate(gameDateJST);
+        }
+      }
 
-            const updatedStats = {
-              totalGames: (currentStats.totalGames || 0) + 1,
-              totalWins: (currentStats.totalWins || 0) +
-                (game.result === "勝利" ? 1 : 0),
-              totalLosses: (currentStats.totalLosses || 0) +
-                (game.result === "敗北" ? 1 : 0),
-              totalDraws: (currentStats.totalDraws || 0) +
-                (game.result === "引き分け" ? 1 : 0),
-              totalScore:
-                Number(currentStats.totalScore || 0) +
-                normalizedScore,
-              totalRunsAllowed:
-                Number(currentStats.totalRunsAllowed || 0) +
-                normalizedRunsAllowed,
-            };
-
-            if (currentStats.gameDate) {
-              const currentGameDate = currentStats.gameDate.toDate();
-              if (currentGameDate >= gameDateJST) {
-                updatedStats.gameDate = Timestamp.fromDate(gameDateJST);
-              }
-            } else {
-              updatedStats.gameDate = Timestamp.fromDate(gameDateJST);
-            }
-
-            // 勝率は「勝敗がついた試合（勝利＋敗北）」のみを分母にする
-            const gamesForWinRate =
-              updatedStats.totalWins + updatedStats.totalLosses;
-
-            updatedStats.winRate =
-              gamesForWinRate > 0 ?
-                updatedStats.totalWins / gamesForWinRate :
-                0;
-
-            transaction.set(statsDocRef, updatedStats, {merge: true});
-          });
-        });
+      if (!latestGameDateJST || latestGameDateJST < gameDateJST) {
+        latestGameDateJST = gameDateJST;
+        latestGameResult = game.result || "";
       }
     }
 
-    // バッチ書き込みを実行
-    await writeBatchWithLimit(batchOps);
+    // team_games をコミット
+    if (gameBatchCount > 0) {
+      await gameBatch.commit();
+    }
+
+    // 既存の stats ドキュメントをまとめて読んで、加算後に一括保存
+    const statsDocIds = Object.keys(statsAccum);
+    const statsSnaps = await Promise.all(
+        statsDocIds.map((id) => statsRef.doc(id).get()),
+    );
+
+    let statsBatch = firestore.batch();
+    let statsBatchCount = 0;
+
+    for (let i = 0; i < statsDocIds.length; i++) {
+      const docId = statsDocIds[i];
+      const snap = statsSnaps[i];
+      const currentStats = snap.exists ? (snap.data() || {}) : {};
+      const add = statsAccum[docId];
+
+      const updatedStats = {
+        totalGames: Number(currentStats.totalGames || 0) + add.totalGames,
+        totalWins: Number(currentStats.totalWins || 0) + add.totalWins,
+        totalLosses: Number(currentStats.totalLosses || 0) + add.totalLosses,
+        totalDraws: Number(currentStats.totalDraws || 0) + add.totalDraws,
+        totalScore: Number(currentStats.totalScore || 0) + add.totalScore,
+        totalRunsAllowed:
+          Number(currentStats.totalRunsAllowed || 0) + add.totalRunsAllowed,
+      };
+
+      const currentGameDate = currentStats.gameDate;
+      if (currentGameDate && typeof currentGameDate.toDate === "function") {
+        updatedStats.gameDate =
+          currentGameDate.toDate() >= add.gameDate.toDate() ?
+            currentGameDate :
+            add.gameDate;
+      } else {
+        updatedStats.gameDate = add.gameDate;
+      }
+
+      const gamesForWinRate = updatedStats.totalWins + updatedStats.totalLosses;
+      updatedStats.winRate =
+        gamesForWinRate > 0 ?
+          updatedStats.totalWins / gamesForWinRate :
+          0;
+
+      statsBatch.set(statsRef.doc(docId), updatedStats, {merge: true});
+      statsBatchCount++;
+
+      if (statsBatchCount === 500) {
+        await statsBatch.commit();
+        statsBatch = firestore.batch();
+        statsBatchCount = 0;
+      }
+    }
+
+    if (statsBatchCount > 0) {
+      await statsBatch.commit();
+    }
+
+    // 最新試合の結果をもとにチームの連勝情報を1回だけ更新
+    if (latestGameDateJST) {
+      const teamDocRef = firestore.collection("teams").doc(teamId);
+      const teamDoc = await teamDocRef.get();
+      const teamData = teamDoc.exists ? (teamDoc.data() || {}) : {};
+      let currentStreak = Number(teamData.currentWinStreak || 0);
+      let maxStreak = Number(teamData.maxWinStreak || 0);
+      let maxStreakYear = teamData.maxWinStreakYear || null;
+
+      if (latestGameResult === "勝利") {
+        currentStreak += 1;
+      } else {
+        if (currentStreak > maxStreak) {
+          maxStreak = currentStreak;
+          maxStreakYear = latestGameDateJST.getFullYear();
+        }
+        currentStreak = 0;
+      }
+
+      await teamDocRef.set({
+        currentWinStreak: currentStreak,
+        maxWinStreak: maxStreak,
+        maxWinStreakYear: maxStreakYear,
+      }, {merge: true});
+    }
 
     // Cloud Tasks による統計集計リクエスト（チームの相手別・場所別）
     const queue = "team-summary-stats-queue"; // Cloud Tasks のキュー名（あとで作成）
@@ -8541,6 +8567,37 @@ export const updateAverageAgeOnBirthdayChanged = onDocumentWritten(
     },
 );
 
+export const recalculateAllTeamsAverageAgeDaily = onSchedule(
+    {
+      schedule: "0 6 * * *",
+      timeZone: "Asia/Tokyo",
+      region: "asia-northeast1",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      console.log("🚀 全チーム平均年齢の定期再計算を開始");
+
+      const teamsSnap = await db.collection("teams").get();
+      if (teamsSnap.empty) {
+        console.log("ℹ️ 対象チームがありません");
+        return;
+      }
+
+      for (const teamDoc of teamsSnap.docs) {
+        try {
+          await recalculateTeamAverageAge(teamDoc.id);
+        } catch (error) {
+          console.error(
+              `❌ チーム ${teamDoc.id} の平均年齢再計算に失敗`,
+              error,
+          );
+        }
+      }
+
+      console.log(`✅ 全チーム平均年齢の定期再計算が完了: ${teamsSnap.size} チーム`);
+    },
+);
+
 // チャットメッセージ保存後に通知を送る
 export const onChatMessageCreated =
 onDocumentCreated("chatRooms/{roomId}/messages/{messageId}", async (event) => {
@@ -11609,3 +11666,222 @@ export const onAnnouncementCreated =
       console.error("onAnnouncementCreated: error sending notifications", err);
     }
   });
+
+
+/**
+ * 仮ユーザーを完全削除し、teams/{teamId}.members からも削除する
+ * 実ユーザーを選択したときに使用
+ */
+export const removeTentativeUserFromTeam = onCall(async (request) => {
+  const {tentativeUid, teamId} = request.data;
+
+  if (!tentativeUid || !teamId) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "tentativeUid and teamId are required",
+    );
+  }
+
+  const teamRef = db.collection("teams").doc(teamId);
+  const userRef = db.collection("users").doc(tentativeUid);
+  const subcollections = [
+    "games",
+    "stats",
+    "subscription",
+    "teamLocationStats",
+    "tentative",
+  ];
+
+  try {
+    // teams/{teamId}.members から仮ユーザー削除
+    await teamRef.update({
+      members: FieldValue.arrayRemove(tentativeUid),
+    });
+
+    // 主要サブコレクションを削除
+    for (const sub of subcollections) {
+      const snap = await userRef.collection(sub).get();
+      if (snap.empty) continue;
+
+      let batch = db.batch();
+      let count = 0;
+
+      for (const doc of snap.docs) {
+        batch.delete(doc.ref);
+        count++;
+
+        if (count === 500) {
+          await batch.commit();
+          batch = db.batch();
+          count = 0;
+        }
+      }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+    }
+
+    // 親ドキュメント削除
+    await userRef.delete();
+
+    return {
+      success: true,
+      deletedSubcollections: subcollections,
+    };
+  } catch (error) {
+    console.error("Failed to fully remove tentative user:", error);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to fully remove tentative user",
+    );
+  }
+});
+
+
+/**
+ * 仮ユーザーの記録を実ユーザーに上書き保存する
+ * 対象: users/{uid}/games, stats, teamLocationStats
+ */
+export const mergeTentativeUserDataToRealUser = onCall(async (request) => {
+  const {tentativeUid, realUid} = request.data;
+
+  if (!tentativeUid || !realUid) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "tentativeUid and realUid are required",
+    );
+  }
+
+  const sourceUserRef = db.collection("users").doc(tentativeUid);
+  const targetUserRef = db.collection("users").doc(realUid);
+  const subcollections = [
+    "games",
+    "stats",
+    "teamLocationStats",
+  ];
+  const deleteSubcollections = [
+    "games",
+    "stats",
+    "teamLocationStats",
+    "subscription",
+    "tentative",
+  ];
+
+  // --- Helper functions for game matching ---
+  const toMillis = (value) => {
+    if (!value) return null;
+    if (typeof value.toMillis === "function") return value.toMillis();
+    if (typeof value.toDate === "function") return value.toDate().getTime();
+    if (value instanceof Date) return value.getTime();
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  };
+
+  const normalizeText = (value) => String(value || "").trim();
+
+  const isSameGame = (a, b) => {
+    return (
+      toMillis(a.gameDate) === toMillis(b.gameDate) &&
+      normalizeText(a.gameType) === normalizeText(b.gameType) &&
+      normalizeText(a.location) === normalizeText(b.location) &&
+      normalizeText(a.opponent) === normalizeText(b.opponent)
+    );
+  };
+
+  try {
+    for (const sub of subcollections) {
+      const sourceSnap = await sourceUserRef.collection(sub).get();
+      if (sourceSnap.empty) continue;
+
+      let batch = db.batch();
+      let count = 0;
+
+      let targetGamesDocs = [];
+      if (sub === "games") {
+        const targetGamesSnap = await targetUserRef.collection(sub).get();
+        targetGamesDocs = targetGamesSnap.docs;
+      }
+
+      for (const doc of sourceSnap.docs) {
+        const data = doc.data() || {};
+
+        let targetDocRef;
+        if (sub === "games") {
+          const matchedTarget = targetGamesDocs.find((targetDoc) => {
+            const targetData = targetDoc.data() || {};
+            return isSameGame(data, targetData);
+          });
+
+          targetDocRef = matchedTarget ?
+            matchedTarget.ref :
+            targetUserRef.collection(sub).doc();
+        } else {
+          targetDocRef = targetUserRef.collection(sub).doc(doc.id);
+        }
+
+        const payload = {
+          ...data,
+          migratedFromUid: tentativeUid,
+          migratedAt: FieldValue.serverTimestamp(),
+        };
+
+        if (sub === "games") {
+          payload.uid = realUid;
+        }
+
+        batch.set(targetDocRef, payload, {merge: false});
+        count++;
+
+        if (count === 500) {
+          await batch.commit();
+          batch = db.batch();
+          count = 0;
+        }
+      }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+    }
+
+    // 移行後、仮ユーザー側の主要サブコレクションを削除
+    for (const sub of deleteSubcollections) {
+      const snap = await sourceUserRef.collection(sub).get();
+      if (snap.empty) continue;
+
+      let batch = db.batch();
+      let count = 0;
+
+      for (const doc of snap.docs) {
+        batch.delete(doc.ref);
+        count++;
+
+        if (count === 500) {
+          await batch.commit();
+          batch = db.batch();
+          count = 0;
+        }
+      }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+    }
+
+    // 最後に仮ユーザー本体を削除
+    await sourceUserRef.delete();
+
+    return {
+      success: true,
+      mergedSubcollections: subcollections,
+      deletedSubcollections: deleteSubcollections,
+    };
+  } catch (error) {
+    console.error("Failed to merge tentative user data:", error);
+    throw new functions.https.HttpsError(
+        "internal",
+        "Failed to merge tentative user data",
+    );
+  }
+});

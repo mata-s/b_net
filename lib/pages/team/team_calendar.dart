@@ -1,9 +1,11 @@
+import 'package:b_net/pages/private/manager/manager_geme_page.dart';
 import 'package:b_net/pages/team/game_team_input_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'dart:collection';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class Event {
   final String id;
@@ -162,25 +164,98 @@ class _TeamGradesCalendarState extends State<TeamGradesCalendar> {
     );
   }
 
+Future<void> _showAddGameChoice() async {
+  final selected = await showDialog<String>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('試合の入力方法を選んでください'),
+        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              '試合中にみんなの成績を入力するか、試合後にチーム成績だけ入力するかを選べます。',
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).pop('individual'),
+              icon: const Icon(Icons.person_outline),
+              label: const Text('チーム成績だけ入力する'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).pop('manager'),
+              icon: const Icon(Icons.groups_outlined),
+              label: const Text('リアルタイムで入力する'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('キャンセル'),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (!mounted || selected == null) return;
+
+  if (selected == 'individual') {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => GameTeamInputPage(
+          teamId: widget.teamId,
+          selectedDate: _selectedDay ?? _focusedDay,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      await _loadTeamData();
+    }
+    return;
+  }
+
+  if (selected == 'manager') {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final uid = currentUser?.uid ?? '';
+
+    if (uid.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ログイン情報が取得できませんでした')),
+      );
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ManagerGemePage(
+          userUid: uid,
+          teamId: widget.teamId,
+          useTeamTentative: true,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    await _loadTeamData();
+  }
+}
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => GameTeamInputPage(
-                teamId: widget.teamId,
-                selectedDate: _selectedDay ?? _focusedDay,
-              ),
-            ),
-          );
-
-          if (result == true) {
-            await _loadTeamData();
-          }
-        },
+        onPressed: _showAddGameChoice,
         child: const Icon(Icons.add),
       ),
       body: Column(

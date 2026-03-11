@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 class TeamInviteIdentifyMemberPage extends StatefulWidget {
@@ -98,7 +99,7 @@ class _TeamInviteIdentifyMemberPageState
     return uid;
   }
 
-  Future<bool> _showConfirmDialog({required String? selectedUid}) async {
+  Future<String?> _showConfirmDialog({required String? selectedUid}) async {
     final titleTeamName = widget.teamName.trim().isNotEmpty ? widget.teamName.trim() : 'チーム';
 
     // 選択が null の場合は「自分はいない」で新規参加
@@ -125,42 +126,57 @@ class _TeamInviteIdentifyMemberPageState
           );
         },
       );
-      return ok == true;
+      return ok == true ? 'join_new' : null;
     }
 
     final name = _displayNameFor(selectedUid);
-    final ok = await showDialog<bool>(
+    final action = await showDialog<String?>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
         return AlertDialog(
-          title: const Text('本当にこの選手ですか？'),
+          title: const Text('この選手の記録をどうしますか？'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('選択：$name'),
-              const SizedBox(height: 6),
-              Text(
-                'この選手（仮メンバー）に保存されているチーム成績は、あなたのアカウントに統合されます。\n\n※間違えると成績が別の人に付く可能性があります。',
+              const SizedBox(height: 10),
+              const Text(
+                'この選手があなた本人なら、これまでこの選手に記録されている成績をあなたのアカウントにまとめます。\n'
+                '今の記録をそのまま残したい場合は、そのまま参加してください。',
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).pop('merge'),
+                  child: const Text('この選手の記録を自分にまとめる'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop('skip_delete'),
+                  child: const Text('記録はそのままで参加する'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(null),
+                  child: const Text('戻る'),
+                ),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('戻る'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('この選手で確定'),
-            ),
-          ],
         );
       },
     );
 
-    return ok == true;
+    return action;
   }
 
   Future<void> _submitJoinOrMerge() async {
@@ -174,8 +190,8 @@ class _TeamInviteIdentifyMemberPageState
       final selectedUid = _selectedUid;
 
       // ④ 確認
-      final confirmed = await _showConfirmDialog(selectedUid: selectedUid);
-      if (!confirmed) {
+      final action = await _showConfirmDialog(selectedUid: selectedUid);
+      if (action == null) {
         if (!mounted) return;
         setState(() {
           _submitting = false;
@@ -205,7 +221,29 @@ class _TeamInviteIdentifyMemberPageState
           .doc(widget.inviteDocId);
 
       final currentUserRef = firestore.collection('users').doc(widget.currentUserUid);
-      final dummyRef = selectedUid == null ? null : firestore.collection('users').doc(selectedUid);
+
+      final bool shouldMerge = action == 'merge';
+final bool shouldDeleteTentativeAndJoin = action == 'skip_delete';
+
+if (selectedUid != null && shouldMerge) {
+  final callable = FirebaseFunctions.instance.httpsCallable(
+    'mergeTentativeUserDataToRealUser',
+  );
+  await callable.call({
+    'tentativeUid': selectedUid,
+    'realUid': widget.currentUserUid,
+  });
+}
+
+if (selectedUid != null && shouldDeleteTentativeAndJoin) {
+  final callable = FirebaseFunctions.instance.httpsCallable(
+    'removeTentativeUserFromTeam',
+  );
+  await callable.call({
+    'tentativeUid': selectedUid,
+    'teamId': widget.teamId,
+  });
+}
 
       await firestore.runTransaction((tx) async {
         final teamSnap = await tx.get(teamRef);
@@ -225,41 +263,38 @@ class _TeamInviteIdentifyMemberPageState
             'updatedAt': FieldValue.serverTimestamp(),
           });
         } else {
-          // 統合：ダミーUIDを自分のUIDに置換
-          final idx = members.indexOf(selectedUid);
-          if (idx >= 0) {
-            members[idx] = widget.currentUserUid;
+          if (shouldMerge) {
+            // 統合：ダミーUIDを自分のUIDに置換
+            final idx = members.indexOf(selectedUid);
+            if (idx >= 0) {
+              members[idx] = widget.currentUserUid;
+            } else {
+              if (!members.contains(widget.currentUserUid)) {
+                members.add(widget.currentUserUid);
+              }
+            }
+
+            // 重複除去
+            final uniq = <String>{};
+            final mergedMembers = <String>[];
+            for (final m in members) {
+              if (uniq.add(m)) mergedMembers.add(m);
+            }
+
+            tx.update(teamRef, {
+              'members': mergedMembers,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
           } else {
-            // 想定外：members に無い場合でも安全側で自分を追加
+            // 引き継がず参加：仮ユーザーは Functions 側で削除済みなので、自分を追加するだけ
             if (!members.contains(widget.currentUserUid)) {
               members.add(widget.currentUserUid);
             }
+            tx.update(teamRef, {
+              'members': members,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
           }
-
-          // 重複除去
-          final uniq = <String>{};
-          final mergedMembers = <String>[];
-          for (final m in members) {
-            if (uniq.add(m)) mergedMembers.add(m);
-          }
-
-          tx.update(teamRef, {
-            'members': mergedMembers,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-
-          // ダミーユーザー側に統合先を記録（監査/追跡用）
-          tx.set(
-            dummyRef!,
-            {
-              'mergedToUid': widget.currentUserUid,
-              'mergedAt': FieldValue.serverTimestamp(),
-              'mergedTeamId': widget.teamId,
-              'mergedTeamName': widget.teamName,
-              'isMerged': true,
-            },
-            SetOptions(merge: true),
-          );
         }
 
         // currentUser に teamId を紐づける（teams 配列がある前提。無くても merge で追加するだけ）
@@ -305,9 +340,15 @@ class _TeamInviteIdentifyMemberPageState
 
       if (!mounted) return;
 
+      final successMessage = selectedUid == null
+          ? 'チームに参加しました'
+          : shouldMerge
+              ? '成績を統合してチームに参加しました'
+              : '仮ユーザーを削除してチームに参加しました';
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(selectedUid == null ? 'チームに参加しました' : '成績を統合してチームに参加しました'),
+          content: Text(successMessage),
         ),
       );
 
@@ -427,7 +468,6 @@ class _TeamInviteIdentifyMemberPageState
                                   name,
                                   style: const TextStyle(fontWeight: FontWeight.w700),
                                 ),
-                                subtitle: Text(uid, maxLines: 1, overflow: TextOverflow.ellipsis),
                                 onTap: _submitting
                                     ? null
                                     : () {

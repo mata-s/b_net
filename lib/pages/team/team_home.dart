@@ -2,6 +2,7 @@ import 'package:b_net/pages/team/ranking/national_team_ranking.dart';
 import 'package:b_net/pages/team/ranking/prefecture_team_ranking.dart';
 import 'package:b_net/pages/team/team_analysis_page.dart';
 import 'package:b_net/pages/team/team_calender_tab.dart';
+import 'package:b_net/pages/team/team_member_stats_page.dart';
 import 'package:b_net/pages/team/team_performance_home.dart';
 import 'package:b_net/pages/team/team_profile.dart';
 import 'package:b_net/pages/team/team_register_member.dart';
@@ -595,6 +596,19 @@ Future<void> _init() async {
                     );
                   },
                 ),
+                                menuTile(
+                  icon: Icons.query_stats,
+                  title: '選手成績一覧',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => TeamMemberStatsPage(
+          teamId: widget.team['teamId'],
+        ),
+        ),
+        );
+        },
+        ),
 
                 if (maxWinStreak != null && maxWinStreak! >= 2)
                   Padding(

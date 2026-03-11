@@ -6,11 +6,31 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ManagerGameInputBattingController {
   Future<void> Function({bool showSnackbar})? _save;
+  VoidCallback? _reset;
+
+  bool _pendingReset = false;
 
   Future<void> save({bool showSnackbar = true}) async {
     final save = _save;
     if (save != null) {
       await save(showSnackbar: showSnackbar);
+    }
+  }
+
+  void reset() {
+    if (_reset != null) {
+      _reset!.call();
+    } else {
+      _pendingReset = true;
+    }
+  }
+
+  Future<void> Function()? _refreshAbsent;
+
+  Future<void> refreshAbsent() async {
+    final refresh = _refreshAbsent;
+    if (refresh != null) {
+      await refresh();
     }
   }
 }
@@ -20,6 +40,8 @@ class ManagerGameInputBatting extends StatefulWidget {
   final String userUid;
   final String teamId;
   final List<Map<String, dynamic>> members;
+  final Map<String, dynamic> gameInfo;
+  final String tentativeDocId;
   final ManagerGameInputBattingController? controller;
 
   const ManagerGameInputBatting({
@@ -28,6 +50,8 @@ class ManagerGameInputBatting extends StatefulWidget {
     required this.userUid,
     required this.teamId,
     required this.members,
+    required this.gameInfo,
+    required this.tentativeDocId,
     this.controller,
   }) : super(key: key);
 
@@ -36,7 +60,8 @@ class ManagerGameInputBatting extends StatefulWidget {
       _ManagerGameInputBattingState();
 }
 
-class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
+class _ManagerGameInputBattingState extends State<ManagerGameInputBatting>
+    with AutomaticKeepAliveClientMixin {
   // 打席ごとの詳細入力データ
   List<List<String?>> _selectedLeftList = List.generate(
     9,
@@ -102,6 +127,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
   int? selectedIndex;
 
   Set<int> _expandedAtBatIndexes = {};
+  Set<String> absentMembers = {};
   final ScrollController _scrollController = ScrollController();
   bool _isDragging = false;
   Offset? _dragStartGlobalPosition;
@@ -111,7 +137,74 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
     super.initState();
     _loadBattingOrder();
     _loadFormData();
+    _loadAbsentMembers();
     widget.controller?._save = _saveTentativeData;
+    widget.controller?._reset = _resetStatsOnly;
+    widget.controller?._refreshAbsent = _refreshAbsentMembers;
+
+    if (widget.controller?._pendingReset == true) {
+      widget.controller?._pendingReset = false;
+      _resetStatsOnly();
+    }
+  }
+
+  void _resetAllData() {
+    if (!mounted) return;
+    setState(() {
+      for (int i = 0; i < 9; i++) {
+        atBatList[i] = 0;
+        _selectedLeftList[i] = List.filled(10, null);
+        _selectedRightList[i] = List.filled(10, null);
+        _selectedBuntDetail[i] = List.filled(10, null);
+        _firstPitchSwingFlags[i] = List.filled(10, false);
+        battingOrderMembers[i] = null;
+
+        for (int j = 0; j < 10; j++) {
+          _swingControllers[i][j].text = '0';
+          _missSwingControllers[i][j].text = '0';
+          _batterPitchCountControllers[i][j].text = '0';
+          _rbisControllers[i][j].text = '0';
+          _runsControllers[i][j].text = '0';
+          _stealsAttemptsControllers[i][j].text = '0';
+          _stealsControllers[i][j].text = '0';
+          _caughtStealingByRunnerControllers[i][j].text = '0';
+        }
+      }
+      _expandedAtBatIndexes.clear();
+      selectedIndex = null;
+      absentMembers = {};
+    });
+    _saveFormData();
+    _saveBattingOrder();
+    _saveAbsentMembers();
+  }
+
+  void _resetStatsOnly() {
+    if (!mounted) return;
+    setState(() {
+      for (int i = 0; i < 9; i++) {
+        atBatList[i] = 0;
+        _selectedLeftList[i] = List.filled(10, null);
+        _selectedRightList[i] = List.filled(10, null);
+        _selectedBuntDetail[i] = List.filled(10, null);
+        _firstPitchSwingFlags[i] = List.filled(10, false);
+
+        for (int j = 0; j < 10; j++) {
+          _swingControllers[i][j].text = '0';
+          _missSwingControllers[i][j].text = '0';
+          _batterPitchCountControllers[i][j].text = '0';
+          _rbisControllers[i][j].text = '0';
+          _runsControllers[i][j].text = '0';
+          _stealsAttemptsControllers[i][j].text = '0';
+          _stealsControllers[i][j].text = '0';
+          _caughtStealingByRunnerControllers[i][j].text = '0';
+        }
+      }
+      _expandedAtBatIndexes.clear();
+      selectedIndex = null;
+      absentMembers = {};
+    });
+    _saveFormData();
   }
 
   Future<void> _saveFormData() async {
@@ -244,6 +337,33 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
 
     setState(() {});
   }
+
+  Future<void> _loadAbsentMembers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('absent_members_${widget.teamId}');
+    if (list != null) {
+      setState(() {
+        absentMembers = list.toSet();
+      });
+    }
+  }
+
+  Future<void> _saveAbsentMembers() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      'absent_members_${widget.teamId}',
+      absentMembers.toList(),
+    );
+  }
+
+  Future<void> _refreshAbsentMembers() async {
+  final prefs = await SharedPreferences.getInstance();
+  final list = prefs.getStringList('absent_members_${widget.teamId}');
+  if (!mounted) return;
+  setState(() {
+    absentMembers = list?.toSet() ?? {};
+  });
+}
 
   Future<void> _saveBattingOrder() async {
     final prefs = await SharedPreferences.getInstance();
@@ -673,6 +793,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       body: Listener(
         onPointerMove: (event) {
@@ -690,7 +811,8 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
           const dragActivationDistance =100.0; // 少し動くまでは自動スクロールしない
 
           // Start the top auto-scroll zone below status bar + (potential) AppBar height
-          final topTriggerY = mediaQuery.padding.top + kToolbarHeight;
+          const extraTopOffset = 120.0; // space for inning / save UI added above
+          final topTriggerY = mediaQuery.padding.top + kToolbarHeight + extraTopOffset;
           // End the bottom auto-scroll zone above the bottom safe area
           final bottomTriggerY = screenHeight - mediaQuery.padding.bottom;
 
@@ -760,6 +882,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
     } else {
       battingOrderMembers[index] = member;
     }
+    absentMembers.remove(member['uid']);
   });
   _saveBattingOrder();
 },
@@ -778,7 +901,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                                   children: [
                                     if (assigned != null)
                                       Expanded(
-                                         child: LongPressDraggable<Map<String, dynamic>>(
+                                        child: LongPressDraggable<Map<String, dynamic>>(
                                           data: assigned,
                                           onDragStarted: () {
                                             _isDragging = true;
@@ -799,22 +922,16 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                                             color: Colors.transparent,
                                             child: Container(
                                               width: 200,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 8),
+                                              padding: const EdgeInsets.symmetric(horizontal: 8),
                                               decoration: BoxDecoration(
                                                 color: Colors.transparent,
-                                                border: Border.all(
-                                                    color: Colors.black,
-                                                    width: 2),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
+                                                border: Border.all(color: Colors.black, width: 2),
+                                                borderRadius: BorderRadius.circular(12),
                                               ),
                                               alignment: Alignment.center,
                                               child: Text(
                                                 assigned['name'],
-                                                style: const TextStyle(
-                                                    fontSize: 16),
+                                                style: const TextStyle(fontSize: 16),
                                               ),
                                             ),
                                           ),
@@ -824,8 +941,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                                               alignment: Alignment.center,
                                               child: Text(
                                                 assigned['name'],
-                                                style: const TextStyle(
-                                                    fontSize: 16),
+                                                style: const TextStyle(fontSize: 16),
                                               ),
                                             ),
                                           ),
@@ -839,6 +955,17 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                                               assigned['name'],
                                               textAlign: TextAlign.center,
                                             ),
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      const Expanded(
+                                        child: Text(
+                                          'ドラッグして配置',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: Colors.grey,
                                           ),
                                         ),
                                       ),
@@ -1041,74 +1168,171 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
                         battingOrderMembers[i] = null;
                       }
                     }
+                    absentMembers.remove(data['uid']);
                   });
                   _saveBattingOrder();
+                  _saveAbsentMembers();
                 },
                 builder: (context, candidateData, rejectedData) {
                   final benchMembers = widget.members
-                      .where((m) => !battingOrderMembers
-                          .any((b) => b?['uid'] == m['uid']))
+                      .where((m) =>
+                          !battingOrderMembers.any((b) => b?['uid'] == m['uid']) &&
+                          !absentMembers.contains(m['uid']))
                       .toList();
                   return Container(
                     padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(minHeight: 120),
+                    alignment: Alignment.centerLeft,
                     decoration: BoxDecoration(
                       color: candidateData.isNotEmpty
-                          ? Colors.blue.withOpacity(0.2)
+                          ? Colors.blue.withOpacity(0.28)
                           : Colors.transparent,
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(
+                        color: candidateData.isNotEmpty
+                            ? Colors.blue
+                            : Colors.grey.shade300,
+                        width: candidateData.isNotEmpty ? 2 : 1,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: benchMembers.map((member) {
-                        final name = member['name'] ?? '名前未設定';
-                        return Draggable<Map<String, dynamic>>(
-                          data: member,
-                          onDragStarted: () {
-                            _isDragging = true;
-                            _dragStartGlobalPosition = null;
-                          },
-                          onDragUpdate: (details) {
-                            _dragStartGlobalPosition ??= details.globalPosition;
-                          },
-                          onDragEnd: (_) {
-                            _isDragging = false;
-                            _dragStartGlobalPosition = null;
-                          },
-                          onDraggableCanceled: (_, __) {
-                            _isDragging = false;
-                            _dragStartGlobalPosition = null;
-                          },
-                          feedback: Material(
-                            color: Colors.transparent,
-                            child: Chip(
-                                label: Text(name,
-                                    style: const TextStyle(fontSize: 12)),
-                                elevation: 6,
-                                backgroundColor: Colors.orange[200], 
+                    child: benchMembers.isEmpty
+                        ? const Align(
+                            alignment: Alignment.center,
+                            child: Text(
+                              'ここにドラッグしてベンチへ戻す',
+                              style: TextStyle(color: Colors.grey),
                             ),
+                          )
+                        : Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: benchMembers.map((member) {
+                              final name = member['name'] ?? '名前未設定';
+                              return Draggable<Map<String, dynamic>>(
+                                data: member,
+                                onDragStarted: () {
+                                  _isDragging = true;
+                                  _dragStartGlobalPosition = null;
+                                },
+                                onDragUpdate: (details) {
+                                  _dragStartGlobalPosition ??= details.globalPosition;
+                                },
+                                onDragEnd: (_) {
+                                  _isDragging = false;
+                                  _dragStartGlobalPosition = null;
+                                },
+                                onDraggableCanceled: (_, __) {
+                                  _isDragging = false;
+                                  _dragStartGlobalPosition = null;
+                                },
+                                feedback: Material(
+                                  color: Colors.transparent,
+                                  child: Chip(
+                                      label: Text(name,
+                                          style: const TextStyle(fontSize: 12)),
+                                      elevation: 6,
+                                      backgroundColor: Colors.orange[200], 
+                                  ),
+                                ),
+                                childWhenDragging: Opacity(
+                                  opacity: 0.5,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: Chip(
+                                      label: Text(name,
+                                          style: const TextStyle(fontSize: 12)),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 4, vertical: 2),
+                                    ),
+                                  ),
+                                ),
+                                child: Chip(
+                                  label: Text(name,
+                                      style: const TextStyle(fontSize: 12)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 4, vertical: 2),
+                                ),
+                              );
+                            }).toList(),
                           ),
-                          childWhenDragging: Opacity(
-                            opacity: 0.5,
-                            child: Material(
-                              color: Colors.transparent,
-                              child: Chip(
-                                label: Text(name,
-                                    style: const TextStyle(fontSize: 12)),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 4, vertical: 2),
-                              ),
-                            ),
-                          ),
-                          child: Chip(
-                            label: Text(name,
-                                style: const TextStyle(fontSize: 12)),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 4, vertical: 2),
-                          ),
-                        );
-                      }).toList(),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              const Text('欠席',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              DragTarget<Map<String, dynamic>>(
+                onWillAccept: (data) => true,
+                onAccept: (data) {
+                  setState(() {
+                    for (int i = 0; i < battingOrderMembers.length; i++) {
+                      if (battingOrderMembers[i]?['uid'] == data['uid']) {
+                        battingOrderMembers[i] = null;
+                      }
+                    }
+                    absentMembers.add(data['uid']);
+                  });
+                  _saveBattingOrder();
+                  _saveAbsentMembers();
+                },
+                builder: (context, candidateData, rejectedData) {
+                  return Container(
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(minHeight: 120),
+                    alignment: Alignment.centerLeft,
+                    decoration: BoxDecoration(
+                      color: candidateData.isNotEmpty
+                          ? Colors.red.withOpacity(0.28)
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: candidateData.isNotEmpty
+                            ? Colors.red
+                            : Colors.grey.shade300,
+                        width: candidateData.isNotEmpty ? 2 : 1,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
                     ),
+                    child: absentMembers.isEmpty
+                        ? const Align(
+                            alignment: Alignment.center,
+                            child: Text(
+                              'ここにドラッグして欠席にする',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          )
+                        : Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: absentMembers.map((uid) {
+                              final member = widget.members.firstWhere(
+                                (m) => m['uid'] == uid,
+                                orElse: () => {},
+                              );
+
+                              if (member.isEmpty) return const SizedBox.shrink();
+
+                              final name = member['name'] ?? '名前未設定';
+
+                              return Draggable<Map<String, dynamic>>(
+                                data: member,
+                                feedback: Material(
+                                  color: Colors.transparent,
+                                  child: Chip(
+                                    avatar: const Icon(Icons.person_off, size: 18),
+                                    label: Text(name, style: const TextStyle(fontSize: 12)),
+                                    backgroundColor: Colors.grey[400],
+                                  ),
+                                ),
+                                childWhenDragging: const SizedBox.shrink(),
+                                child: Chip(
+                                  avatar: const Icon(Icons.person_off, size: 18),
+                                  label: Text(name, style: const TextStyle(fontSize: 12)),
+                                  backgroundColor: Colors.grey[300],
+                                ),
+                              );
+                            }).toList(),
+                          ),
                   );
                 },
               ),
@@ -1116,48 +1340,10 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
               Center(
                 child: Column(
                   children: [
-                    ElevatedButton(
-                      onPressed: _saveTentativeData,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 12),
-                      ),
-                      child: const Text(
-                        'メンバーの成績を仮保存する',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
                     TextButton(
-                      onPressed: () {
-                        setState(() {
-                          // Clear all relevant input fields and lists
-                          for (int i = 0; i < 9; i++) {
-                            atBatList[i] = 0;
-                            _selectedLeftList[i] = List.filled(10, null);
-                            _selectedRightList[i] = List.filled(10, null);
-                            _selectedBuntDetail[i] = List.filled(10, null);
-                            _firstPitchSwingFlags[i] = List.filled(10, false);
-
-                            for (int j = 0; j < 10; j++) {
-                              _swingControllers[i][j].text = '0';
-                              _missSwingControllers[i][j].text = '0';
-                              _batterPitchCountControllers[i][j].text = '0';
-                              _rbisControllers[i][j].text = '0';
-                              _runsControllers[i][j].text = '0';
-                              _stealsAttemptsControllers[i][j].text = '0';
-                              _stealsControllers[i][j].text = '0';
-                              _caughtStealingByRunnerControllers[i][j].text =
-                                  '0';
-                            }
-                          }
-                          _expandedAtBatIndexes.clear();
-                          selectedIndex = null;
-                        });
-                        _saveFormData();
-                      },
+                      onPressed: _resetAllData,
                       child: const Text(
-                        'データをリセット',
+                        '打撃を全てリセット',
                         style: TextStyle(color: Colors.red),
                       ),
                     ),
@@ -1172,6 +1358,25 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
   );
   }
 
+  @override
+  bool get wantKeepAlive => true;
+  @override
+  void dispose() {
+    if (widget.controller?._save == _saveTentativeData) {
+      widget.controller?._save = null;
+    }
+
+    if (widget.controller?._reset == _resetStatsOnly) {
+      widget.controller?._reset = null;
+    }
+
+    if (widget.controller?._refreshAbsent != null) {
+      widget.controller?._refreshAbsent = null;
+    }
+
+    super.dispose();
+  }
+
   Future<void> _saveTentativeData({bool showSnackbar = true}) async {
     for (int i = 0; i < battingOrderMembers.length; i++) {
       final member = battingOrderMembers[i];
@@ -1180,21 +1385,26 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
       if (role.contains('監督') || role.contains('マネージャー')) continue;
 
       final String uid = member['uid'];
-      final collectionRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('tentative');
 
-      final querySnapshot = await collectionRef
-          .orderBy('savedAt', descending: true)
-          .orderBy('updatedAt', descending: true)
-          .limit(1)
-          .get();
+      // --- 欠席者は保存しない & 今回の tentative データだけ削除 ---
+      if (absentMembers.contains(uid)) {
+        final docRef = FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('tentative')
+            .doc(widget.tentativeDocId);
+        try {
+          await docRef.delete();
+        } catch (_) {}
+        continue;
+      }
 
       final DocumentReference<Map<String, dynamic>> docRef =
-          querySnapshot.docs.isNotEmpty
-              ? collectionRef.doc(querySnapshot.docs.first.id)
-              : collectionRef.doc();
+          FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .collection('tentative')
+              .doc(widget.tentativeDocId);
 
       List<Map<String, dynamic>> atBats = [];
       for (int j = 0; j < atBatList[i]; j++) {
@@ -1225,6 +1435,18 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
 
       final currentGame =
           Map<String, dynamic>.from(updatedGames[widget.matchIndex] ?? {});
+
+      final rawGameDate = widget.gameInfo['gameDate'];
+      final Timestamp gameDateTimestamp = rawGameDate is Timestamp
+          ? rawGameDate
+          : rawGameDate is DateTime
+              ? Timestamp.fromDate(rawGameDate)
+              : Timestamp.now();
+
+      currentGame['gameType'] = widget.gameInfo['gameType'] ?? '';
+      currentGame['location'] = widget.gameInfo['location'] ?? '';
+      currentGame['opponent'] = widget.gameInfo['opponent'] ?? '';
+      currentGame['gameDate'] = gameDateTimestamp;
       currentGame['atBats'] = atBats;
       currentGame['rbis'] = int.tryParse(_rbisControllers[i][0].text) ?? 0;
       currentGame['runs'] = int.tryParse(_runsControllers[i][0].text) ?? 0;
@@ -1249,7 +1471,7 @@ class _ManagerGameInputBattingState extends State<ManagerGameInputBatting> {
       // --- END PATCH ---
     }
 
-        if (showSnackbar && mounted) {
+    if (showSnackbar && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('仮保存しました')),
       );

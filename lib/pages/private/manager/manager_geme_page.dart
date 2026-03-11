@@ -6,11 +6,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class ManagerGemePage extends StatefulWidget {
   final String userUid;
   final String teamId;
+  final bool useTeamTentative;
 
   const ManagerGemePage({
     super.key,
     required this.userUid,
     required this.teamId,
+    this.useTeamTentative = false,
   });
 
   @override
@@ -27,10 +29,8 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
     final now = Timestamp.now();
     final todayStart =
         DateTime(now.toDate().year, now.toDate().month, now.toDate().day);
-    final tentativeCollection = FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('tentative');
+
+        final tentativeCollection = _tentativeCollection();
 
     final snapshot = await tentativeCollection.get();
 
@@ -61,11 +61,12 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
 
       await docRef.set({
         'createdAt': Timestamp.fromDate(todayStart),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'savedAt': FieldValue.serverTimestamp(),
         'data': {
           'games': games,
         },
         'numberOfMatches': games.length,
-        'savedAt': FieldValue.serverTimestamp(),
       });
     } else {
       final docRef = snapshot.docs.firstWhere((doc) {
@@ -95,12 +96,27 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
       rawGames[matchIndex] = mergedGame;
 
       await docRef.update({
+        'updatedAt': FieldValue.serverTimestamp(),
+        'savedAt': FieldValue.serverTimestamp(),
         'data': {'games': rawGames},
         'numberOfMatches': rawGames.length,
-        'savedAt': FieldValue.serverTimestamp(),
       });
     }
   }
+
+  CollectionReference<Map<String, dynamic>> _tentativeCollection() {
+  if (widget.useTeamTentative) {
+    return FirebaseFirestore.instance
+        .collection('teams')
+        .doc(widget.teamId)
+        .collection('tentative');
+  }
+
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(widget.userUid)
+      .collection('tentative');
+}
 
   final List<TextEditingController> _opponentControllers = [];
   final List<TextEditingController> _locationControllers = [];
@@ -119,11 +135,7 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
     final todayStart =
         DateTime(now.toDate().year, now.toDate().month, now.toDate().day);
 
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.userUid)
-        .collection('tentative')
-        .get();
+        final snapshot = await _tentativeCollection().get();
 
     for (var doc in snapshot.docs) {
       final createdAt = doc.data()['createdAt'];
@@ -167,8 +179,8 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('試合情報入力'),
-        automaticallyImplyLeading: false,
+        title: const Text('試合情報入力'),
+        automaticallyImplyLeading: widget.useTeamTentative,
       ),
       body: Stack(
         children: [
@@ -319,53 +331,35 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
                                       return;
                                     }
 
-                                    final List<Map<String, dynamic>> members =
-                                        [];
-                                    for (final uid in memberUids) {
-                                      final userDoc = await FirebaseFirestore
-                                          .instance
-                                          .collection('users')
-                                          .doc(uid)
-                                          .get();
-                                      members.add({
-                                        'uid': uid,
-                                        'name': userDoc['name'] ?? '',
-                                        'positions': userDoc['positions'] ?? [],
-                                      });
+                              // 試合情報を tentative に保存してから次画面へ渡す
+                              final gameInfo = {
+                                'gameType': _matchTypes[i],
+                                'location': _locationControllers[i].text,
+                                'opponent': _opponentControllers[i].text,
+                                'gameDate': Timestamp.now(),
+                              };
 
-                                      // 最新のmatchIndexを取得
-                                      int matchIndex = i;
-                                      final docSnapshot =
-                                          await FirebaseFirestore.instance
-                                              .collection('users')
-                                              .doc(uid)
-                                              .collection('tentative')
-                                              .orderBy('createdAt',
-                                                  descending: true)
-                                              .limit(1)
-                                              .get();
-                                      if (docSnapshot.docs.isNotEmpty) {
-                                        final data =
-                                            docSnapshot.docs.first.data();
-                                        if (data['data']?['games'] is Map) {
-                                          matchIndex =
-                                              (data['data']['games'] as Map)
-                                                  .length;
-                                        }
-                                      }
+                              // Firestore を並列で取得（高速化）
+                              final userDocs = await Future.wait(
+                                memberUids.map((uid) => FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(uid)
+                                    .get()),
+                              );
 
-                                      // Build gameData before saving
-                                      final gameData = {
-                                        'gameType': _matchTypes[i],
-                                        'location':
-                                            _locationControllers[i].text,
-                                        'opponent':
-                                            _opponentControllers[i].text,
-                                      };
+                              final List<Map<String, dynamic>> members = [];
 
-                                      await saveTentativeGameData(
-                                          uid, gameData, matchIndex);
-                                    }
+                              for (final userDoc in userDocs) {
+                                final data = userDoc.data() ?? {};
+
+                                members.add({
+                                  'uid': userDoc.id,
+                                  'name': data['name'] ?? '',
+                                  'positions': data['positions'] ?? [],
+                                  'isTeamMemberOnly': data['isTeamMemberOnly'] ?? false,
+                                });
+                              }
+                              await saveTentativeGameData(widget.userUid, gameInfo, i);
 
                                     if (!mounted) return;
                                     await Navigator.push(
@@ -377,6 +371,7 @@ class _ManagerGemePageState extends State<ManagerGemePage> {
                                           userUid: widget.userUid,
                                           teamId: widget.teamId,
                                           members: members,
+                                          gameInfo: gameInfo,
                                         ),
                                       ),
                                     );

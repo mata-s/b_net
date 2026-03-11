@@ -63,6 +63,7 @@ class _HomePageState extends State<HomePage> {
   // --- team invites
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _teamInvitesSubscription;
   QueryDocumentSnapshot<Map<String, dynamic>>? _pendingInviteDoc;
+  QueryDocumentSnapshot<Map<String, dynamic>>? _pendingTentativeDoc;
 
   @override
   void initState() {
@@ -71,6 +72,7 @@ class _HomePageState extends State<HomePage> {
     _fetchUnreadMessageCount();
     _listenOngoingGoals();
     _listenPendingTeamInvites();
+    _listenPendingTentative();
     _checkSubscriptionStatus().then((_) {
       _initializePages();
     });
@@ -151,6 +153,75 @@ class _HomePageState extends State<HomePage> {
       },
       onError: (error) {
         debugPrint('goals snapshots error: $error');
+      },
+    );
+  }
+
+  /// tentative の最新仮保存を監視して、ホーム上に通知表示する
+  void _listenPendingTentative() {
+    final uid = widget.userUid;
+    if (uid.isEmpty) return;
+
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('tentative')
+        .snapshots()
+        .listen(
+      (snapshot) {
+        if (!mounted) return;
+
+        if (snapshot.docs.isEmpty) {
+          setState(() {
+            _pendingTentativeDoc = null;
+          });
+          return;
+        }
+
+        DateTime extractDate(Map<String, dynamic> data) {
+          final candidates = [
+            data['updatedAt'],
+            data['savedAt'],
+            data['createdAt'],
+          ];
+
+          for (final value in candidates) {
+            if (value is Timestamp) return value.toDate();
+            if (value is DateTime) return value;
+          }
+          return DateTime.fromMillisecondsSinceEpoch(0);
+        }
+
+        final docs = [...snapshot.docs];
+        docs.sort((a, b) {
+          final aDate = extractDate(a.data());
+          final bDate = extractDate(b.data());
+          return bDate.compareTo(aDate);
+        });
+
+        final latest = docs.first;
+        final latestData = latest.data();
+        final rootData = latestData['data'];
+        final games = rootData is Map<String, dynamic> ? rootData['games'] : null;
+
+        if (games is! List || games.isEmpty) {
+          setState(() {
+            _pendingTentativeDoc = null;
+          });
+          return;
+        }
+
+        final hasAnyGameData = games.any((game) {
+          if (game is! Map) return false;
+          return game.isNotEmpty;
+        });
+
+        setState(() {
+          _pendingTentativeDoc = hasAnyGameData ? latest : null;
+        });
+      },
+      onError: (error) {
+        debugPrint('tentative snapshots error: $error');
       },
     );
   }
@@ -496,6 +567,43 @@ class _HomePageState extends State<HomePage> {
         _currentIndex = 0; // または別の有効なインデックス
       });
     }
+  }
+
+  String _buildTentativeBannerText() {
+    final data = _pendingTentativeDoc?.data();
+    if (data == null) return '仮保存データがあります';
+
+    final rootData = data['data'];
+    final games = rootData is Map<String, dynamic> ? rootData['games'] : null;
+    if (games is! List || games.isEmpty) return '仮保存データがあります';
+
+    Map<String, dynamic>? targetGame;
+    for (final game in games) {
+      if (game is Map && game.isNotEmpty) {
+        targetGame = Map<String, dynamic>.from(game);
+        break;
+      }
+    }
+
+    if (targetGame == null) return '仮保存データがあります';
+
+    final opponent = (targetGame['opponent'] as String?)?.trim() ?? '相手未設定';
+    final rawGameDate = targetGame['gameDate'];
+
+    DateTime? gameDate;
+    if (rawGameDate is Timestamp) {
+      gameDate = rawGameDate.toDate();
+    } else if (rawGameDate is DateTime) {
+      gameDate = rawGameDate;
+    } else if (rawGameDate is String && rawGameDate.isNotEmpty) {
+      gameDate = DateTime.tryParse(rawGameDate);
+    }
+
+    if (gameDate != null) {
+      return '仮保存があります：${gameDate.month}月${gameDate.day}日の${opponent}との試合';
+    }
+
+    return '仮保存があります：${opponent}との試合';
   }
 
   @override
@@ -1032,6 +1140,43 @@ class _HomePageState extends State<HomePage> {
                   },
                 );
               },
+            ),
+          if (_pendingTentativeDoc != null &&
+              !(widget.userPosition.contains('監督') ||
+                widget.userPosition.contains('マネージャー')))
+            GestureDetector(
+              onTap: () {
+                _onTabTapped(1);
+              },
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFA5D6A7)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.sports_baseball, color: Color(0xFF2E7D32)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _buildTentativeBannerText(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF1B5E20),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: Color(0xFF2E7D32)),
+                  ],
+                ),
+              ),
             ),
           Expanded(
             child: _pages.isNotEmpty

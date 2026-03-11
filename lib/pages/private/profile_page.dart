@@ -35,6 +35,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _isLoading = true;
   String? _personalPlanName;
   bool _isPersonalSubscribed = false;
+  bool _showAgeOnProfile = true;
 
   @override
   void initState() {
@@ -55,6 +56,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _positions = List<String>.from(userDoc.data()?['positions'] ?? []);
         _teams = List<String>.from(userDoc.data()?['teams'] ?? []);
         _bio = userDoc.data()?['include'] ?? '';
+        _showAgeOnProfile = userDoc.data()?['showAgeOnProfile'] ?? true;
         _nameController.text = _userName ?? '';
 
         final birthdayValue = userDoc.data()?['birthday'];
@@ -80,6 +82,28 @@ class _ProfilePageState extends State<ProfilePage> {
 
         _isLoading = false;
       });
+    }
+  }
+  Future<void> _updateShowAgeOnProfile(bool value) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    setState(() {
+      _showAgeOnProfile = value;
+    });
+
+    try {
+      await _firestore.collection('users').doc(user.uid).set({
+        'showAgeOnProfile': value,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      setState(() {
+        _showAgeOnProfile = !value;
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('年齢表示の設定更新に失敗しました')),
+      );
     }
   }
 
@@ -717,13 +741,24 @@ class _ProfilePageState extends State<ProfilePage> {
                                   size: 20,
                                   color: Colors.grey), // 📍 位置アイコン（都道府県）
                               const SizedBox(width: 5), // 🔹 アイコンとテキストの間に余白を追加
-                              if (_age != null)
-                                Text('${_formatBirthday(_birthday!)} $_age歳',
-                                    style: const TextStyle(
-                                        fontSize: 16, color: Colors.grey)),
+                              if (_birthday != null)
+                                Text(
+                                  _showAgeOnProfile && _age != null
+                                      ? '${_formatBirthday(_birthday!)} $_age歳'
+                                      : _formatBirthday(_birthday!),
+                                  style: const TextStyle(
+                                      fontSize: 16, color: Colors.grey),
+                                ),
                             ],
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 8),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('年齢をプロフィールに表示'),
+                        value: _showAgeOnProfile,
+                        onChanged: _updateShowAgeOnProfile,
                       ),
                       const SizedBox(height: 10),
                       const Divider(),

@@ -610,7 +610,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
-                                        if (data['birthday'] != null)
+                                        if (data['birthday'] != null &&
+                                            (data['showAgeOnProfile'] ?? true))
                                           Padding(
                                             padding:
                                                 const EdgeInsets.only(top: 8),

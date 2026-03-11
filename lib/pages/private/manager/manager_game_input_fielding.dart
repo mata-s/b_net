@@ -8,11 +8,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ManagerGameInputFieldingController {
   Future<void> Function({bool showSnackbar})? _save;
+  VoidCallback? _reset;
+  bool _pendingReset = false;
 
   Future<void> save({bool showSnackbar = true}) async {
     final save = _save;
     if (save != null) {
       await save(showSnackbar: showSnackbar);
+    }
+  }
+
+  void reset() {
+    if (_reset != null) {
+      _reset!.call();
+    } else {
+      _pendingReset = true;
+    }
+  }
+
+  Future<void> Function()? _refreshAbsent;
+
+  Future<void> refreshAbsent() async {
+    final refresh = _refreshAbsent;
+    if (refresh != null) {
+      await refresh();
     }
   }
 }
@@ -21,6 +40,8 @@ class ManagerGameInputFielding extends StatefulWidget {
   final String userUid;
   final String teamId;
   final List<Map<String, dynamic>> members;
+  final Map<String, dynamic> gameInfo;
+  final String tentativeDocId;
   final int matchIndex;
   final ManagerGameInputFieldingController? controller;
 
@@ -29,6 +50,8 @@ class ManagerGameInputFielding extends StatefulWidget {
     required this.userUid,
     required this.teamId,
     required this.members,
+    required this.gameInfo,
+    required this.tentativeDocId,
     required this.matchIndex,
     this.controller,
   }) : super(key: key);
@@ -38,19 +61,21 @@ class ManagerGameInputFielding extends StatefulWidget {
       _ManagerGameInputFieldingState();
 }
 
-class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
+class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding>
+    with AutomaticKeepAliveClientMixin {
   late Map<String, Offset> memberPositions;
+  Set<String> absentMembers = {};
 
   Map<String, Offset> positionRatios = {
-    '投手': Offset(0.36, 0.60),
-    '捕手': Offset(0.36, 0.82),
+    '投手': Offset(0.38, 0.60),
+    '捕手': Offset(0.38, 0.82),
     '一塁': Offset(0.60, 0.55),
-    '二塁': Offset(0.50, 0.45),
-    '三塁': Offset(0.13, 0.55),
-    '遊撃': Offset(0.20, 0.45),
-    '左翼': Offset(0.15, 0.32),
-    '中堅': Offset(0.36, 0.25),
-    '右翼': Offset(0.57, 0.32),
+    '二塁': Offset(0.54, 0.45),
+    '三塁': Offset(0.15, 0.55),
+    '遊撃': Offset(0.22, 0.45),
+    '左翼': Offset(0.17, 0.32),
+    '中堅': Offset(0.38, 0.25),
+    '右翼': Offset(0.59, 0.32),
   };
 
   double fieldWidth = 0;
@@ -59,6 +84,7 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
   final ScrollController _scrollController = ScrollController();
   bool _isDragging = false;
   Offset? _dragStartGlobalPosition;
+  bool _dragStartedFromBench = false;
 
   // --- Controllers for input fields ---
   late List<TextEditingController> _putoutsControllers;
@@ -95,6 +121,22 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
     for (int i = 0; i < members.length; i++) {
       final member = members[i];
       final uid = member['uid'];
+
+      // --- 欠席者は保存しない & 今回の tentative データだけ削除 ---
+      if (absentMembers.contains(uid)) {
+        final docRef = FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('tentative')
+            .doc(widget.tentativeDocId);
+
+        try {
+          await docRef.delete();
+        } catch (_) {}
+
+        continue;
+      }
+
       final positionLabel = member['position'] ?? '';
       // ignore: unused_local_variable
       final name = member['name']?.toString() ?? 'No Name';
@@ -115,31 +157,44 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
       // This line is added as per instructions:
       // Store the positions array into gameData
 
-      // --- Firestore tentative document reuse logic ---
-      final tentativeCollection = FirebaseFirestore.instance
+      // --- Firestore tentative document fixed per session ---
+      final DocumentReference docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .collection('tentative');
-
-      final querySnapshot = await tentativeCollection
-          .orderBy('savedAt', descending: true)
-          .limit(1)
-          .get();
-
-      DocumentReference docRef;
-
-      if (querySnapshot.docs.isNotEmpty) {
-        docRef = querySnapshot.docs.first.reference;
-      } else {
-        docRef = tentativeCollection.doc();
-      }
+          .collection('tentative')
+          .doc(widget.tentativeDocId);
 
       // Use matchIndex as gameIndex
       final int gameIndex = matchIndex;
       final Map<String, dynamic> gameData = {};
 
+      final rawGameDate = widget.gameInfo['gameDate'];
+      final Timestamp gameDateTimestamp = rawGameDate is Timestamp
+          ? rawGameDate
+          : rawGameDate is DateTime
+              ? Timestamp.fromDate(rawGameDate)
+              : Timestamp.now();
+
+      gameData['gameType'] = widget.gameInfo['gameType'] ?? '';
+      gameData['location'] = widget.gameInfo['location'] ?? '';
+      gameData['opponent'] = widget.gameInfo['opponent'] ?? '';
+      gameData['gameDate'] = gameDateTimestamp;
+
       // Store positions array in gameData
       gameData['positions'] = positionsList;
+
+      // --- Fielding stats (刺殺 / 捕殺 / 失策) ---
+      gameData['putouts'] = int.tryParse(_putoutsControllers[i].text) ?? 0;
+      gameData['assists'] = int.tryParse(_assistsControllers[i].text) ?? 0;
+      gameData['errors'] = int.tryParse(_errorsControllers[i].text) ?? 0;
+
+      // 捕手専用
+      if (positionsList.contains('捕手')) {
+        gameData['stolenBaseAttempts'] =
+            int.tryParse(_stolenBaseAttemptsControllers[i].text) ?? 0;
+        gameData['caughtStealing'] =
+            int.tryParse(_caughtStealingControllers[i].text) ?? 0;
+      }
 
       final List<String> positionsListPitch = (raw is String)
           ? [raw]
@@ -226,8 +281,151 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
     }
   }
 
+  Future<void> _resetAllData() async {
+    for (int i = 0; i < widget.members.length; i++) {
+      final uid = widget.members[i]['uid'];
+      final prefs = await SharedPreferences.getInstance();
+      final keys = [
+        'putouts_$i',
+        'assists_$i',
+        'errors_$i',
+        'stolenBaseAttempts_$i',
+        'caughtStealing_$i',
+        'walks_$i',
+        'hitByPitch_$i',
+        'runsAllowed_$i',
+        'earnedRuns_$i',
+        'hitsAllowed_$i',
+        'strikeouts_$i',
+        'homeRunsAllowed_$i',
+        'pitchCount_$i',
+        'battersFaced_$i',
+        'inningsThrow_$i',
+        'appearanceType_$i',
+        'isCompleteGame_$i',
+        'isShutoutGame_$i',
+        'isHold_$i',
+        'isSave_$i',
+        'result_$i',
+        'outFraction_$i',
+      ];
+
+      for (final key in keys) {
+        await prefs.remove('$uid-$key');
+      }
+
+      _putoutsControllers[i].text = '0';
+      _assistsControllers[i].text = '0';
+      _errorsControllers[i].text = '0';
+      _stolenBaseAttemptsControllers[i].text = '0';
+      _caughtStealingControllers[i].text = '0';
+      _walksControllers[i].text = '0';
+      _hitByPitchControllers[i].text = '0';
+      _runsAllowedControllers[i].text = '0';
+      _earnedRunsControllers[i].text = '0';
+      _hitsAllowedControllers[i].text = '0';
+      _strikeoutsControllers[i].text = '0';
+      _homeRunsAllowedControllers[i].text = '0';
+      _pitchCountControllers[i].text = '0';
+      _battersFacedControllers[i].text = '0';
+      _inningsThrowControllers[i].text = '0';
+      _selectedAppearanceType[i] = null;
+      _resultList[i] = null;
+      _outFractionList[i] = null;
+      _isCompleteGame[i] = false;
+      _isShutoutGame[i] = false;
+      _isHold[i] = false;
+      _isSave[i] = false;
+    }
+
+    setState(() {
+      memberPositions = {};
+      absentMembers = {};
+    });
+    await saveMemberPositions();
+  }
+
+  Future<void> _resetStatsOnly() async {
+    for (int i = 0; i < widget.members.length; i++) {
+      final uid = widget.members[i]['uid'];
+      final prefs = await SharedPreferences.getInstance();
+
+      final keys = [
+        'putouts_$i',
+        'assists_$i',
+        'errors_$i',
+        'stolenBaseAttempts_$i',
+        'caughtStealing_$i',
+        'walks_$i',
+        'hitByPitch_$i',
+        'runsAllowed_$i',
+        'earnedRuns_$i',
+        'hitsAllowed_$i',
+        'strikeouts_$i',
+        'homeRunsAllowed_$i',
+        'pitchCount_$i',
+        'battersFaced_$i',
+        'inningsThrow_$i',
+        'appearanceType_$i',
+        'isCompleteGame_$i',
+        'isShutoutGame_$i',
+        'isHold_$i',
+        'isSave_$i',
+        'result_$i',
+        'outFraction_$i',
+      ];
+
+      for (final key in keys) {
+        await prefs.remove('$uid-$key');
+      }
+
+      _putoutsControllers[i].text = '0';
+      _assistsControllers[i].text = '0';
+      _errorsControllers[i].text = '0';
+      _stolenBaseAttemptsControllers[i].text = '0';
+      _caughtStealingControllers[i].text = '0';
+      _walksControllers[i].text = '0';
+      _hitByPitchControllers[i].text = '0';
+      _runsAllowedControllers[i].text = '0';
+      _earnedRunsControllers[i].text = '0';
+      _hitsAllowedControllers[i].text = '0';
+      _strikeoutsControllers[i].text = '0';
+      _homeRunsAllowedControllers[i].text = '0';
+      _pitchCountControllers[i].text = '0';
+      _battersFacedControllers[i].text = '0';
+      _inningsThrowControllers[i].text = '0';
+      _selectedAppearanceType[i] = null;
+      _resultList[i] = null;
+      _outFractionList[i] = null;
+      _isCompleteGame[i] = false;
+      _isShutoutGame[i] = false;
+      _isHold[i] = false;
+      _isSave[i] = false;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      absentMembers = {};
+    });
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void dispose() {
+    if (widget.controller?._save == _saveTentativeData) {
+      widget.controller?._save = null;
+    }
+
+    if (widget.controller?._reset != null) {
+      widget.controller?._reset = null;
+    }
+
+    if (widget.controller?._refreshAbsent != null) {
+      widget.controller?._refreshAbsent = null;
+    }
+
     _scrollController.dispose();
     super.dispose();
   }
@@ -286,6 +484,14 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
       }
     });
     widget.controller?._save = _saveTentativeData;
+    widget.controller?._reset = _resetStatsOnly;
+
+    widget.controller?._refreshAbsent = _refreshAbsentMembers;
+
+    if (widget.controller?._pendingReset == true) {
+      widget.controller?._pendingReset = false;
+      _resetStatsOnly();
+    }
   }
 
   /// Save all fielding data for a given member (index, uid) to SharedPreferences.
@@ -552,11 +758,19 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
     });
     await prefs.setString(
         'member_positions_${widget.teamId}', json.encode(positionsJson));
+    await prefs.setStringList(
+      'absent_members_${widget.teamId}',
+      absentMembers.toList(),
+    );
   }
 
   Future<void> loadMemberPositions() async {
     final prefs = await SharedPreferences.getInstance();
     final jsonString = prefs.getString('member_positions_${widget.teamId}');
+    final absentList = prefs.getStringList('absent_members_${widget.teamId}');
+    if (absentList != null) {
+      absentMembers = absentList.toSet();
+    }
     if (jsonString != null && fieldWidth > 0 && fieldHeight > 0) {
       final Map<String, dynamic> decoded = json.decode(jsonString);
       setState(() {
@@ -569,6 +783,15 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
       });
     }
   }
+
+  Future<void> _refreshAbsentMembers() async {
+  final prefs = await SharedPreferences.getInstance();
+  final absentList = prefs.getStringList('absent_members_${widget.teamId}');
+  if (!mounted) return;
+  setState(() {
+    absentMembers = absentList?.toSet() ?? {};
+  });
+}
 
   void _showTentativeInputDialog(
       String uid, String name, int matchIndex) async {
@@ -677,7 +900,7 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
   List<Widget> buildPitcherStatsWidgets() {
     List<Widget> widgets = [];
 
-    const pitcherOffset = Offset(0.36, 0.60); // 投手の配置座標
+    const pitcherOffset = Offset(0.38, 0.60); // 投手の配置座標（positionRatiosと一致させる）
 
     for (int i = 0; i < widget.members.length; i++) {
       final user = widget.members[i];
@@ -980,6 +1203,7 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final double height = constraints.maxHeight * 0.8;
@@ -996,7 +1220,7 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
 
         // 投手が該当位置にいる場合に「投手」と表示
         bool shouldShowPitcherLabel = false;
-        const pitcherOffset = Offset(0.36, 0.60);
+        const pitcherOffset = Offset(0.38, 0.60);
         widget.members.forEach((member) {
           final uid = member['uid'];
           final positions = member['positions'];
@@ -1027,10 +1251,10 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
 
               const edgeThreshold = 100; // distance from edge to trigger scroll
               const scrollSpeed = 15.0;
-              const dragActivationDistance = 200.0; // 少し大きめに動くまでは自動スクロールしない
 
-              // Start the top auto-scroll zone below status bar + (potential) AppBar height
-              final topTriggerY = mediaQuery.padding.top + kToolbarHeight;
+              // Start the top auto-scroll zone below status bar + (potential) AppBar height + extra offset for inning/save UI
+              const extraTopOffset = 120.0; // space for inning / save UI added above
+              final topTriggerY = mediaQuery.padding.top + kToolbarHeight + extraTopOffset;
               // Start bottom auto-scroll after passing bench area (rough offset adjustment)
               final bottomTriggerY =
                   screenHeight - mediaQuery.padding.bottom - 200;
@@ -1040,18 +1264,16 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
               final startY = _dragStartGlobalPosition?.dy;
               if (startY == null) return;
 
-              final movedEnough =
-                  (currentY - startY).abs() >= dragActivationDistance;
-
-              if (!movedEnough) return;
 
               if (currentY < topTriggerY + edgeThreshold) {
                 // Scroll up
                 final target = (_scrollController.offset - scrollSpeed)
                     .clamp(0.0, _scrollController.position.maxScrollExtent);
                 _scrollController.jumpTo(target);
-              } else if (currentY > bottomTriggerY - edgeThreshold) {
-                // Scroll down
+              } else if (
+                  !_dragStartedFromBench &&
+                  currentY > bottomTriggerY - edgeThreshold) {
+                // Scroll down only when the drag did not start from the bench.
                 final target = (_scrollController.offset + scrollSpeed)
                     .clamp(0.0, _scrollController.position.maxScrollExtent);
                 _scrollController.jumpTo(target);
@@ -1186,6 +1408,7 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                                     child: Draggable<String>(
                                       data: uid,
                                       onDragStarted: () {
+                                        _dragStartedFromBench = false;
                                         _isDragging = true;
                                         _dragStartGlobalPosition = null;
                                       },
@@ -1193,10 +1416,12 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                                         _dragStartGlobalPosition ??= details.globalPosition;
                                       },
                                       onDragEnd: (_) {
+                                        _dragStartedFromBench = false;
                                         _isDragging = false;
                                         _dragStartGlobalPosition = null;
                                       },
                                       onDraggableCanceled: (_, __) {
+                                        _dragStartedFromBench = false;
                                         _isDragging = false;
                                         _dragStartGlobalPosition = null;
                                       },
@@ -1237,153 +1462,164 @@ class _ManagerGameInputFieldingState extends State<ManagerGameInputFielding> {
                   onWillAccept: (data) => true,
                   onAccept: (data) {
                     setState(() {
-                      memberPositions.remove(data); // Remove from field
+                      memberPositions.remove(data); // Remove from field (return to bench)
                     });
                     saveMemberPositions();
                   },
                   builder: (context, candidateData, rejectedData) {
+                    final benchMembers = widget.members
+                        .where((m) =>
+                            !memberPositions.containsKey(m['uid']) &&
+                            !absentMembers.contains(m['uid']))
+                        .toList();
+
                     return Container(
                       padding: const EdgeInsets.all(8),
+                      constraints: const BoxConstraints(minHeight: 120),
+                      alignment: Alignment.centerLeft,
                       decoration: BoxDecoration(
                         color: candidateData.isNotEmpty
-                            ? Colors.blue.withOpacity(0.2)
+                            ? Colors.blue.withOpacity(0.28)
                             : Colors.transparent,
-                        border: Border.all(color: Colors.grey.shade300),
+                        border: Border.all(
+                          color: candidateData.isNotEmpty
+                              ? Colors.blue
+                              : Colors.grey.shade300,
+                          width: candidateData.isNotEmpty ? 2 : 1,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: widget.members
-                            .where(
-                                (m) => !memberPositions.containsKey(m['uid']))
-                            .map((member) {
-                          final uid = member['uid'];
-                          final name = member['name'] ?? '名前未設定';
-                          return GestureDetector(
-                            onTap: () {
-                              _showTentativeInputDialog(
-                                  uid, name, widget.matchIndex);
-                            },
-                            child: Draggable<String>(
-                              data: uid,
-                              onDragStarted: () {
-                                _isDragging = true;
-                                _dragStartGlobalPosition = null;
-                              },
-                              onDragUpdate: (details) {
-                                _dragStartGlobalPosition ??= details.globalPosition;
-                              },
-                              onDragEnd: (_) {
-                                _isDragging = false;
-                                _dragStartGlobalPosition = null;
-                              },
-                              onDraggableCanceled: (_, __) {
-                                _isDragging = false;
-                                _dragStartGlobalPosition = null;
-                              },
-                              feedback: Material(
-                                color: Colors.transparent,
-                                child: Chip(
-                                  label: Text(name, style: const TextStyle(fontSize: 12)),
-                                  elevation: 6,
-                                  backgroundColor: Colors.orange[200],
-                                ),
+                      child: benchMembers.isEmpty
+                          ? const Align(
+                              alignment: Alignment.center,
+                              child: Text(
+                                'ここにドラッグしてベンチへ戻す',
+                                style: TextStyle(color: Colors.grey),
                               ),
-                              childWhenDragging: Opacity(
-                                opacity: 0.5,
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: Chip(
-                                    label: Text(name,
-                                        style: const TextStyle(fontSize: 12)),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 4, vertical: 2),
+                            )
+                          : Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: benchMembers.map((member) {
+                                final uid = member['uid'];
+                                final name = member['name'] ?? '名前未設定';
+                                return GestureDetector(
+                                  onTap: () {
+                                    _showTentativeInputDialog(
+                                        uid, name, widget.matchIndex);
+                                  },
+                                  child: Draggable<String>(
+                                    data: uid,
+                                    onDragStarted: () {
+                                      _dragStartedFromBench = true;
+                                      _isDragging = true;
+                                      _dragStartGlobalPosition = null;
+                                    },
+                                    onDragUpdate: (details) {
+                                      _dragStartGlobalPosition ??= details.globalPosition;
+                                    },
+                                    onDragEnd: (_) {
+                                      _dragStartedFromBench = false;
+                                      _isDragging = false;
+                                      _dragStartGlobalPosition = null;
+                                    },
+                                    onDraggableCanceled: (_, __) {
+                                      _dragStartedFromBench = false;
+                                      _isDragging = false;
+                                      _dragStartGlobalPosition = null;
+                                    },
+                                    feedback: Material(
+                                      color: Colors.transparent,
+                                      child: Chip(
+                                        label: Text(name, style: const TextStyle(fontSize: 12)),
+                                        elevation: 6,
+                                        backgroundColor: Colors.orange[200],
+                                      ),
+                                    ),
+                                    childWhenDragging: Opacity(
+                                      opacity: 0.5,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: Chip(
+                                          label: Text(name,
+                                              style: const TextStyle(fontSize: 12)),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 4, vertical: 2),
+                                        ),
+                                      ),
+                                    ),
+                                    child: Chip(
+                                      label: Text(name,
+                                          style: const TextStyle(fontSize: 12)),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 4, vertical: 2),
+                                    ),
                                   ),
-                                ),
-                              ),
-                              child: Chip(
-                                label: Text(name,
-                                    style: const TextStyle(fontSize: 12)),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 4, vertical: 2),
-                              ),
+                                );
+                              }).toList(),
                             ),
-                          );
-                        }).toList(),
-                      ),
                     );
                   },
                 ),
-                const SizedBox(height: 48),
-                // 保存ボタン
-                ElevatedButton(
-                  onPressed: null,
-                  child: const Text('上部の保存ボタンからまとめて保存'),
-                ),
                 const SizedBox(height: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text('欠席',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 4),
+                    Text(
+                      '※ 欠席の変更は打撃タブでできます',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    SizedBox(height: 8),
+                  ],
+                ),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  constraints: const BoxConstraints(minHeight: 72),
+                  alignment: Alignment.centerLeft,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.grey.shade50,
+                  ),
+                  child: absentMembers.isEmpty
+                      ? const Align(
+                          alignment: Alignment.center,
+                          child: Text(
+                            '欠席者はいません',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        )
+                      : Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: absentMembers.map((uid) {
+                            final member = widget.members.firstWhere(
+                              (m) => m['uid'] == uid,
+                              orElse: () => <String, dynamic>{},
+                            );
+
+                            if (member.isEmpty) return const SizedBox.shrink();
+
+                            final name = member['name'] ?? '名前未設定';
+
+                            return Chip(
+                              avatar: const Icon(Icons.person_off, size: 18),
+                              label: Text(name, style: const TextStyle(fontSize: 12)),
+                              backgroundColor: Colors.grey[300],
+                            );
+                          }).toList(),
+                        ),
+                ),
+                const SizedBox(height: 48),
                 // リセットボタン
                 TextButton(
-                  onPressed: () async {
-                    for (int i = 0; i < widget.members.length; i++) {
-                      final uid = widget.members[i]['uid'];
-                      final prefs = await SharedPreferences.getInstance();
-                      List<String> keys = [
-                        'putouts_$i',
-                        'assists_$i',
-                        'errors_$i',
-                        'stolenBaseAttempts_$i',
-                        'caughtStealing_$i',
-                        'walks_$i',
-                        'hitByPitch_$i',
-                        'runsAllowed_$i',
-                        'earnedRuns_$i',
-                        'hitsAllowed_$i',
-                        'strikeouts_$i',
-                        'homeRunsAllowed_$i',
-                        'pitchCount_$i',
-                        'battersFaced_$i',
-                        'inningsThrow_$i',
-                        'appearanceType_$i',
-                        'isCompleteGame_$i',
-                        'isShutoutGame_$i',
-                        'isHold_$i',
-                        'isSave_$i',
-                        'result_$i',
-                        'outFraction_$i',
-                      ];
-
-                      for (final key in keys) {
-                        await prefs.remove('$uid-$key');
-                      }
-
-                      _putoutsControllers[i].text = '0';
-                      _assistsControllers[i].text = '0';
-                      _errorsControllers[i].text = '0';
-                      _stolenBaseAttemptsControllers[i].text = '0';
-                      _caughtStealingControllers[i].text = '0';
-                      _walksControllers[i].text = '0';
-                      _hitByPitchControllers[i].text = '0';
-                      _runsAllowedControllers[i].text = '0';
-                      _earnedRunsControllers[i].text = '0';
-                      _hitsAllowedControllers[i].text = '0';
-                      _strikeoutsControllers[i].text = '0';
-                      _homeRunsAllowedControllers[i].text = '0';
-                      _pitchCountControllers[i].text = '0';
-                      _battersFacedControllers[i].text = '0';
-                      _inningsThrowControllers[i].text = '0';
-                      _selectedAppearanceType[i] = null;
-                      _resultList[i] = null;
-                      _outFractionList[i] = null;
-                      _isCompleteGame[i] = false;
-                      _isShutoutGame[i] = false;
-                      _isHold[i] = false;
-                      _isSave[i] = false;
-                    }
-
-                    setState(() {});
-                  },
+                  onPressed: _resetAllData,
                   child: const Text(
-                    'データをリセット',
+                    '守備を全てリセット',
                     style: TextStyle(color: Colors.red),
                   ),
                 ),
@@ -1433,83 +1669,14 @@ class TentativeInputDialog extends StatefulWidget {
 }
 
 class _TentativeInputDialogState extends State<TentativeInputDialog> {
-  late String gameId;
-
   @override
   void initState() {
     super.initState();
     (() async {
-      final tentativeCollection = FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.uid)
-          .collection('tentative');
-
-      final querySnapshot = await tentativeCollection
-          .orderBy('savedAt', descending: true)
-          .limit(1)
-          .get();
-
-      if (querySnapshot.docs.isNotEmpty) {
-        gameId = querySnapshot.docs.first.id;
-      } else {
-        gameId = tentativeCollection.doc().id;
-      }
-
       await widget.loadFieldingDataFromPrefs(widget.index, widget.uid);
+      if (!mounted) return;
       setState(() {});
     })();
-  }
-
-  Future<void> saveAllTentativeData() async {
-    final Map<String, dynamic> gameStats = {
-      'putouts': int.tryParse(widget.putoutsController.text) ?? 0,
-      'assists': int.tryParse(widget.assistsController.text) ?? 0,
-      'errors': int.tryParse(widget.errorsController.text) ?? 0,
-    };
-
-    if (widget.positions.contains('捕手')) {
-      gameStats['stolenBaseAttempts'] =
-          int.tryParse(widget.stolenBaseAttemptsController.text) ?? 0;
-      gameStats['caughtStealing'] =
-          int.tryParse(widget.caughtStealingController.text) ?? 0;
-    }
-
-    // Save values using shared method passed from parent
-    await widget.saveFieldingDataToPrefs(widget.index, widget.uid);
-
-    final docRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.uid)
-        .collection('tentative')
-        .doc(gameId);
-
-    final snapshot = await docRef.get();
-    Map<String, dynamic> existingData = {};
-    List<dynamic> existingGames = [];
-
-    if (snapshot.exists) {
-      existingData = snapshot.data()?['data'] ?? {};
-      existingGames = (existingData['games'] as List?) ?? [];
-    }
-
-    // Ensure the list is large enough for the current matchIndex
-    while (existingGames.length <= widget.matchIndex) {
-      existingGames.add({});
-    }
-
-    Map<String, dynamic> mergedGame = {};
-    if (existingGames[widget.matchIndex] is Map<String, dynamic>) {
-      mergedGame = Map<String, dynamic>.from(existingGames[widget.matchIndex]);
-    }
-    mergedGame.addAll(gameStats);
-    existingGames[widget.matchIndex] = mergedGame;
-
-    await docRef.set({
-      'data': {
-        'games': existingGames,
-      },
-      'savedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
   }
 
   @override
@@ -1537,13 +1704,10 @@ class _TentativeInputDialogState extends State<TentativeInputDialog> {
       actions: [
         TextButton(
           onPressed: () async {
-            await saveAllTentativeData();
+            await widget.saveFieldingDataToPrefs(widget.index, widget.uid);
+            if (!mounted) return;
             Navigator.of(context).pop();
           },
-          child: const Text('保存して閉じる'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
           child: const Text('閉じる'),
         ),
       ],
@@ -1570,12 +1734,13 @@ class _TentativeInputDialogState extends State<TentativeInputDialog> {
             children: [
               IconButton(
                 icon: Icon(Icons.remove, size: 24),
-                onPressed: () {
+                onPressed: () async {
                   final current = int.tryParse(controller.text) ?? 0;
                   if (current > 0) {
                     setState(() {
                       controller.text = (current - 1).toString();
                     });
+                    await widget.saveFieldingDataToPrefs(widget.index, widget.uid);
                   }
                 },
               ),
@@ -1594,18 +1759,20 @@ class _TentativeInputDialogState extends State<TentativeInputDialog> {
                     fontSize: 18,
                     fontWeight: FontWeight.w500,
                   ),
-                  onChanged: (value) {
-                    setState(() {}); // 反映
+                  onChanged: (value) async {
+                    setState(() {});
+                    await widget.saveFieldingDataToPrefs(widget.index, widget.uid);
                   },
                 ),
               ),
               IconButton(
                 icon: Icon(Icons.add, size: 24),
-                onPressed: () {
+                onPressed: () async {
                   final current = int.tryParse(controller.text) ?? 0;
                   setState(() {
                     controller.text = (current + 1).toString();
                   });
+                  await widget.saveFieldingDataToPrefs(widget.index, widget.uid);
                 },
               ),
             ],

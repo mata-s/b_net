@@ -31,6 +31,42 @@ class _GameInputPageState extends State<GameInputPage> {
     _initFromTentative();
   }
 
+  Future<QueryDocumentSnapshot<Map<String, dynamic>>?> _getLatestTentativeDoc() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return null;
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('tentative')
+        .get();
+
+    if (snapshot.docs.isEmpty) return null;
+
+    DateTime _extractDate(Map<String, dynamic> data) {
+      final candidates = [
+        data['updatedAt'],
+        data['savedAt'],
+        data['createdAt'],
+      ];
+
+      for (final value in candidates) {
+        if (value is Timestamp) return value.toDate();
+        if (value is DateTime) return value;
+      }
+      return DateTime.fromMillisecondsSinceEpoch(0);
+    }
+
+    final docs = [...snapshot.docs];
+    docs.sort((a, b) {
+      final aDate = _extractDate(a.data());
+      final bDate = _extractDate(b.data());
+      return bDate.compareTo(aDate);
+    });
+
+    return docs.first;
+  }
+
   Future<void> _initFromTentative() async {
     // まず仮保存データから試合数や各種フィールドを復元
     await _initializeFields();
@@ -43,16 +79,10 @@ class _GameInputPageState extends State<GameInputPage> {
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return;
 
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('tentative')
-        .orderBy('createdAt', descending: true)
-        .limit(1)
-        .get();
+    final latestDoc = await _getLatestTentativeDoc();
 
-    if (snapshot.docs.isNotEmpty) {
-      final docData = snapshot.docs.first.data();
+    if (latestDoc != null) {
+      final docData = latestDoc.data();
       // 仮保存データの形式により'data'キーの有無をチェック
       final data = docData['data'] ?? docData;
 
@@ -208,6 +238,7 @@ class _GameInputPageState extends State<GameInputPage> {
 
       setState(() {
         numberOfMatches = loadedNumberOfMatches;
+        _eventController.text = numberOfMatches.toString();
         _selectedGameType
           ..clear()
           ..addAll(loadedGameType);
@@ -339,22 +370,17 @@ class _GameInputPageState extends State<GameInputPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('tentative')
-        .orderBy('createdAt', descending: true)
-        .limit(1)
-        .get();
+    final latestDoc = await _getLatestTentativeDoc();
 
-    if (snapshot.docs.isNotEmpty) {
-      final docData = snapshot.docs.first.data();
+    if (latestDoc != null) {
+      final docData = latestDoc.data();
       // 仮保存データの形式により'data'キーの有無をチェック
       final data = docData['data'] ?? docData;
       if (mounted) {
         setState(() {
           // 試合数
           numberOfMatches = data['games'] != null ? data['games'].length : 1;
+          _eventController.text = numberOfMatches.toString();
           // ポジションは前画面から渡されたもの(widget.positions)を優先し、
           // tentative からは上書きしない
           // ゲームタイプ
@@ -733,6 +759,7 @@ class _GameInputPageState extends State<GameInputPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final String uid = user.uid;
+      bool hasError = false;
 
       for (int matchIndex = 0; matchIndex < numberOfMatches; matchIndex++) {
         // 試合タイプが選択されていない場合、スキップ
@@ -867,11 +894,14 @@ class _GameInputPageState extends State<GameInputPage> {
 
           print("Cloud Functions response: ${response.data}");
         } catch (e) {
+          hasError = true;
           print("Error saving game data: $e");
         }
       }
+      if (!hasError) {
+        await deleteTentativeData();
+      }
     }
-
     setState(() {
       _isSaving = false;
     });
@@ -882,30 +912,31 @@ class _GameInputPageState extends State<GameInputPage> {
     final uid = FirebaseAuth.instance.currentUser!.uid;
     final data = _buildGameData();
 
-      print('📝 saveTentativeData: uid=$uid, data keys=${data.keys.toList()}');
+    print('📝 saveTentativeData: uid=$uid, data keys=${data.keys.toList()}');
 
     final tentativeCollection = FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .collection('tentative');
 
-    final existingDocs = await tentativeCollection
-        .orderBy('createdAt', descending: true)
-        .limit(1)
-        .get();
+    final latestDoc = await _getLatestTentativeDoc();
 
-    if (existingDocs.docs.isNotEmpty) {
+    if (latestDoc != null) {
       // Overwrite the latest document
-      final latestDocId = existingDocs.docs.first.id;
+      final latestDocId = latestDoc.id;
       await tentativeCollection.doc(latestDocId).set({
         'data': data,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+        'createdAt': latestDoc.data()['createdAt'] ?? FieldValue.serverTimestamp(),
+        'savedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     } else {
       // Add new document
       await tentativeCollection.add({
         'data': data,
         'createdAt': FieldValue.serverTimestamp(),
+        'savedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
     }
     ScaffoldMessenger.of(context)
