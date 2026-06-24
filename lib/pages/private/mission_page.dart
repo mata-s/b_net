@@ -1,4 +1,3 @@
-import 'package:b_net/common/subscription_guard.dart';
 import 'package:b_net/pages/private/goal_list_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -8,9 +7,8 @@ enum GoalType { hits, scores, custom }
 
 class MissionPage extends StatefulWidget {
   final String userUid;
-  final bool hasActiveSubscription;
 
-  const MissionPage({Key? key, required this.userUid, required this.hasActiveSubscription}) : super(key: key);
+  const MissionPage({Key? key, required this.userUid,}) : super(key: key);
 
   @override
   _MissionPageState createState() => _MissionPageState();
@@ -22,11 +20,16 @@ class _MissionPageState extends State<MissionPage> {
   CompareTypeOption? _compareTypeMonth;
   CompareTypeOption? _compareTypeYear;
   final TextEditingController _targetController = TextEditingController();
+  late Future<QuerySnapshot> _yearGoalFuture;
+  late Future<QuerySnapshot> _monthGoalFuture;
 
   @override
   void initState() {
     super.initState();
     _initSelectedCompareTypes();
+
+    _yearGoalFuture = _fetchYearGoal();
+    _monthGoalFuture = _fetchMonthGoal();
   }
 
   Future<void> _initSelectedCompareTypes() async {
@@ -165,6 +168,30 @@ class _MissionPageState extends State<MissionPage> {
       '自由に決める': 'custom',
     }
   };
+
+  Future<QuerySnapshot> _fetchYearGoal() {
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(widget.userUid)
+      .collection('goals')
+      .where('period', isEqualTo: 'year')
+      .where('year', isEqualTo: DateTime.now().year)
+      .get();
+}
+
+Future<QuerySnapshot> _fetchMonthGoal() {
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(widget.userUid)
+      .collection('goals')
+      .where('period', isEqualTo: 'month')
+      .where(
+        'month',
+        isEqualTo:
+            "${DateTime.now().year.toString().padLeft(4, '0')}-${DateTime.now().month}",
+      )
+      .get();
+}
 
   void _showDualCupertinoPicker({
     required BuildContext context,
@@ -378,7 +405,7 @@ class _MissionPageState extends State<MissionPage> {
         .collection('goals')
         .doc(goalId)
         .set(data);
-    setState(() {});
+    setState(() { _yearGoalFuture = _fetchYearGoal(); });
   }
 
   void _saveMonthMission() async {
@@ -481,7 +508,9 @@ class _MissionPageState extends State<MissionPage> {
         .collection('goals')
         .doc(goalId)
         .set(data);
-    setState(() {});
+    setState(() {
+      _monthGoalFuture = _fetchMonthGoal();
+    });
   }
 
   @override
@@ -492,16 +521,6 @@ class _MissionPageState extends State<MissionPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.hasActiveSubscription) {
-      return Scaffold(
-        backgroundColor: Colors.white,
-        body: const SubscriptionGuard(
-          isLocked: true,
-          initialPage: 5,
-          showCloseButton: true,
-        ),
-      );
-    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('目標'),
@@ -515,13 +534,7 @@ class _MissionPageState extends State<MissionPage> {
             Container(
               margin: const EdgeInsets.only(bottom: 24),
               child: FutureBuilder<QuerySnapshot>(
-                future: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.userUid)
-                    .collection('goals')
-                    .where('period', isEqualTo: 'year')
-                    .where('year', isEqualTo: DateTime.now().year)
-                    .get(),
+                future: _yearGoalFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -934,17 +947,7 @@ class _MissionPageState extends State<MissionPage> {
             ),
             // 今月の目標をFirestoreから取得して表示
             FutureBuilder<QuerySnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(widget.userUid)
-                  .collection('goals')
-                  .where('period', isEqualTo: 'month')
-                  .where(
-                    'month',
-                    isEqualTo:
-                        "${DateTime.now().year.toString().padLeft(4, '0')}-${DateTime.now().month.toString()}",
-                  )
-                  .get(),
+              future: _monthGoalFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

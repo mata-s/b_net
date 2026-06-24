@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/cupertino.dart';
 
 class NationalHit extends StatefulWidget {
   final String uid;
@@ -89,31 +88,45 @@ class _NationalHitState extends State<NationalHit> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // タイトル
-            Container(
-              alignment: Alignment.center,
-              child: const Text(
-                '全国',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            const SizedBox(height: 8),
+            const Text(
+              '都道府県ヒットバトル',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
               ),
             ),
-
-            const SizedBox(height: 5),
-
-            // 年
+            const SizedBox(height: 4),
             Text(
-              '$_year年',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              '$_year年シーズン',
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-
-            // 全国合計ヒット数
             Container(
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              alignment: Alignment.center,
-              child: Text(
-                '全国合計：$_totalNationwideHits本',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F7F7),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: Colors.black12,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '全国合計 $_totalNationwideHits本',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
               ),
             ),
 
@@ -140,7 +153,9 @@ class _NationalHitState extends State<NationalHit> {
   }
 
   List<DataRow> _buildPlayerRows() {
-    return _players.map((player) {
+    return _players.asMap().entries.map((entry) {
+      final rank = entry.key + 1;
+      final player = entry.value;
       final isUser =
           player['prefecture'] == widget.prefecture; // ユーザー自身の都道府県チェック
       return DataRow(
@@ -152,31 +167,63 @@ class _NationalHitState extends State<NationalHit> {
             return null;
           },
         ),
-        cells: _buildDataCells(player, isUser: isUser),
+        cells: _buildDataCells(
+          player,
+          rank: rank,
+          isUser: isUser,
+        ),
       );
     }).toList();
   }
 
   List<DataColumn> _buildDataColumns() {
     return [
+      const DataColumn(
+        label: SizedBox(
+          width: 60,
+          child: Center(
+            child: Text(
+              '順位',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
       DataColumn(
-        label: Container(
-          width: 100, // 選手列の幅を設定
+        label: SizedBox(
+          width: 100,
           child: Center(child: _buildPlayerNational()),
         ),
       ),
       DataColumn(
-        label: Container(
-          width: 100, // 選手列の幅を設定
+        label: SizedBox(
+          width: 100,
           child: Center(child: _nationalHits()),
         ),
       ),
     ];
   }
 
-  List<DataCell> _buildDataCells(Map<String, dynamic> player,
-      {bool isUser = false}) {
+  List<DataCell> _buildDataCells(
+    Map<String, dynamic> player, {
+    required int rank,
+    bool isUser = false,
+  }) {
     return [
+      DataCell(
+        Center(
+          child: Text(
+            '${rank}位',
+            style: TextStyle(
+              fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
+              color: isUser ? Colors.blue : Colors.black,
+            ),
+          ),
+        ),
+      ),
       DataCell(Center(
         child: Text(
           player['prefecture']?.toString() ?? '不明',

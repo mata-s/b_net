@@ -22,6 +22,8 @@ class _BattingRankingState extends State<BattingRanking> {
   String _selectedRankingType = '打率ランキング';
   int _year = DateTime.now().year;
   bool _isSeasonMode = true;
+  int _monthlyRankingYear = DateTime.now().year;
+  int _monthlyRankingMonth = DateTime.now().month;
   int _playersCount = 0;
   // rankingContextの軽量キャッシュ（自分の前後±2など）
   List<Map<String, dynamic>> _ctxAroundUser = [];
@@ -60,22 +62,62 @@ class _BattingRankingState extends State<BattingRanking> {
     _loadAvailableAgeGroups();
   }
 
+  Future<_ResolvedMonthlyRankingPath> _resolveMonthlyRankingPath() async {
+    final now = DateTime.now();
+    final candidates = <DateTime>[
+      DateTime(now.year, now.month, 1),
+      DateTime(now.year, now.month - 1, 1),
+    ];
+
+    for (final candidate in candidates) {
+      final year = candidate.year;
+      final month = candidate.month;
+      final noPadBasePath =
+          'battingAverageRanking/${year}_${month}/${widget.prefecture}';
+      final padBasePath =
+          'battingAverageRanking/${year}_${month.toString().padLeft(2, '0')}/${widget.prefecture}';
+
+      final noPadStats =
+          await FirebaseFirestore.instance.doc('$noPadBasePath/stats').get();
+      if (noPadStats.exists) {
+        return _ResolvedMonthlyRankingPath(
+          year: year,
+          month: month,
+          basePath: noPadBasePath,
+          monthKeyPad: month.toString().padLeft(2, '0'),
+        );
+      }
+
+      final padStats =
+          await FirebaseFirestore.instance.doc('$padBasePath/stats').get();
+      if (padStats.exists) {
+        return _ResolvedMonthlyRankingPath(
+          year: year,
+          month: month,
+          basePath: padBasePath,
+          monthKeyPad: month.toString().padLeft(2, '0'),
+        );
+      }
+    }
+
+    final fallback = DateTime(now.year, now.month, 1);
+    return _ResolvedMonthlyRankingPath(
+      year: fallback.year,
+      month: fallback.month,
+      basePath:
+          'battingAverageRanking/${fallback.year}_${fallback.month}/${widget.prefecture}',
+      monthKeyPad: fallback.month.toString().padLeft(2, '0'),
+    );
+  }
+
   Future<void> _loadAvailableAgeGroups() async {
     String collectionPath;
     if (_isSeasonMode) {
       collectionPath = 'battingAverageRanking/${_year}_total/${widget.prefecture}';
     } else {
-      final now = DateTime.now();
-      int y = now.year;
-      int m = now.month - 1;
-      if (m == 0) { m = 12; y -= 1; }
-      final noPad = 'battingAverageRanking/${y}_${m}/${widget.prefecture}';
-      final pad = 'battingAverageRanking/${y}_${m.toString().padLeft(2, '0')}/${widget.prefecture}';
-      // try non-padded first; if empty, try padded
-      var snapshot = await FirebaseFirestore.instance.collection(noPad).get();
-      if (snapshot.docs.isEmpty) {
-        snapshot = await FirebaseFirestore.instance.collection(pad).get();
-      }
+      final resolved = await _resolveMonthlyRankingPath();
+      final basePath = resolved.basePath;
+      var snapshot = await FirebaseFirestore.instance.collection(basePath).get();
       List<String> foundGroups = ['全年齢'];
       for (String group in ageGroupLabels.keys) {
         final exists = snapshot.docs.any((doc) => doc.id.contains('_age_$group'));
@@ -113,26 +155,28 @@ class _BattingRankingState extends State<BattingRanking> {
     try {
       DateTime currentDate = DateTime.now();
       int year;
-      int lastMonth = 0; // 初期値を設定
+      int targetMonth = 0; // 初期値を設定
+      _ResolvedMonthlyRankingPath? resolvedMonthlyPath;
 
-      // シーズンまたは先月モードに基づいて年と月を設定
+      // シーズンまたは月間モードに基づいて年と月を設定
       if (_isSeasonMode) {
         year = currentDate.year;
         if (currentDate.month <= 3) {
           year -= 1; // シーズンの場合、1月〜3月は前年のデータを使用
         }
       } else {
-        year = currentDate.year;
-        lastMonth = currentDate.month - 1;
-        if (lastMonth == 0) {
-          lastMonth = 12;
-          year -= 1;
-        }
+        resolvedMonthlyPath = await _resolveMonthlyRankingPath();
+        year = resolvedMonthlyPath.year;
+        targetMonth = resolvedMonthlyPath.month;
       }
 
       if (!mounted) return;
       setState(() {
         _year = year; // 年を設定
+        if (!_isSeasonMode && resolvedMonthlyPath != null) {
+          _monthlyRankingYear = resolvedMonthlyPath.year;
+          _monthlyRankingMonth = resolvedMonthlyPath.month;
+        }
       });
 
       // Firestoreのパスを構築
@@ -140,13 +184,13 @@ class _BattingRankingState extends State<BattingRanking> {
       if (_isSeasonMode) {
         basePath = 'battingAverageRanking/${year}_total/${widget.prefecture}';
       } else {
-        final String monthKeyNoPad = lastMonth.toString();
+        final String monthKeyNoPad = targetMonth.toString();
         // ignore: unused_local_variable
-        final String monthKeyPad = lastMonth.toString().padLeft(2, '0');
-        // デフォは非ゼロ埋め（/2025_9/）だが、後続の取得で存在しなければゼロ埋め（/2025_09/）を試す
-        basePath = 'battingAverageRanking/${year}_${monthKeyNoPad}/${widget.prefecture}';
+        final String monthKeyPad = targetMonth.toString().padLeft(2, '0');
+        basePath = resolvedMonthlyPath?.basePath ??
+            'battingAverageRanking/${year}_${monthKeyNoPad}/${widget.prefecture}';
 
-        // 先月モードで「打率ランキング」以外を選択している場合、何も表示しない
+        // 月間モードで「打率ランキング」以外を選択している場合、何も表示しない
         if (_selectedRankingType != '打率ランキング') {
           if (!mounted) return;
           setState(() {
@@ -290,12 +334,9 @@ class _BattingRankingState extends State<BattingRanking> {
               }
             } else {
               // 月次：月別 rankingContext のみを利用（年間コンテキストは使わない）
-              final String monthKey = (DateTime.now().month - 1 == 0)
-                  ? '12'
-                  : (DateTime.now().month - 1).toString().padLeft(2, '0');
-              final int y = (DateTime.now().month - 1 == 0)
-                  ? DateTime.now().year - 1
-                  : DateTime.now().year;
+              final String monthKey = resolvedMonthlyPath?.monthKeyPad ??
+                  DateTime.now().month.toString().padLeft(2, '0');
+              final int y = resolvedMonthlyPath?.year ?? DateTime.now().year;
               final monthlyCtxPath = 'users/${widget.uid}/rankingContext/month/${y}_${monthKey}/battingAverageRank$ageSuffix';
               final monthlyCtx = await FirebaseFirestore.instance.doc(monthlyCtxPath).get();
               if (monthlyCtx.exists) {
@@ -706,78 +747,77 @@ class _BattingRankingState extends State<BattingRanking> {
   }
 
   Future<void> _fetchPlayersCount() async {
-  try {
-    final now = DateTime.now();
-    int year;
-    int lastMonth = 0;
+    try {
+      final now = DateTime.now();
+      int year;
+     
+      _ResolvedMonthlyRankingPath? resolvedMonthlyPath;
 
-    String docPath;
+      String docPath;
 
-    if (_isSeasonMode) {
-      // シーズンモード：1〜3月は前年扱い
-      year = now.year;
-      if (now.month <= 3) {
-        year -= 1;
-      }
-      docPath =
-          'battingAverageRanking/${year}_total/${widget.prefecture}/stats';
-    } else {
-      // 先月モード
-      year = now.year;
-      lastMonth = now.month - 1;
-      if (lastMonth == 0) {
-        lastMonth = 12;
-        year -= 1;
-      }
-      final monthKeyNoPad = lastMonth.toString();
-      docPath =
-          'battingAverageRanking/${year}_${monthKeyNoPad}/${widget.prefecture}/stats';
-    }
-
-    // stats ドキュメント取得（先月モードはゼロ埋めフォールバックも試す）
-    var statsSnapshot =
-        await FirebaseFirestore.instance.doc(docPath).get();
-
-    if (!statsSnapshot.exists && !_isSeasonMode) {
-      final altDocPath =
-          docPath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
-        final mm = m.group(1) ?? '';
-        return '_${mm.padLeft(2, '0')}/';
-      });
-      statsSnapshot =
-          await FirebaseFirestore.instance.doc(altDocPath).get();
-    }
-
-    int count = 0;
-
-    if (statsSnapshot.exists) {
-      final data = statsSnapshot.data();
-
-      // 「全年齢」のときは playersCount
-      if (_selectedAgeGroup == null || _selectedAgeGroup == '全年齢') {
-        count = (data?['playersCount'] ?? 0) as int;
+      if (_isSeasonMode) {
+        // シーズンモード：1〜3月は前年扱い
+        year = now.year;
+        if (now.month <= 3) {
+          year -= 1;
+        }
+        docPath =
+            'battingAverageRanking/${year}_total/${widget.prefecture}/stats';
       } else {
-        // 年齢別のときは stats.totalPlayers_age_XX_YY を使用
-        final statsMap =
-            (data?['stats'] ?? <String, dynamic>{}) as Map<String, dynamic>;
-        final key = 'totalPlayers_age_${_selectedAgeGroup}';
-        count = (statsMap[key] ?? 0) as int;
+        // 月間モード（最新更新月。今月がなければ先月）
+        resolvedMonthlyPath = await _resolveMonthlyRankingPath();
+        year = resolvedMonthlyPath.year;
+        docPath = '${resolvedMonthlyPath.basePath}/stats';
       }
-    }
 
-    if (!mounted) return;
-    setState(() {
-      _year = year; // 見出しの年も合わせておく
-      _playersCount = count;
-    });
-  } catch (e) {
-    print('stats取得エラー: $e');
-    if (!mounted) return;
-    setState(() {
-      _playersCount = 0;
-    });
+      // stats ドキュメント取得（先月モードはゼロ埋めフォールバックも試す）
+      var statsSnapshot =
+          await FirebaseFirestore.instance.doc(docPath).get();
+
+      if (!statsSnapshot.exists && !_isSeasonMode) {
+        final altDocPath =
+            docPath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
+          final mm = m.group(1) ?? '';
+          return '_${mm.padLeft(2, '0')}/';
+        });
+        statsSnapshot =
+            await FirebaseFirestore.instance.doc(altDocPath).get();
+      }
+
+      int count = 0;
+
+      if (statsSnapshot.exists) {
+        final data = statsSnapshot.data();
+
+        // 「全年齢」のときは playersCount
+        if (_selectedAgeGroup == null || _selectedAgeGroup == '全年齢') {
+          count = (data?['playersCount'] ?? 0) as int;
+        } else {
+          // 年齢別のときは stats.totalPlayers_age_XX_YY を使用
+          final statsMap =
+              (data?['stats'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+          final key = 'totalPlayers_age_${_selectedAgeGroup}';
+          count = (statsMap[key] ?? 0) as int;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _year = year; // 見出しの年も合わせておく
+        if (!_isSeasonMode && resolvedMonthlyPath != null) {
+          _monthlyRankingYear = resolvedMonthlyPath.year;
+          _monthlyRankingMonth = resolvedMonthlyPath.month;
+        }
+        _playersCount = count;
+      });
+    } catch (e) {
+      print('stats取得エラー: $e');
+      if (!mounted) return;
+      setState(() {
+        _playersCount = 0;
+      });
+    }
   }
-}
 
   // Future<void> _fetchPlayersCount() async {
   //   final statsSnapshot = await FirebaseFirestore.instance
@@ -881,91 +921,66 @@ class _BattingRankingState extends State<BattingRanking> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            Container(
-              alignment: Alignment.center,
-              child: Text(
-                '${widget.prefecture}',
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            const SizedBox(height: 8),
+            Text(
+              '${widget.prefecture} 打撃ランキング',
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
               ),
             ),
-            SizedBox(height: 5),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: () => _showModePicker(context), // モード選択ピッカーを表示
-                  child: Container(
-                    decoration: BoxDecoration(
-                      border:
-                          Border.all(color: Colors.black54, width: 1), // 控えめな枠線
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    padding: EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      children: [
-                        Text(
-                          _isSeasonMode ? 'シーズン' : '先月',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Icon(Icons.arrow_drop_down),
-                      ],
-                    ),
-                  ),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  _isSeasonMode
-                      ? '$_year年' // シーズンの場合は「年」のみ表示
-                      : '${_year}年${DateTime.now().month - 1 == 0 ? 12 : DateTime.now().month - 1}月', // 先月の場合「年+月」
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+            const SizedBox(height: 4),
+            Text(
+              _isSeasonMode
+                  ? '$_year年シーズン'
+                  : '${_monthlyRankingYear}年${_monthlyRankingMonth}月',
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            SizedBox(height: 10),
-            // 年齢別
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: () => _showAgePicker(context),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          _selectedAgeGroup == '全年齢'
-                              ? '全年齢'
-                              : ageGroupLabels[_selectedAgeGroup!] ?? _selectedAgeGroup!,
-                          style: TextStyle(fontSize: 16),
-                        ),
-                        Icon(Icons.arrow_drop_down),
-                      ],
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  GestureDetector(
+                    onTap: () => _showModePicker(context),
+                    child: _FilterChipButton(
+                      label: _isSeasonMode ? 'シーズン' : '月',
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _showAgePicker(context),
+                    child: _FilterChipButton(
+                      label: _selectedAgeGroup == '全年齢'
+                          ? '全年齢'
+                          : ageGroupLabels[_selectedAgeGroup!] ?? _selectedAgeGroup!,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_isSeasonMode)
+            const SizedBox(height: 10),
+            if (_isSeasonMode)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       IconButton(
-                        icon: Icon(Icons.navigate_before, size: 32.0),
+                        icon: const Icon(Icons.navigate_before, size: 24.0),
+                        visualDensity: VisualDensity.compact,
                         onPressed: () {
                           final currentIndex = rankingTypes.indexOf(_selectedRankingType);
                           final previousIndex = (currentIndex - 1 + rankingTypes.length) % rankingTypes.length;
@@ -975,49 +990,33 @@ class _BattingRankingState extends State<BattingRanking> {
                           });
                         },
                       ),
-                    if (_isSeasonMode)
                       InkWell(
+                        borderRadius: BorderRadius.circular(16),
                         onTap: () => _showCupertinoPicker(context),
-                        child: Row(
-                          children: [
-                            Container(
-                              decoration: const BoxDecoration(
-                                border: Border(bottom: BorderSide(color: Colors.grey)),
-                              ),
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Text(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          child: Row(
+                            children: [
+                              Text(
                                 _selectedRankingType,
                                 style: const TextStyle(
-                                  fontSize: 18,
+                                  fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                            ),
-                            const Icon(Icons.arrow_drop_down),
-                          ],
-                        ),
-                      )
-                    else
-                      Row(
-                        children: [
-                          Container(
-                            decoration: const BoxDecoration(
-                              border: Border(bottom: BorderSide(color: Colors.grey)),
-                            ),
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Text(
-                              _selectedRankingType,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.arrow_drop_down,
+                                size: 20,
+                                color: Colors.black54,
+                              )
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    if (_isSeasonMode)
                       IconButton(
-                        icon: Icon(Icons.navigate_next, size: 32.0),
+                        icon: const Icon(Icons.navigate_next, size: 24.0),
+                        visualDensity: VisualDensity.compact,
                         onPressed: () {
                           final currentIndex = rankingTypes.indexOf(_selectedRankingType);
                           final nextIndex = (currentIndex + 1) % rankingTypes.length;
@@ -1027,18 +1026,43 @@ class _BattingRankingState extends State<BattingRanking> {
                           });
                         },
                       ),
-                  ],
+                    ],
+                  ),
                 ),
-              ],
-            ),
-            SizedBox(width: 5),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Text(
+                  _selectedRankingType,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 10),
             Container(
-              margin: const EdgeInsets.only(top: 5, bottom: 10),
-              alignment: Alignment.center,
-              child: Text(
-                '$_playersCount人ランキングに参加中',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F7F7),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.black12),
+              ),
+              child: Center(
+                child: Text(
+                  '$_playersCount人がランキングに参加中',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
             // データがない場合の表示（全てのランキングに適用）
@@ -1137,7 +1161,7 @@ class _BattingRankingState extends State<BattingRanking> {
       builder: (BuildContext context) {
         int tempIndex = _isSeasonMode ? 0 : 1;
 
-        return Container(
+        return SizedBox(
           height: 300,
           child: Column(
             children: [
@@ -1182,7 +1206,7 @@ class _BattingRankingState extends State<BattingRanking> {
                   },
                   children: const [
                     Center(child: Text('シーズン', style: TextStyle(fontSize: 24))),
-                    Center(child: Text('先月', style: TextStyle(fontSize: 24))),
+                    Center(child: Text('月', style: TextStyle(fontSize: 24))),
                   ],
                 ),
               ),
@@ -1200,7 +1224,7 @@ class _BattingRankingState extends State<BattingRanking> {
       builder: (BuildContext context) {
         int tempIndex = rankingTypes.indexOf(_selectedRankingType);
 
-        return Container(
+        return SizedBox(
           height: 300,
           child: Column(
             children: [
@@ -1244,7 +1268,7 @@ class _BattingRankingState extends State<BattingRanking> {
                   },
                   children: rankingTypes.map((type) {
                     return Center(
-                      child: Text(type, style: TextStyle(fontSize: 22)),
+                      child: Text(type, style: const TextStyle(fontSize: 22)),
                     );
                   }).toList(),
                 ),
@@ -2516,4 +2540,54 @@ bool _isUserInSelectedAgeGroup() {
       },
     );
   }
+}
+// UI filter chip button widget
+class _FilterChipButton extends StatelessWidget {
+  final String label;
+
+  const _FilterChipButton({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Icon(
+            Icons.arrow_drop_down,
+            size: 20,
+            color: Colors.black54,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResolvedMonthlyRankingPath {
+  final int year;
+  final int month;
+  final String basePath;
+  final String monthKeyPad;
+
+  const _ResolvedMonthlyRankingPath({
+    required this.year,
+    required this.month,
+    required this.basePath,
+    required this.monthKeyPad,
+  });
 }

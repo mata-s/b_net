@@ -35,52 +35,41 @@ Future<void> savePersonalSubscriptionToFirestore(
     return;
   }
 
-  final purchaseDate = DateTime.tryParse(entitlement.latestPurchaseDate) ?? DateTime.now();
+  final purchaseDate =
+      DateTime.tryParse(entitlement.latestPurchaseDate) ?? DateTime.now();
   final expiryDate = DateTime.tryParse(entitlement.expirationDate ?? '') ??
       purchaseDate.add(const Duration(days: 30));
 
   final platform = Platform.isIOS ? 'iOS' : 'Android';
+  final isActive = entitlement.isActive && expiryDate.isAfter(DateTime.now());
 
-  await FirebaseFirestore.instance
-      .collection('users')
-      .doc(userId)
-      .collection('subscription')
-      .doc(platform)
-      .set({
+  final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+
+  await userRef.set({
+    'isPremium': isActive,
+    'premiumUpdatedAt': FieldValue.serverTimestamp(),
+  }, SetOptions(merge: true));
+
+  await userRef.collection('subscription').doc('current').set({
     'productId': purchasedProductId,
     'purchaseDate': Timestamp.fromDate(purchaseDate),
     'expiryDate': Timestamp.fromDate(expiryDate),
-    'status': entitlement.isActive ? 'active' : 'inactive',
+    'status': isActive ? 'active' : 'inactive',
     'platform': platform,
     'entitlementId': entitlement.identifier, // ← 保存しておくとデバッグ強い
-  });
-
-  print("✅ Firestore に個人サブスク保存: $purchasedProductId (entitlement: ${entitlement.identifier})");
+    'updatedAt': FieldValue.serverTimestamp(),
+  }, SetOptions(merge: true));
   }
 
   /// 🔹 Firestore からサブスクが有効か確認（個人用）
   Future<bool> isUserSubscribed(String userId) async {
-  final subRef = FirebaseFirestore.instance
-      .collection('users')
-      .doc(userId)
-      .collection('subscription');
+    final userSnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get();
 
-  final subSnapshot = await subRef.get();
+    final userData = userSnapshot.data();
 
-  for (final doc in subSnapshot.docs) {
-    final data = doc.data();
-
-    final status = data['status'];
-final expiryTimestamp = data['expiryDate'];
-
-if (status == 'active' && expiryTimestamp is Timestamp) {
-  final expiryDate = expiryTimestamp.toDate();
-  if (expiryDate.isAfter(DateTime.now())) {
-    return true;
+    return userData?['isPremium'] == true;
   }
-}
-  }
-
-  return false;
-}
 }

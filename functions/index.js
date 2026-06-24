@@ -11,6 +11,7 @@ import {onDocumentCreated} from "firebase-functions/v2/firestore";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 import {CloudTasksClient} from "@google-cloud/tasks";
+import {defineSecret} from "firebase-functions/params";
 
 initializeApp();
 const db = getFirestore();
@@ -4484,7 +4485,6 @@ export const createPrayerRanking = onSchedule(
     },
     async () => {
       const date = new Date();
-      date.setMonth(date.getMonth() - 1);
 
       const year = date.getFullYear();
       const month = date.getMonth() + 1;
@@ -4497,6 +4497,21 @@ export const createPrayerRanking = onSchedule(
       const skipAnnualUpdate = (month === 12 || month === 1 || month === 2);
       if (skipAnnualUpdate) {
         console.log("📌 年間データの更新はこの月では行われません。");
+      }
+
+      const monthlyBattingRef =
+        db.collection(`battingAverageRanking`).doc(`${year}_${month}`);
+      const monthlyPitchingRef =
+        db.collection(`pitcherRanking`).doc(`${year}_${month}`);
+
+      try {
+        console.log(`🧹 月間ランキングを初期化中... ${year}_${month}`);
+        await getFirestore().recursiveDelete(monthlyBattingRef);
+        console.log("✅ Monthly batting ranking deleted");
+        await getFirestore().recursiveDelete(monthlyPitchingRef);
+        console.log("✅ Monthly pitching ranking deleted");
+      } catch (err) {
+        console.error("⚠️ 月間ランキング初期化失敗", err);
       }
 
       if (!skipAnnualUpdate) {
@@ -4529,13 +4544,12 @@ export const createPrayerRanking = onSchedule(
 
       for (const userDoc of allUsersSnapshot.docs) {
         const uid = userDoc.id;
-        const isSubscribed = await checkSubscriptionStatus(uid);
-        if (!isSubscribed) {
-          console.log(`Skipping user ${uid} due to inactive subscription.`);
+        const userData = userDoc.data();
+
+        if (userData.isTeamMemberOnly === true) {
+          console.log(`Skipping user ${uid} because isTeamMemberOnly is true.`);
           continue;
         }
-
-        const userData = userDoc.data();
         const birthday = userData.birthday;
         let age = null;
         if (birthday && typeof birthday.toDate === "function") {
@@ -4604,40 +4618,41 @@ export const createPrayerRanking = onSchedule(
       }
     });
 
-/**
- * ユーザーのサブスクリプション状態を確認
- * @param {string} uid - ユーザーの一意識別子 (UID)
- * @return {Promise<boolean>} - ユーザーがアクティブなサブスクリプションを持っているか
- */
-async function checkSubscriptionStatus(uid) {
-  const subscriptionRef =
-  db.collection("users").doc(uid).collection("subscription");
-  const [iosSub, androidSub] = await Promise.all([
-    subscriptionRef.doc("iOS").get(),
-    subscriptionRef.doc("android").get(),
-  ]);
+// /**
+//  * ユーザーのサブスクリプション状態を確認
+//  * @param {string} uid - ユーザーの一意識別子 (UID)
+//  * @return {Promise<boolean>} - ユーザーがアクティブなサブスクリプションを持っているか
+//  */
+// async function checkSubscriptionStatus(uid) {
+//   const subscriptionRef =
+//   db.collection("users").doc(uid).collection("subscription");
+//   const [iosSub, androidSub] = await Promise.all([
+//     subscriptionRef.doc("iOS").get(),
+//     subscriptionRef.doc("android").get(),
+//   ]);
 
-  let iosActive = false;
-  let androidActive = false;
+//   let iosActive = false;
+//   let androidActive = false;
 
-  if (iosSub.exists) {
-    const iosData = iosSub.data();
-    iosActive = iosData && iosData.status === "active";
-  }
+//   if (iosSub.exists) {
+//     const iosData = iosSub.data();
+//     iosActive = iosData && iosData.status === "active";
+//   }
 
-  if (androidSub.exists) {
-    const androidData = androidSub.data();
-    androidActive = androidData && androidData.status === "active";
-  }
+//   if (androidSub.exists) {
+//     const androidData = androidSub.data();
+//     androidActive = androidData && androidData.status === "active";
+//   }
 
-  return iosActive || androidActive;
-}
+//   return iosActive || androidActive;
+// }
 
 export const processMonthlyRanking = onRequest(async (req, res) => {
   const {
     uid, year, month, userPrefecture, teamIds, teamNames, playerName, isPitcher,
     age,
   } = req.body;
+  console.log(`Looking for: results_stats_${year}_${month}`);
 
   // 月次データ取得
   const monthlyStatsDocRef =
@@ -4650,7 +4665,29 @@ export const processMonthlyRanking = onRequest(async (req, res) => {
 
   const monthlyData = monthlyStatsDoc.data();
 
-  const requiredBats = (month === 12 || month === 1 || month === 2) ? 4 : 8;
+  const maxRequiredBats = (month === 12 || month === 1 || month === 2) ? 4 : 8;
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 0, 23, 59, 59);
+  const now = new Date();
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const isCurrentTargetMonth =
+    monthStart.getFullYear() === currentMonthStart.getFullYear() &&
+    monthStart.getMonth() === currentMonthStart.getMonth();
+  const monthlyProgressBaseDate = isCurrentTargetMonth ? now : monthEnd;
+
+  let monthProgress =
+    (monthlyProgressBaseDate.getTime() - monthStart.getTime()) /
+    (monthEnd.getTime() - monthStart.getTime());
+
+  monthProgress = Math.max(0, Math.min(1, monthProgress));
+
+  const requiredBats = Math.min(
+      maxRequiredBats,
+      Math.max(1, Math.ceil(maxRequiredBats * monthProgress)),
+  );
+
+  console.log("monthProgress", monthProgress);
+  console.log("requiredBats", requiredBats);
 
   // 月次プレイヤーデータ作成
   const playerMonthlyData = {
@@ -4691,8 +4728,14 @@ export const processMonthlyRanking = onRequest(async (req, res) => {
 
   // **投手データ**
   if (isPitcher) {
-    const requiredInnings =
-    (month === 12 || month === 1 || month === 2) ? 6 : 12;
+    const maxRequiredInnings =
+      (month === 12 || month === 1 || month === 2) ? 6 : 12;
+    const requiredInnings = Math.min(
+        maxRequiredInnings,
+        Math.max(1, Math.ceil(maxRequiredInnings * monthProgress)),
+    );
+
+    console.log("requiredInnings", requiredInnings);
     const pitcherMonthlyData = {
       id: uid,
       name: playerName,
@@ -4730,7 +4773,7 @@ export const processMonthlyRanking = onRequest(async (req, res) => {
 
 export const processYearlyRanking = onRequest(async (req, res) => {
   const {
-    uid, year, month, userPrefecture, teamIds, teamNames, playerName, isPitcher,
+    uid, year, userPrefecture, teamIds, teamNames, playerName, isPitcher,
     age,
   } = req.body;
 
@@ -4745,7 +4788,22 @@ export const processYearlyRanking = onRequest(async (req, res) => {
 
   const totalData = totalStatsDoc.data();
 
-  const requiredBatsTotal = (month >= 3) ? Math.min((month - 2) * 8, 72) : 72;
+  // 年間規定打席計算
+  const seasonStart = new Date(year, 2, 1); // 3/1
+  const seasonEnd = new Date(year, 10, 30, 23, 59, 59); // 11/30
+  const currentDate = new Date();
+
+  let seasonProgress =
+    (currentDate.getTime() - seasonStart.getTime()) /
+    (seasonEnd.getTime() - seasonStart.getTime());
+
+  seasonProgress = Math.max(0, Math.min(1, seasonProgress));
+
+  const requiredBatsTotal = Math.min(
+      72,
+      Math.max(2, Math.ceil(72 * seasonProgress)),
+  );
+  console.log(`必要な打席数: ${requiredBatsTotal}`);
 
   // 年間プレイヤーデータ作成
   const playerTotalData = {
@@ -4786,9 +4844,10 @@ export const processYearlyRanking = onRequest(async (req, res) => {
 
   // **投手データ**
   if (isPitcher) {
-    const requiredInningsTotal =
-    (month >= 3) ? Math.min((month - 2) * 12, 108) : 108;
-    console.log(`現在の月: ${month + 1}月`);
+    const requiredInningsTotal = Math.min(
+        108,
+        Math.max(3, Math.ceil(108 * seasonProgress)),
+    );
     console.log(`必要なイニング: ${requiredInningsTotal}`);
     const pitcherTotalData = {
       id: uid,
@@ -4825,56 +4884,37 @@ export const processYearlyRanking = onRequest(async (req, res) => {
   console.log(`Yearly ranking updated for ${uid}`);
 
 
-  // **✅ 各都道府県の選手数を Firestore から取得 & 加算**
+  // **✅ 各都道府県・全国の選手数をatomic incrementで加算**
   const battingStatsRef =
-  db.doc(`battingAverageRanking/${year}_total/${userPrefecture}/stats`);
-  const battingStatsDoc =
-  await battingStatsRef.get();
-  const currentBattingCount =
-   battingStatsDoc.exists ? (battingStatsDoc.data().playersCount || 0) : 0;
-  await battingStatsRef
-      .set({playersCount: currentBattingCount + 1}, {merge: true});
-  console.log(
-      `バッティングランキング: ${userPrefecture} の選手数 
-      (${currentBattingCount + 1}) を保存しました。`,
-  );
+    db.doc(`battingAverageRanking/${year}_total/${userPrefecture}/stats`);
+  await battingStatsRef.set({
+    playersCount: FieldValue.increment(1),
+  }, {merge: true});
+  console.log(`バッティングランキング: ${userPrefecture} の選手数を+1しました。`);
 
   if (isPitcher) {
     const pitcherStatsRef =
-    db.doc(`pitcherRanking/${year}_total/${userPrefecture}/stats`);
-    const pitcherStatsDoc = await pitcherStatsRef.get();
-    const currentPitcherCount =
-    pitcherStatsDoc.exists ? (pitcherStatsDoc.data().pitchersCount || 0) : 0;
-    await pitcherStatsRef
-        .set({pitchersCount: currentPitcherCount + 1}, {merge: true});
-    console.log(
-        `ピッチャー: ${userPrefecture} の選手数 (${currentPitcherCount + 1}) を保存しました。`,
-    );
+      db.doc(`pitcherRanking/${year}_total/${userPrefecture}/stats`);
+    await pitcherStatsRef.set({
+      pitchersCount: FieldValue.increment(1),
+    }, {merge: true});
+    console.log(`ピッチャー: ${userPrefecture} の選手数を+1しました。`);
   }
 
-  // **全国の合計人数を Firestore から取得 & 加算**
   const nationwideStatsRef =
-  db.doc(`battingAverageRanking/${year}_total/全国/stats`);
-  const nationwideStatsDoc =
-  await nationwideStatsRef.get();
-  const currentTotalPlayers =
-  nationwideStatsDoc.exists ?
-  (nationwideStatsDoc.data().totalPlayersCount || 0) : 0;
-  await nationwideStatsRef
-      .set({totalPlayersCount: currentTotalPlayers + 1}, {merge: true});
-  console.log(`全国のバッティング選手合計人数 (${currentTotalPlayers + 1}) を保存しました。`);
+    db.doc(`battingAverageRanking/${year}_total/全国/stats`);
+  await nationwideStatsRef.set({
+    totalPlayersCount: FieldValue.increment(1),
+  }, {merge: true});
+  console.log("全国のバッティング選手合計人数を+1しました。");
 
   if (isPitcher) {
     const nationwidePitchersRef =
-    db.doc(`pitcherRanking/${year}_total/全国/stats`);
-    const nationwidePitchersDoc =
-    await nationwidePitchersRef.get();
-    const currentTotalPitchers =
-    nationwidePitchersDoc.exists ?
-    (nationwidePitchersDoc.data().totalPitchersCount || 0) : 0;
-    await nationwidePitchersRef
-        .set({totalPitchersCount: currentTotalPitchers + 1}, {merge: true});
-    console.log(`全国のピッチャー選手合計人数 (${currentTotalPitchers + 1}) を保存しました。`);
+      db.doc(`pitcherRanking/${year}_total/全国/stats`);
+    await nationwidePitchersRef.set({
+      totalPitchersCount: FieldValue.increment(1),
+    }, {merge: true});
+    console.log("全国のピッチャー選手合計人数を+1しました。");
   }
 
 
@@ -4882,7 +4922,7 @@ export const processYearlyRanking = onRequest(async (req, res) => {
 });
 
 
-// 月一プレイヤーランク付
+// 週一プレイヤーランク付
 const batterQueuePath =
 client.queuePath(project, location, "batter-ranking-queue");
 const pitcherQueuePath =
@@ -4895,20 +4935,31 @@ const nationwideBatterQueuePath =
 client.queuePath(project, location, "nationwide-batter-queue");
 const nationwidePitcherQueuePath =
 client.queuePath(project, location, "nationwide-pitcher-queue");
+const rankingSnapshotQueuePath =
+client.queuePath(project, location, "ranking-snapshot-queue");
 
 export const scheduleRankingProcessing = onSchedule(
     {
-      schedule: "40 2 1 * *",
+      schedule: "40 2 * * 1", // 毎週月曜日 2:40 実行
       timeZone: "Asia/Tokyo",
       timeoutSeconds: 1800,
     },
     async () => {
       const now = new Date();
-      now.setMonth(now.getMonth() - 1); // ←先月のデータを処理
       const year = now.getFullYear();
       const month = now.getMonth() + 1;
 
-      console.log(`🚀 ランキング処理開始: ${year}年 ${month}月`);
+      // 全国ランキングタスクのディレイ設定
+      const nationwideDelaySeconds = 10 * 60;
+      const nationwideScheduleTime = {
+        seconds: Math.floor(Date.now() / 1000) + nationwideDelaySeconds,
+      };
+      const snapshotDelaySeconds = nationwideDelaySeconds + (5 * 60);
+      const snapshotScheduleTime = {
+        seconds: Math.floor(Date.now() / 1000) + snapshotDelaySeconds,
+      };
+
+      console.log(`🚀 週次ランキング処理開始: ${year}年 ${month}月`);
 
       // 🔁 年間と全国の処理スキップ判定（対象が12月,1月,2月ならスキップ）
       const skipAnnualUpdate = [12, 1, 2].includes(month);
@@ -4917,16 +4968,16 @@ export const scheduleRankingProcessing = onSchedule(
       }
 
 
-      // 🔍 Firestore から都道府県リストを取得
-      const prefectureRefs = await db
+      // 🔍 Firestore から月次ランキング用の都道府県リストを取得
+      const monthlyPrefectureRefs = await db
           .doc(`battingAverageRanking/${year}_${month}`)
           .listCollections();
 
-      const prefectures = prefectureRefs.map((col) => col.id);
+      const monthlyPrefectures = monthlyPrefectureRefs.map((col) => col.id);
 
-      console.log(`🏆 都道府県数: ${prefectures.length}`);
+      console.log(`🏆 月次都道府県数: ${monthlyPrefectures.length}`);
 
-      for (const prefecture of prefectures) {
+      for (const prefecture of monthlyPrefectures) {
         const payload = {
           year,
           month,
@@ -4947,7 +4998,7 @@ export const scheduleRankingProcessing = onSchedule(
             },
           },
         });
-        console.log(`✅ Batterタスク追加: ${prefecture}`);
+        console.log(`✅ 月次Batterタスク追加: ${prefecture}`);
 
         // 🔹 ピッチャーランキングのタスク
         await client.createTask({
@@ -4963,21 +5014,41 @@ export const scheduleRankingProcessing = onSchedule(
             },
           },
         });
-        console.log(`✅ Pitcherタスク追加: ${prefecture}`);
+        console.log(`✅ 月次Pitcherタスク追加: ${prefecture}`);
+      }
 
-        if (!skipAnnualUpdate) {
-        // 年間バッター
+      if (!skipAnnualUpdate) {
+        // 🔍 Firestore から年間ランキング用の都道府県リストを取得
+        const yearlyPrefectureRefs = await db
+            .doc(`battingAverageRanking/${year}_total`)
+            .listCollections();
+
+        const yearlyPrefectures = yearlyPrefectureRefs
+            .map((col) => col.id)
+            .filter((prefecture) => prefecture !== "全国");
+
+        console.log(`🏆 年間都道府県数: ${yearlyPrefectures.length}`);
+
+        for (const prefecture of yearlyPrefectures) {
+          const yearlyPayload = {
+            year,
+            prefecture,
+          };
+
+          // 年間バッター
           await client.createTask({
             parent: batterYearlyQueuePath,
             task: {
               httpRequest: {
                 httpMethod: "POST",
                 url: "https://processbatteryearly-etndg3x4ra-uc.a.run.app",
-                body: Buffer.from(JSON.stringify(payload)).toString("base64"),
+                body: Buffer.from(JSON.stringify(yearlyPayload))
+                    .toString("base64"),
                 headers: {"Content-Type": "application/json"},
               },
             },
           });
+          console.log(`✅ 年間Batterタスク追加: ${prefecture}`);
 
           // 年間ピッチャー
           await client.createTask({
@@ -4986,11 +5057,13 @@ export const scheduleRankingProcessing = onSchedule(
               httpRequest: {
                 httpMethod: "POST",
                 url: "https://processpitcheryearly-etndg3x4ra-uc.a.run.app",
-                body: Buffer.from(JSON.stringify(payload)).toString("base64"),
+                body: Buffer.from(JSON.stringify(yearlyPayload))
+                    .toString("base64"),
                 headers: {"Content-Type": "application/json"},
               },
             },
           });
+          console.log(`✅ 年間Pitcherタスク追加: ${prefecture}`);
         }
       }
 
@@ -5005,8 +5078,10 @@ export const scheduleRankingProcessing = onSchedule(
               body: Buffer.from(JSON.stringify({year})).toString("base64"),
               headers: {"Content-Type": "application/json"},
             },
+            scheduleTime: nationwideScheduleTime,
           },
         });
+        console.log(`✅ 全国Batterタスク追加: ${nationwideDelaySeconds}秒後`);
 
         // 全国ランキングタスク（最後に追加）
         await client.createTask({
@@ -5018,8 +5093,24 @@ export const scheduleRankingProcessing = onSchedule(
               body: Buffer.from(JSON.stringify({year})).toString("base64"),
               headers: {"Content-Type": "application/json"},
             },
+            scheduleTime: nationwideScheduleTime,
           },
         });
+        console.log(`✅ 全国Pitcherタスク追加: ${nationwideDelaySeconds}秒後`);
+
+        await client.createTask({
+          parent: rankingSnapshotQueuePath,
+          task: {
+            httpRequest: {
+              httpMethod: "POST",
+              url: "https://processweeklyrankingsnapshots-etndg3x4ra-uc.a.run.app",
+              body: Buffer.from(JSON.stringify({year})).toString("base64"),
+              headers: {"Content-Type": "application/json"},
+            },
+            scheduleTime: snapshotScheduleTime,
+          },
+        });
+        console.log(`✅ 週次ランキングSnapshotタスク追加: ${snapshotDelaySeconds}秒後`);
       }
       console.log("📌 全タスクのスケジューリング完了");
     });
@@ -5290,6 +5381,320 @@ export const processNationwidePitcherRanking = onRequest(
         res.status(500).send("❌ 全国ピッチャーランキング処理に失敗しました");
       }
     });
+
+export const processWeeklyRankingSnapshots = onRequest(
+    {
+      timeoutSeconds: 3600,
+    },
+    async (req, res) => {
+      try {
+        const {year} = req.body;
+        if (!year) {
+          return res.status(400).send("year is required");
+        }
+
+        await saveWeeklyRankingSnapshots(year);
+        return res.status(200).send("✅ 週次ランキングスナップショットを保存しました");
+      } catch (error) {
+        console.error("🚨 processWeeklyRankingSnapshots Error:", error);
+        return res.status(500).send("❌ 週次ランキングスナップショット保存に失敗しました");
+      }
+    },
+);
+
+/**
+ * 週次ランキング更新通知用に、ユーザーごとの現在順位を保存する。
+ * 前回順位がある場合のみ、順位アップした項目を rankingUpdates/current に保存する。
+ * @param {number} year 対象年
+ * @return {Promise<void>}
+ */
+async function saveWeeklyRankingSnapshots(year) {
+  console.log(`📌 saveWeeklyRankingSnapshots start: ${year}`);
+
+  const battingPrefectureRefs = await db
+      .doc(`battingAverageRanking/${year}_total`)
+      .listCollections();
+
+  const currentRanksByUser = {};
+
+  for (const col of battingPrefectureRefs) {
+    const prefecture = col.id;
+    if (prefecture === "全国") continue;
+
+    const snapshot = await db
+        .collection(`battingAverageRanking/${year}_total/${prefecture}`)
+        .get();
+
+    snapshot.forEach((doc) => {
+      if (doc.id === "stats") return;
+      const data = doc.data() || {};
+      const uid = doc.id;
+
+      if (!currentRanksByUser[uid]) {
+        currentRanksByUser[uid] = {
+          prefecture,
+        };
+      }
+
+      currentRanksByUser[uid].battingAverageRank =
+        rankValueOrNull(data.battingAverageRank);
+      currentRanksByUser[uid].homeRunsRank =
+        rankValueOrNull(data.homeRunsRank);
+      currentRanksByUser[uid].onBaseRank =
+        rankValueOrNull(data.onBaseRank);
+      currentRanksByUser[uid].sluggingRank =
+        rankValueOrNull(data.sluggingRank);
+      currentRanksByUser[uid].stealsRank =
+        rankValueOrNull(data.stealsRank);
+      currentRanksByUser[uid].totalRbisRank =
+        rankValueOrNull(data.totalRbisRank);
+    });
+  }
+
+  const pitcherPrefectureRefs = await db
+      .doc(`pitcherRanking/${year}_total`)
+      .listCollections();
+
+  for (const col of pitcherPrefectureRefs) {
+    const prefecture = col.id;
+    if (prefecture === "全国") continue;
+
+    const snapshot = await db
+        .collection(`pitcherRanking/${year}_total/${prefecture}`)
+        .get();
+
+    snapshot.forEach((doc) => {
+      if (doc.id === "stats") return;
+      const data = doc.data() || {};
+      const uid = doc.id;
+
+      if (!currentRanksByUser[uid]) {
+        currentRanksByUser[uid] = {
+          prefecture,
+        };
+      }
+
+      currentRanksByUser[uid].eraRank = rankValueOrNull(data.eraRank);
+      currentRanksByUser[uid].totalEarnedRunsRank =
+        rankValueOrNull(data.totalEarnedRunsRank);
+      currentRanksByUser[uid].totalHoldPointsRank =
+        rankValueOrNull(data.totalHoldPointsRank);
+      currentRanksByUser[uid].totalPStrikeoutsRank =
+        rankValueOrNull(data.totalPStrikeoutsRank);
+      currentRanksByUser[uid].totalSavesRank =
+        rankValueOrNull(data.totalSavesRank);
+      currentRanksByUser[uid].winRateRank =
+        rankValueOrNull(data.winRateRank);
+    });
+  }
+
+  let savedCount = 0;
+  let updateCount = 0;
+
+  for (const [uid, ranks] of Object.entries(currentRanksByUser)) {
+    const snapshotRef = db.doc(`users/${uid}/rankingSnapshot/current`);
+    const updateRef = db.doc(`users/${uid}/rankingUpdates/current`);
+
+    const previousSnap = await snapshotRef.get();
+    const previous = previousSnap.exists ? previousSnap.data() || {} : {};
+
+    const current = {
+      year,
+      prefecture: ranks.prefecture || null,
+      updatedAt: Timestamp.now(),
+    };
+
+    setRankIfExists(current, "battingAverageRank", ranks.battingAverageRank);
+    setRankIfExists(current, "homeRunsRank", ranks.homeRunsRank);
+    setRankIfExists(current, "onBaseRank", ranks.onBaseRank);
+    setRankIfExists(current, "sluggingRank", ranks.sluggingRank);
+    setRankIfExists(current, "stealsRank", ranks.stealsRank);
+    setRankIfExists(current, "totalRbisRank", ranks.totalRbisRank);
+    setRankIfExists(current, "eraRank", ranks.eraRank);
+    setRankIfExists(
+        current,
+        "totalEarnedRunsRank",
+        ranks.totalEarnedRunsRank,
+    );
+    setRankIfExists(
+        current,
+        "totalHoldPointsRank",
+        ranks.totalHoldPointsRank,
+    );
+    setRankIfExists(
+        current,
+        "totalPStrikeoutsRank",
+        ranks.totalPStrikeoutsRank,
+    );
+    setRankIfExists(current, "totalSavesRank", ranks.totalSavesRank);
+    setRankIfExists(current, "winRateRank", ranks.winRateRank);
+
+    const items = [
+      buildRankingUpdateItem({
+        type: "battingAverageRank",
+        label: "打率",
+        previousRank: previous.battingAverageRank,
+        currentRank: current.battingAverageRank,
+      }),
+      buildRankingUpdateItem({
+        type: "homeRunsRank",
+        label: "本塁打",
+        previousRank: previous.homeRunsRank,
+        currentRank: current.homeRunsRank,
+      }),
+      buildRankingUpdateItem({
+        type: "onBaseRank",
+        label: "出塁率",
+        previousRank: previous.onBaseRank,
+        currentRank: current.onBaseRank,
+      }),
+      buildRankingUpdateItem({
+        type: "sluggingRank",
+        label: "長打率",
+        previousRank: previous.sluggingRank,
+        currentRank: current.sluggingRank,
+      }),
+      buildRankingUpdateItem({
+        type: "stealsRank",
+        label: "盗塁",
+        previousRank: previous.stealsRank,
+        currentRank: current.stealsRank,
+      }),
+      buildRankingUpdateItem({
+        type: "totalRbisRank",
+        label: "打点",
+        previousRank: previous.totalRbisRank,
+        currentRank: current.totalRbisRank,
+      }),
+      buildRankingUpdateItem({
+        type: "eraRank",
+        label: "防御率",
+        previousRank: previous.eraRank,
+        currentRank: current.eraRank,
+      }),
+      buildRankingUpdateItem({
+        type: "totalEarnedRunsRank",
+        label: "自責点",
+        previousRank: previous.totalEarnedRunsRank,
+        currentRank: current.totalEarnedRunsRank,
+      }),
+      buildRankingUpdateItem({
+        type: "totalHoldPointsRank",
+        label: "ホールドポイント",
+        previousRank: previous.totalHoldPointsRank,
+        currentRank: current.totalHoldPointsRank,
+      }),
+      buildRankingUpdateItem({
+        type: "totalPStrikeoutsRank",
+        label: "奪三振",
+        previousRank: previous.totalPStrikeoutsRank,
+        currentRank: current.totalPStrikeoutsRank,
+      }),
+      buildRankingUpdateItem({
+        type: "totalSavesRank",
+        label: "セーブ",
+        previousRank: previous.totalSavesRank,
+        currentRank: current.totalSavesRank,
+      }),
+      buildRankingUpdateItem({
+        type: "winRateRank",
+        label: "勝率",
+        previousRank: previous.winRateRank,
+        currentRank: current.winRateRank,
+      }),
+    ].filter(Boolean);
+
+    if (items.length > 0) {
+      await updateRef.set({
+        year,
+        createdAt: Timestamp.now(),
+        items,
+      });
+      updateCount++;
+    } else {
+      await updateRef.delete().catch((error) => {
+        console.log(
+            `rankingUpdates/current delete skipped for ${uid}:`,
+            error.message,
+        );
+      });
+    }
+
+    await snapshotRef.set(current);
+    savedCount++;
+  }
+
+  console.log(
+      `✅ saveWeeklyRankingSnapshots done: 
+      saved=${savedCount}, updates=${updateCount}`,
+  );
+}
+
+/**
+ * rank値を保存用に正規化する。
+ * @param {*} value 値
+ * @return {number|null}
+ */
+function rankValueOrNull(value) {
+  return typeof value === "number" ? value : null;
+}
+
+/**
+ * rank値が存在するときだけ保存対象に入れる。
+ * @param {Object} target 保存対象
+ * @param {string} key フィールド名
+ * @param {number|null|undefined} value rank値
+ */
+function setRankIfExists(target, key, value) {
+  if (typeof value === "number") {
+    target[key] = value;
+  }
+}
+
+/**
+ * 順位アップした場合だけ通知アイテムを返す。
+ * @param {Object} params パラメータ
+ * @param {string} params.type 種別
+ * @param {string} params.label 表示名
+ * @param {number|null|undefined} params.previousRank 前回順位
+ * @param {number|null|undefined} params.currentRank 今回順位
+ * @return {Object|null}
+ */
+function buildRankingUpdateItem({type, label, previousRank, currentRank}) {
+  // 初ランクイン
+  if (
+    (previousRank === null || previousRank === undefined) &&
+    typeof currentRank === "number"
+  ) {
+    return {
+      type,
+      label,
+      previousRank: null,
+      currentRank,
+      change: null,
+      isFirstPlace: currentRank === 1,
+      isNewRankIn: true,
+    };
+  }
+
+  if (typeof previousRank !== "number" || typeof currentRank !== "number") {
+    return null;
+  }
+
+  if (currentRank >= previousRank) {
+    return null;
+  }
+
+  return {
+    type,
+    label,
+    previousRank,
+    currentRank,
+    change: previousRank - currentRank,
+    isFirstPlace: currentRank === 1,
+    isNewRankIn: false,
+  };
+}
 
 /**
       * 月次ランキングを保存
@@ -10989,7 +11394,7 @@ export const checkSubscriptionExpiry = onSchedule(
         if (subDocs.empty) continue;
 
         for (const subDoc of subDocs.docs) {
-          const platform = subDoc.id;
+          // const platform = subDoc.id;
           const subData = subDoc.data() || {};
 
           let expiryDate = null;
@@ -11007,15 +11412,23 @@ export const checkSubscriptionExpiry = onSchedule(
           const status = String(subData.status || "").toLowerCase();
 
           if (isExpired && status !== "inactive") {
-            await subColRef.doc(platform).set(
+            await subDoc.ref.set(
                 {
                   status: "inactive",
-                  platform,
                   updatedAt: Timestamp.now(),
                 },
                 {merge: true},
             );
-            console.log(`❌ [users] 期限切れ→inactive: ${userId} (${platform})`);
+
+            await db.collection("users").doc(userId).set(
+                {
+                  isPremium: false,
+                  premiumUpdatedAt: Timestamp.now(),
+                },
+                {merge: true},
+            );
+
+            console.log(`❌ [users] 期限切れ→inactive: ${userId}`);
           }
         }
       }
@@ -11487,7 +11900,7 @@ export const revenuecatWebhook = onRequest(
               .collection("users")
               .doc(uid)
               .collection("subscription")
-              .doc(platform);
+              .doc("current");
 
           // 既存購読を確認（active を守る）
           if (writeData.status === "inactive") {
@@ -11533,6 +11946,19 @@ export const revenuecatWebhook = onRequest(
           }
 
           await userSubRef.set(writeData, {merge: true});
+
+          if (writeData.status) {
+            await db
+                .collection("users")
+                .doc(uid)
+                .set(
+                    {
+                      isPremium: writeData.status === "active",
+                      premiumUpdatedAt: Timestamp.now(),
+                    },
+                    {merge: true},
+                );
+          }
 
           console.log(
               "✅ RevenueCat webhook(v2) applied to USER:",
@@ -11885,3 +12311,1420 @@ export const mergeTentativeUserDataToRealUser = onCall(async (request) => {
     );
   }
 });
+
+// ================= 月一称号 =================
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
+const monthlyAwardQueuePath =
+  client.queuePath(project, location, "generateMonthlyAwardsQueue");
+
+const generateMonthlyAwardTaskUrl =
+  "https://generatemonthlyawardtask-etndg3x4ra-an.a.run.app";
+
+// 月初に全ユーザー分の称号生成タスクを積む
+export const enqueueMonthlyAwards = onSchedule(
+    {
+      schedule: "0 4 1 * *",
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      console.log("🏅 enqueueMonthlyAwards started");
+
+      const usersSnap = await db.collection("users").get();
+
+      let taskCount = 0;
+
+      for (const userDoc of usersSnap.docs) {
+        const uid = userDoc.id;
+
+        // プレミアム会員のみ対象
+        const userData = userDoc.data() || {};
+        if (userData.isPremium !== true) {
+          continue;
+        }
+
+        await client.createTask({
+          parent: monthlyAwardQueuePath,
+          task: {
+            httpRequest: {
+              httpMethod: "POST",
+              url: generateMonthlyAwardTaskUrl,
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: Buffer.from(
+                  JSON.stringify({uid}),
+              ).toString("base64"),
+            },
+          },
+        });
+
+        taskCount++;
+      }
+
+      console.log("🏅 monthly award tasks enqueued", {
+        taskCount,
+      });
+
+      console.log("🏅 enqueueMonthlyAwards finished");
+    },
+);
+
+// Cloud Tasks から呼ばれる称号生成 Function
+export const generateMonthlyAwardTask = onRequest(
+    {
+      region: "asia-northeast1",
+      timeoutSeconds: 540,
+      secrets: [OPENAI_API_KEY],
+    },
+    async (req, res) => {
+      try {
+        const {uid} = req.body || {};
+
+        if (!uid) {
+          res.status(400).send("Missing uid");
+          return;
+        }
+
+        const userRef = db.collection("users").doc(uid);
+        const userSnap = await userRef.get();
+        const userData = userSnap.data() || {};
+
+        if (userData.isPremium !== true) {
+          console.log("⏭️ monthly award skipped: not premium", {uid});
+          res.status(200).send("not premium");
+          return;
+        }
+
+        const now = new Date();
+        const targetDate = new Date(
+            now.getFullYear(),
+            now.getMonth() - 1,
+            1,
+        );
+
+        const targetYear = targetDate.getFullYear();
+        const targetMonth = targetDate.getMonth() + 1;
+        const awardMonthKey = `${targetYear}-${targetMonth}`;
+
+        console.log("🏅 generateMonthlyAwardTask", {uid, awardMonthKey});
+
+        // 月初に前月分の称号を作る。statsの月キーは0埋めしない。
+        const targetMonthStatsKey =
+        `results_stats_${targetYear}_${targetMonth}`;
+
+        const previousMonthDate = new Date(
+            targetYear,
+            targetMonth - 2,
+            1,
+        );
+
+        const previousMonthStatsKey =
+          `results_stats_${previousMonthDate.getFullYear()}_${
+            previousMonthDate.getMonth() + 1
+          }`;
+
+        const [
+          seasonStatsSnap,
+          targetMonthStatsSnap,
+          previousMonthStatsSnap,
+        ] = await Promise.all([
+          userRef.collection("stats")
+              .doc(`results_stats_${targetYear}_all`).get(),
+          userRef.collection("stats")
+              .doc(targetMonthStatsKey).get(),
+          userRef.collection("stats")
+              .doc(previousMonthStatsKey).get(),
+        ]);
+
+        const seasonStats = seasonStatsSnap.data() || {};
+        const targetMonthStats = targetMonthStatsSnap.data() || {};
+        const previousMonthStats = previousMonthStatsSnap.data() || {};
+        const growthCandidates = buildMonthlyGrowthCandidates(
+            previousMonthStats,
+            targetMonthStats,
+        );
+
+        const award = await generateMonthlyAwardWithOpenAI({
+          userData,
+          seasonStats,
+          targetMonthStats,
+          previousMonthStats,
+          growthCandidates,
+          year: targetYear,
+          awardMonthKey,
+          targetMonthStatsKey,
+          previousMonthStatsKey,
+        });
+
+        const awardData = {
+          monthKey: awardMonthKey,
+          title: award.title,
+          description: award.description,
+          encourage: award.encourage,
+          reasonHints: award.reasonHints || [],
+          growthPoints: award.growthPoints || [],
+          growthCandidates,
+          source: award.source,
+          model: award.model || null,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        };
+
+        const monthlyAwardsRef = userRef.collection("monthlyAwards");
+
+        await monthlyAwardsRef.doc(awardMonthKey).set(awardData, {merge: true});
+        await monthlyAwardsRef.doc("current").set(awardData, {merge: true});
+
+        console.log("✅ monthly award saved", {
+          uid,
+          awardMonthKey,
+          source: awardData.source,
+          title: awardData.title,
+        });
+
+        res.status(200).send("ok");
+      } catch (e) {
+        console.error("🚨 generateMonthlyAwardTask error", e);
+        res.status(500).send("error");
+      }
+    },
+);
+
+/**
+ * OpenAIで月間称号を生成する。失敗時はダミーにフォールバック。
+ * @param {Object} params パラメータ
+ * @return {Promise<Object>} 称号データ
+ */
+async function generateMonthlyAwardWithOpenAI(params) {
+  const apiKey = OPENAI_API_KEY.value();
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+
+  if (!apiKey) {
+    return buildFallbackMonthlyAward("missing_api_key");
+  }
+
+  const payload = buildMonthlyAwardPromptPayload(params);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          {
+            role: "system",
+            content:
+              "あなたは草野球アプリB-Netの楽しい専属コーチです。" +
+              "選手を前向きに褒める短い称号を作ります。" +
+              "過度にプロっぽくしすぎず、草野球らしい親しみやすさを大切にしてください。",
+          },
+          {
+            role: "user",
+            content: [
+              "次の選手データから今月の称号をJSONで作ってください。",
+              "これは成績レポートではなく、毎月届く野球おみくじです。",
+              "titleは12文字以内。説明文ではなく短いあだ名にしてください。",
+              "titleは自然な日本語で、チーム内で言われても違和感のない言葉にしてください。",
+              "titleは肩書ではありません。友達が付ける呼び名のようにしてください。",
+              "titleだけ見て少しクスッとできる、親しみのある表現を優先してください。",
+              "titleは性格を決めつけず、プレースタイルや今月の動きから作ってください。",
+              "titleはふざけすぎず、少し親しみがある程度にしてください。",
+              "『おっとり』『太郎』『魔神』『怪物』『王』『最強』は禁止です。",
+              "不自然・強すぎる・キャラ付けしすぎる表現は避けてください。",
+              "『〜職人』『〜のエース』『安打製造機』は避けてください。",
+              "『〜番長』『〜名人』『〜マスター』などのテンプレ表現も避けてください。",
+              "『頼れるバッター兼投手』『安定した投手』のような説明文は禁止です。",
+              "『打撃で活躍した選手』『二刀流プレイヤー』のような説明文も禁止です。",
+              "良いtitle例:『投打で大忙し』『気づけば出塁』。",
+              "良いtitle例:『守って打って大活躍』『マウンドも打席も』。",
+              "良いtitle例:『今日もフル稼働』『グラウンド駆け回り係』。",
+              "悪いtitle例:『頼れるバッター兼投手』『安定した投手』。",
+              "悪いtitle例:『打撃で活躍した選手』『二刀流プレイヤー』。",
+              "descriptionは70文字以内。監督の講評ではありません。",
+              "descriptionは友達やチームメイトがその月を振り返って言う一言にしてください。",
+              "descriptionで数字や成績説明を並べないでください。",
+              "descriptionは40〜70文字程度を目安にしてください。",
+              "descriptionは短すぎる一文だけで終わらせないでください。",
+              "descriptionはその月の印象が少し伝わるようにしてください。",
+              "『勝利に貢献した』『活躍した』『安定感があった』は禁止です。",
+              "descriptionはプレー中の雰囲気や印象を表現してください。",
+              "良いdescription例:『気づいたらいつも塁にいた気がする。』",
+              "良いdescription例:『なんだかんだ一番グラウンドにいたね。』",
+              "良いdescription例:『今月はやたら忙しそうだったな。』",
+              "良いdescription例:『打席でも守備でもよく見かけたよ。』",
+              "悪いdescription例:『チームの勝利に大きく貢献した。』",
+              "悪いdescription例:『安定した投球で試合を作った。』",
+              "悪いdescription例:『打撃で存在感を発揮した。』",
+              "encourageは60文字以内。来月も野球したくなる前向きな一言にしてください。",
+              "reasonHintsは1〜3個。数字ではなく特徴で書いてください。",
+              "reasonHints例:『出塁が多かった』『投打で動いていた』。",
+              "reasonHints例:『出塁が多かった』『投打で動いていた』。",
+              "reasonHints例:『守備でも存在感があった』。",
+              "reasonHints例:『盗塁で動いていた』『打席によく立っていた』。",
+              "reasonHints例:『マウンドでも投げていた』。",
+              "称号は成績上位項目だけで決める必要はありません。",
+              "打球方向、盗塁成功率、四球、三振、守備機会も見てください。",
+              "投打のバランスなどから、その選手らしい特徴を探してください。",
+              "少し意外でも面白い特徴が見つかった場合は優先して構いません。",
+              "ただし不自然な称号や強すぎる称号にはしないでください。",
+              "previousMonthStatsも渡されています。",
+              "前月との比較で伸びている部分があれば参考にしてください。",
+              "ただし比較や成長は無理に称号へ入れないでください。",
+              "growthCandidatesにはコードで計算した成長候補が入っています。",
+              "growthPointsはgrowthCandidatesから面白いものを最大3個選んでください。",
+              "growthPointsは必ずgrowthCandidatesの" +
+              "label/detail/valueTextを元にしてください。",
+              "growthPointsでは数字を少し見せて構いません。",
+              "ただし数字だけでなく、見た人がうれしくなる言葉にしてください。",
+              "順位や細かい数値はユーザーに見せない前提です。",
+              "isPitcherは参考情報です。実際の成績から評価してください。",
+              "打者型・投手型・二刀流型のどれとして評価するべきか判断してください。",
+              "投手登録でも打撃成績が際立っていれば打者として評価して構いません。",
+              "逆も同様です。",
+              "地域名や県名を無理に入れないでください。",
+              "データに無い要素を創作しないでください。",
+              "titleに書いた内容をdescriptionで繰り返さないでください。",
+              "titleとdescriptionは別の角度で褒めてください。",
+              "悪い称号例:『おっとり投げ太郎』『沖縄の二刀流魔神』。",
+              "悪い称号例:『安打製造機』『最強エース』『盗塁王』。",
+              JSON.stringify(payload),
+            ].join("\n"),
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "monthly_award",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                title: {type: "string"},
+                description: {type: "string"},
+                encourage: {type: "string"},
+                reasonHints: {
+                  type: "array",
+                  items: {type: "string"},
+                  minItems: 1,
+                  maxItems: 3,
+                },
+                growthPoints: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      label: {type: "string"},
+                      detail: {type: "string"},
+                      valueText: {type: "string"},
+                    },
+                    required: ["label", "detail", "valueText"],
+                  },
+                  minItems: 0,
+                  maxItems: 3,
+                },
+              },
+              required: [
+                "title",
+                "description",
+                "encourage",
+                "reasonHints",
+                "growthPoints",
+              ],
+            },
+          },
+        },
+        max_output_tokens: 220,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("🚨 OpenAI monthly award failed", {
+        status: response.status,
+        errorText,
+      });
+      return buildFallbackMonthlyAward("openai_error");
+    }
+
+    const json = await response.json();
+    const outputText = extractOpenAIText(json);
+    const parsed = JSON.parse(outputText);
+
+    return {
+      title: sanitizeAwardText(parsed.title, "今日もフル稼働", 16),
+      description: sanitizeAwardText(
+          parsed.description,
+          "今月もなんだかんだ、グラウンドでよく見かけました。",
+          90,
+      ),
+      encourage: sanitizeAwardText(
+          parsed.encourage,
+          "来月も自分らしく野球を楽しんでいきましょう。",
+          90,
+      ),
+      reasonHints: sanitizeReasonHints(parsed.reasonHints),
+      growthPoints: sanitizeGrowthPoints(parsed.growthPoints),
+      source: "openai",
+      model,
+    };
+  } catch (error) {
+    console.error("🚨 generateMonthlyAwardWithOpenAI error", error);
+    return buildFallbackMonthlyAward("exception");
+  }
+}
+
+/**
+ * AIに渡す称号用データを小さく整形する。
+ * @param {Object} params パラメータ
+ * @return {Object} プロンプト用データ
+ */
+function buildMonthlyAwardPromptPayload(params) {
+  const {
+    userData,
+    seasonStats,
+    targetMonthStats,
+    previousMonthStats,
+    growthCandidates,
+    year,
+    awardMonthKey,
+    targetMonthStatsKey,
+    previousMonthStatsKey,
+  } = params;
+
+  return {
+    year,
+    awardMonthKey,
+    targetMonthStatsKey,
+    previousMonthStatsKey,
+    player: {
+      positions: userData.positions || userData.position || null,
+      isPitcher: seasonStats.isPitcher === true ||
+        targetMonthStats.isPitcher === true,
+    },
+    targetMonthStats: compactMonthlyAwardStats(targetMonthStats),
+    previousMonthStats: compactMonthlyAwardStats(previousMonthStats),
+    seasonStats: compactMonthlyAwardStats(seasonStats),
+    growthCandidates,
+  };
+}
+
+/**
+ * 月間称号AIに渡す成績データを整形する。
+ * @param {Object} stats 元成績
+ * @return {Object} 整形済み成績
+ */
+function compactMonthlyAwardStats(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  return {
+    games: source.totalGames || null,
+    isPitcher: source.isPitcher === true,
+    batting: {
+      battingAverage: source.battingAverage || source.avg || null,
+      onBasePercentage: source.onBasePercentage || null,
+      sluggingPercentage: source.sluggingPercentage || null,
+      ops: source.ops || null,
+      hits: source.hits || source.totalHits || null,
+      atBats: source.atBats || null,
+      totalBats: source.totalBats || null,
+      homeRuns: source.totalHomeRuns || source.homeRuns || null,
+      rbis: source.totalRbis || source.rbis || null,
+      steals: source.totalSteals || source.steals || null,
+      stealSuccessRate: advancedStats.stealSuccessRate || null,
+      strikeoutRate: advancedStats.strikeoutRate || null,
+      firstPitchSwingRate: advancedStats.firstPitchSwingRate || null,
+      firstPitchSwingSuccessRate:
+        advancedStats.firstPitchSwingSuccessRate || null,
+      hitBreakdown: advancedStats.hitBreakdown || null,
+      hitDirectionPercentage:
+        advancedStats.hitDirectionPercentage || null,
+      hitDirectionDetails: source.hitDirectionDetails || null,
+    },
+    pitching: {
+      era: source.era || null,
+      winRate: source.winRate || null,
+      wins: source.totalWins || null,
+      losses: source.totalLosses || null,
+      saves: source.totalSaves || null,
+      holdPoints: source.totalHoldPoints || null,
+      appearances: source.totalAppearances || null,
+      starts: source.totalStarts || null,
+      inningsPitched: source.totalInningsPitched || null,
+      strikeouts: source.totalPStrikeouts || null,
+      earnedRuns: source.totalEarnedRuns || null,
+      runsAllowed: source.totalRunsAllowed || null,
+      hitsAllowed: source.totalHitsAllowed || null,
+      walks: source.totalWalks || null,
+      whip: advancedStats.whip || null,
+      qsRate: advancedStats.qsRate || null,
+      strikeoutsPerNineInnings:
+        advancedStats.strikeoutsPerNineInnings || null,
+      pitcherStrikeoutsPerInning:
+        advancedStats.pitcherStrikeoutsPerInning || null,
+      battingAverageAllowed:
+        advancedStats.battingAverageAllowed || null,
+    },
+    fielding: {
+      fieldingPercentage: source.fieldingPercentage || null,
+      putouts: source.totalPutouts || null,
+      assists: source.totalAssists || null,
+      errors: source.totalErrors || null,
+    },
+  };
+}
+
+/**
+ * 前月と対象月を比較して成長候補を作る。
+ * @param {Object} previousStats 前月成績
+ * @param {Object} targetStats 対象月成績
+ * @return {Object[]} 成長候補
+ */
+function buildMonthlyGrowthCandidates(previousStats, targetStats) {
+  const previous = previousStats || {};
+  const target = targetStats || {};
+  const candidates = [];
+
+  const previousGames = toNumberOrNull(previous.totalGames);
+  const targetGames = toNumberOrNull(target.totalGames);
+
+  if (!previousGames || !targetGames) {
+    return candidates;
+  }
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalSteals,
+      target.totalSteals,
+      "盗塁での動きが増えた",
+      "前月より走塁で動く場面が増えています。",
+      1,
+      "回",
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.hits || previous.totalHits,
+      target.hits || target.totalHits,
+      "安打が増えた",
+      "打席で結果につながる場面が増えています。",
+      1,
+      "本",
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalRbis || previous.rbis,
+      target.totalRbis || target.rbis,
+      "打点につながる場面が増えた",
+      "チャンスで得点に絡む場面が増えています。",
+      1,
+      "点",
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalHomeRuns || previous.homeRuns,
+      target.totalHomeRuns || target.homeRuns,
+      "長打の存在感が増えた",
+      "大きい当たりで印象を残す場面が増えています。",
+      1,
+      "本",
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      previous.onBasePercentage,
+      target.onBasePercentage,
+      "出塁の存在感が上がった",
+      "塁に出る力が前月より目立っています。",
+      0.05,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      previous.sluggingPercentage,
+      target.sluggingPercentage,
+      "長打の気配が増した",
+      "強い打球で印象を残す場面が増えています。",
+      0.08,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      previous.ops,
+      target.ops,
+      "打席での怖さが増した",
+      "出塁と長打を合わせた打席の怖さが増しています。",
+      0.08,
+  );
+
+  addRateDecreaseCandidate(
+      candidates,
+      previous.era,
+      target.era,
+      "投球内容が締まってきた",
+      "前月より失点を抑える投球になっています。",
+      0.5,
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalPStrikeouts,
+      target.totalPStrikeouts,
+      "奪三振が増えた",
+      "打者を打ち取る力が数字にも出ています。",
+      1,
+      "個",
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalPutouts,
+      target.totalPutouts,
+      "守備での出番が増えた",
+      "守備でボールに関わる場面が増えています。",
+      2,
+      "回",
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      previous.fieldingPercentage,
+      target.fieldingPercentage,
+      "守備の安定感が上がった",
+      "守備の確実さが前月より上がっています。",
+      0.05,
+  );
+
+  // ==== Additional monthly growth candidates ====
+  addRateIncreaseCandidate(
+      candidates,
+      previous.battingAverage,
+      target.battingAverage,
+      "ミート力が上がった",
+      "前月よりヒットにする力が目立っています。",
+      0.05,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      previous.sluggingPercentage,
+      target.sluggingPercentage,
+      "長打の気配が増した",
+      "打球の強さや遠くへ飛ばす力が前月より出ています。",
+      0.08,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      getStealSuccessRate(previous),
+      getStealSuccessRate(target),
+      "走塁の成功率が上がった",
+      "積極性だけでなく、走塁の精度も上がっています。",
+      0.1,
+  );
+
+  addRateDecreaseCandidate(
+      candidates,
+      getStrikeoutRate(previous),
+      getStrikeoutRate(target),
+      "三振が減ってきた",
+      "打席で粘れる場面が前月より増えています。",
+      0.05,
+  );
+
+  // === バッター向けアプローチの成長候補 ===
+  addRateDecreaseCandidate(
+      candidates,
+      getMissSwingRate(previous),
+      getMissSwingRate(target),
+      "空振りが減ってきた",
+      "バットに当てる場面が前月より増えています。",
+      0.05,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      getAvgPitchesPerAtBat(previous),
+      getAvgPitchesPerAtBat(target),
+      "打席で粘れていた",
+      "相手投手に球数を投げさせる打席が増えています。",
+      0.5,
+  );
+
+  addRateDecreaseCandidate(
+      candidates,
+      getSwingRate(previous),
+      getSwingRate(target),
+      "見極めが落ち着いてきた",
+      "振り急がずにボールを見る場面が増えています。",
+      0.08,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      getFirstPitchSuccessRate(previous),
+      getFirstPitchSuccessRate(target),
+      "初球から仕掛けられていた",
+      "初球から良い形で打ちにいける場面が増えています。",
+      0.1,
+  );
+
+  addRateDecreaseCandidate(
+      candidates,
+      getWhip(previous),
+      getWhip(target),
+      "ランナーを出しにくくなった",
+      "投球中の余計な出塁を前月より抑えられています。",
+      0.2,
+  );
+
+  addRateDecreaseCandidate(
+      candidates,
+      getAvgPitchesPerBatter(previous),
+      getAvgPitchesPerBatter(target),
+      "テンポ良く投げられていた",
+      "少ない球数で打者を打ち取る場面が増えています。",
+      0.2,
+  );
+
+  addRateDecreaseCandidate(
+      candidates,
+      getBattingAverageAllowed(previous),
+      getBattingAverageAllowed(target),
+      "打たれにくくなった",
+      "相手打者を抑える場面が前月より増えています。",
+      0.05,
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalInningsPitched,
+      target.totalInningsPitched,
+      "投げる出番が増えた",
+      "マウンドで任される場面が前月より増えています。",
+      2,
+      "回",
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalAssists,
+      target.totalAssists,
+      "守備でさばく場面が増えた",
+      "送球や中継など守備で関わる場面が増えています。",
+      2,
+      "回",
+  );
+
+  addDecreaseCandidate(
+      candidates,
+      previous.totalErrors,
+      target.totalErrors,
+      "エラーが減ってきた",
+      "守備で落ち着いたプレーが前月より増えています。",
+      1,
+      "個",
+  );
+
+  addDecreaseCandidate(
+      candidates,
+      previous.totalWalks,
+      target.totalWalks,
+      "四球が減ってきた",
+      "余計なランナーを出す場面が前月より減っています。",
+      1,
+      "個",
+  );
+
+  addDecreaseCandidate(
+      candidates,
+      previous.totalRunsAllowed,
+      target.totalRunsAllowed,
+      "失点を抑えられていた",
+      "前月より相手に点を許す場面が減っています。",
+      1,
+      "点",
+  );
+
+  // === 打球方向の広がり・特徴追加 ===
+  addDirectionSpreadCandidate(
+      candidates,
+      previous,
+      target,
+  );
+
+  addMainDirectionCandidate(
+      candidates,
+      previous,
+      target,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      getBuntSuccessRate(previous),
+      getBuntSuccessRate(target),
+      "小技が光っていた",
+      "バントでチームを助ける場面が増えています。",
+      0.1,
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalInfieldHits,
+      target.totalInfieldHits,
+      "内野安打が増えた",
+      "足や打球の工夫で出塁する場面が増えています。",
+      1,
+      "本",
+  );
+
+  addIncreaseCandidate(
+      candidates,
+      previous.totalWalks,
+      target.totalWalks,
+      "四球を選べていた",
+      "打席で落ち着いて見極める場面が増えています。",
+      1,
+      "個",
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      getFirstPitchSwingRate(previous),
+      getFirstPitchSwingRate(target),
+      "初球から積極的だった",
+      "迷わず勝負にいく場面が増えています。",
+      0.1,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      getInfieldHitsRate(previous),
+      getInfieldHitsRate(target),
+      "足で一本をもぎ取れた",
+      "打球や走力で出塁する場面が増えています。",
+      0.05,
+  );
+
+  addRateIncreaseCandidate(
+      candidates,
+      getLinerRate(previous),
+      getLinerRate(target),
+      "強い打球が増えた",
+      "ライナー性の打球が前月より増えています。",
+      0.08,
+  );
+
+  return candidates.slice(0, 10);
+}
+
+/**
+ * 数値に変換する。変換できない場合はnull。
+ * @param {*} value 値
+ * @return {?number} 数値またはnull
+ */
+function toNumberOrNull(value) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+/**
+ * 打球方向の広がりが増えたときに成長候補を追加する。
+ * @param {Object[]} candidates 成長候補配列
+ * @param {Object} previous 前月成績
+ * @param {Object} target 対象月成績
+ */
+function addDirectionSpreadCandidate(candidates, previous, target) {
+  const previousCount = countActiveHitDirections(previous);
+  const targetCount = countActiveHitDirections(target);
+
+  if (previousCount === null || targetCount === null) return;
+  const diff = targetCount - previousCount;
+
+  if (diff >= 2) {
+    candidates.push({
+      label: "広角に打てていた",
+      detail: "前月よりいろいろな方向へ打球が飛んでいます。",
+      previousValue: previousCount,
+      targetValue: targetCount,
+      diff,
+      valueText: `${previousCount}方向 → ${targetCount}方向`,
+    });
+  }
+}
+
+/**
+ * 対象月に目立った打球方向があれば成長候補を追加する。
+ * @param {Object[]} candidates 成長候補配列
+ * @param {Object} previous 前月成績
+ * @param {Object} target 対象月成績
+ */
+function addMainDirectionCandidate(candidates, previous, target) {
+  const previousMain = getMainHitDirection(previous);
+  const targetMain = getMainHitDirection(target);
+
+  if (!targetMain || targetMain.rate < 0.28) return;
+
+  if (!previousMain || targetMain.name !== previousMain.name ||
+    targetMain.rate - previousMain.rate >= 0.12) {
+    candidates.push({
+      label: `${targetMain.name}方向への打球が増えた`,
+      detail: "前月より打球方向に特徴が出ています。",
+      previousValue: previousMain ? previousMain.rate : null,
+      targetValue: targetMain.rate,
+      diff: previousMain ? targetMain.rate - previousMain.rate :
+        targetMain.rate,
+      valueText: previousMain ?
+        `${formatRate(previousMain.rate)} → ${formatRate(targetMain.rate)}` :
+        formatRate(targetMain.rate),
+    });
+  }
+}
+
+/**
+ * 打球方向の割合またはカウントを取得する。
+ * @param {Object} stats 成績
+ * @return {?Object} 打球方向データ
+ */
+function getHitDirectionMap(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  return advancedStats.hitDirectionPercentage ||
+    source.hitDirectionPercentage ||
+    source.hitDirectionCounts ||
+    null;
+}
+
+/**
+ * 打球が飛んだ方向数を数える。
+ * @param {Object} stats 成績
+ * @return {?number} 方向数
+ */
+function countActiveHitDirections(stats) {
+  const value = getHitDirectionMap(stats);
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return Object.values(value).filter((rate) => {
+    const numberValue = toNumberOrNull(rate);
+    return numberValue !== null && numberValue > 0;
+  }).length;
+}
+
+/**
+ * 最も割合が高い打球方向を取得する。
+ * @param {Object} stats 成績
+ * @return {?Object} 方向データ
+ */
+function getMainHitDirection(stats) {
+  const value = getHitDirectionMap(stats);
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const total = Object.values(value).reduce((sum, rawValue) => {
+    const numberValue = toNumberOrNull(rawValue);
+    return numberValue === null ? sum : sum + numberValue;
+  }, 0);
+
+  if (total <= 0) return null;
+
+  let result = null;
+  for (const [name, rawValue] of Object.entries(value)) {
+    const numberValue = toNumberOrNull(rawValue);
+    if (numberValue === null) continue;
+    const rate = numberValue > 1 ? numberValue / total : numberValue;
+    if (!result || rate > result.rate) {
+      result = {name, rate};
+    }
+  }
+  return result;
+}
+
+/**
+ * バント成功率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} バント成功率
+ */
+function getBuntSuccessRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.buntSuccessRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const attempts = toNumberOrNull(source.totalBuntAttempts);
+  const successes = toNumberOrNull(source.totalBuntSuccesses);
+  if (!attempts || successes === null) return null;
+  return successes / attempts;
+}
+
+/**
+ * 盗塁成功率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 盗塁成功率
+ */
+function getStealSuccessRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.stealSuccessRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const steals = toNumberOrNull(source.totalSteals);
+  const attempts = toNumberOrNull(source.totalstealsAttempts);
+  if (!attempts || steals === null) return null;
+  return steals / attempts;
+}
+
+/**
+ * 三振率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 三振率
+ */
+function getStrikeoutRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.strikeoutRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const strikeouts = toNumberOrNull(source.totalStrikeouts);
+  const atBats = toNumberOrNull(source.atBats);
+  if (!atBats || strikeouts === null) return null;
+  return strikeouts / atBats;
+}
+
+/**
+ * 空振り率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 空振り率
+ */
+function getMissSwingRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.missSwingRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const misses = toNumberOrNull(source.missSwingCount);
+  const swings = toNumberOrNull(source.swingCount);
+  if (!swings || misses === null) return null;
+  return misses / swings;
+}
+
+/**
+ * 1打席あたり球数を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 1打席あたり球数
+ */
+function getAvgPitchesPerAtBat(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.avgPitchesPerAtBat);
+  if (advancedRate !== null) return advancedRate;
+
+  const pitchCount = toNumberOrNull(source.batterPitchCount);
+  const atBats = toNumberOrNull(source.atBats);
+  if (!atBats || pitchCount === null) return null;
+  return pitchCount / atBats;
+}
+
+/**
+ * スイング率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} スイング率
+ */
+function getSwingRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.swingRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const swingCount = toNumberOrNull(source.swingCount);
+  const pitchCount = toNumberOrNull(source.batterPitchCount);
+  if (!pitchCount || swingCount === null) return null;
+  return swingCount / pitchCount;
+}
+
+/**
+ * 初球スイング成功率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 初球成功率
+ */
+function getFirstPitchSuccessRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(
+      advancedStats.firstPitchSwingSuccessRate,
+  );
+  if (advancedRate !== null) return advancedRate;
+
+  const hits = toNumberOrNull(source.firstPitchSwingHits);
+  const swings = toNumberOrNull(source.firstPitchSwingCount);
+  if (!swings || hits === null) return null;
+  return hits / swings;
+}
+
+/**
+ * 初球スイング率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 初球スイング率
+ */
+function getFirstPitchSwingRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.firstPitchSwingRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const firstPitchSwings = toNumberOrNull(source.firstPitchSwingCount);
+  const atBats = toNumberOrNull(source.atBats);
+  if (!atBats || firstPitchSwings === null) return null;
+  return firstPitchSwings / atBats;
+}
+
+/**
+ * 1打者あたり球数を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 1打者あたり球数
+ */
+function getAvgPitchesPerBatter(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(
+      advancedStats.avgPitchesPerBatter,
+  );
+  if (advancedRate !== null) return advancedRate;
+
+  const pitchCount = toNumberOrNull(source.totalPitchCount);
+  const battersFaced = toNumberOrNull(source.totalBattersFaced);
+
+  if (!battersFaced || pitchCount === null) return null;
+
+  return pitchCount / battersFaced;
+}
+
+/**
+ * WHIPを取得する。
+ * @param {Object} stats 成績
+ * @return {?number} WHIP
+ */
+function getWhip(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.whip);
+  if (advancedRate !== null) return advancedRate;
+
+  const hitsAllowed = toNumberOrNull(source.totalHitsAllowed);
+  const walks = toNumberOrNull(source.totalWalks);
+  const innings = toNumberOrNull(source.totalInningsPitched);
+  if (!innings || hitsAllowed === null || walks === null) return null;
+  return (hitsAllowed + walks) / innings;
+}
+
+/**
+ * 被打率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 被打率
+ */
+function getBattingAverageAllowed(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedRate = toNumberOrNull(advancedStats.battingAverageAllowed);
+  if (advancedRate !== null) return advancedRate;
+
+  const hitsAllowed = toNumberOrNull(source.totalHitsAllowed);
+  const battersFaced = toNumberOrNull(source.totalBattersFaced);
+  if (!battersFaced || hitsAllowed === null) return null;
+  return hitsAllowed / battersFaced;
+}
+
+/**
+ * 内野安打率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} 内野安打率
+ */
+function getInfieldHitsRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const advancedBreakdown = advancedStats.hitBreakdown || {};
+  const advancedRate = toNumberOrNull(advancedBreakdown.infieldHitsRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const infieldHits = toNumberOrNull(source.totalInfieldHits);
+  const hits = toNumberOrNull(source.hits);
+  if (!hits || infieldHits === null) return null;
+  return infieldHits / hits;
+}
+
+/**
+ * ライナー率を取得する。
+ * @param {Object} stats 成績
+ * @return {?number} ライナー率
+ */
+function getLinerRate(stats) {
+  const source = stats || {};
+  const advancedStats = source.advancedStats || {};
+  const outBreakdown = advancedStats.outBreakdown || {};
+  const advancedRate = toNumberOrNull(outBreakdown.linerRate);
+  if (advancedRate !== null) return advancedRate;
+
+  const liners = toNumberOrNull(source.totalLiners);
+  const outs = toNumberOrNull(source.totalOuts);
+  if (!outs || liners === null) return null;
+  return liners / outs;
+}
+
+
+/**
+ * 数値が増えたときに成長候補を追加する。
+ * @param {Object[]} candidates 成長候補配列
+ * @param {*} previousValue 前月値
+ * @param {*} targetValue 対象月値
+ * @param {string} label ラベル
+ * @param {string} detail 詳細文
+ * @param {number} threshold 閾値
+ * @param {string} unit 単位
+ */
+function addIncreaseCandidate(
+    candidates,
+    previousValue,
+    targetValue,
+    label,
+    detail,
+    threshold,
+    unit,
+) {
+  const previous = toNumberOrNull(previousValue);
+  const target = toNumberOrNull(targetValue);
+  if (previous === null || target === null) return;
+  const diff = target - previous;
+  if (diff >= threshold) {
+    candidates.push({
+      label,
+      detail,
+      previousValue: previous,
+      targetValue: target,
+      diff,
+      valueText: `${formatGrowthNumber(previous)} → ` +
+        `${formatGrowthNumber(target)}（+${formatGrowthNumber(diff)}${unit}）`,
+    });
+  }
+}
+
+/**
+ * 率が上がったときに成長候補を追加する。
+ * @param {Object[]} candidates 成長候補配列
+ * @param {*} previousValue 前月値
+ * @param {*} targetValue 対象月値
+ * @param {string} label ラベル
+ * @param {string} detail 詳細文
+ * @param {number} threshold 閾値
+ */
+function addRateIncreaseCandidate(
+    candidates,
+    previousValue,
+    targetValue,
+    label,
+    detail,
+    threshold,
+) {
+  const previous = toNumberOrNull(previousValue);
+  const target = toNumberOrNull(targetValue);
+  if (previous === null || target === null) return;
+  const diff = target - previous;
+  if (diff >= threshold) {
+    candidates.push({
+      label,
+      detail,
+      previousValue: previous,
+      targetValue: target,
+      diff,
+      valueText: `${formatRate(previous)} → ${formatRate(target)}`,
+    });
+  }
+}
+
+/**
+ * 率が下がったときに成長候補を追加する。
+ * @param {Object[]} candidates 成長候補配列
+ * @param {*} previousValue 前月値
+ * @param {*} targetValue 対象月値
+ * @param {string} label ラベル
+ * @param {string} detail 詳細文
+ * @param {number} threshold 閾値
+ */
+function addRateDecreaseCandidate(
+    candidates,
+    previousValue,
+    targetValue,
+    label,
+    detail,
+    threshold,
+) {
+  const previous = toNumberOrNull(previousValue);
+  const target = toNumberOrNull(targetValue);
+  if (previous === null || target === null) return;
+  const diff = previous - target;
+  if (diff >= threshold) {
+    candidates.push({
+      label,
+      detail,
+      previousValue: previous,
+      targetValue: target,
+      diff: -diff,
+      valueText: `${formatGrowthNumber(previous)} → ` +
+        `${formatGrowthNumber(target)}`,
+    });
+  }
+}
+
+/**
+ * 成長数字を表示用に整える。
+ * @param {number} value 数値
+ * @return {string} 表示文字列
+ */
+function formatGrowthNumber(value) {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/**
+ * 率を表示用に整える。
+ * @param {number} value 数値
+ * @return {string} 表示文字列
+ */
+function formatRate(value) {
+  return value.toFixed(3).replace(/^0/, "");
+}
+
+/**
+ * OpenAI Responses APIの返答からテキストを取り出す。
+ * @param {Object} responseJson レスポンスJSON
+ * @return {string} 出力テキスト
+ */
+function extractOpenAIText(responseJson) {
+  if (typeof responseJson.output_text === "string") {
+    return responseJson.output_text;
+  }
+
+  const outputs = Array.isArray(responseJson.output) ? responseJson.output : [];
+  for (const output of outputs) {
+    const content = Array.isArray(output.content) ? output.content : [];
+    for (const item of content) {
+      if (typeof item.text === "string") return item.text;
+    }
+  }
+
+  throw new Error("OpenAI output text not found");
+}
+
+/**
+ * 称号文言の保険。
+ * @param {*} value 値
+ * @param {string} fallback fallback
+ * @param {number} maxLength 最大文字数
+ * @return {string} 整形済み文字列
+ */
+function sanitizeAwardText(value, fallback, maxLength) {
+  const text = String(value || fallback).trim();
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+/**
+ * AIが返した理由ヒントを整形する。
+ * @param {*} value 理由ヒント配列
+ * @return {string[]} 整形済み理由ヒント
+ */
+function sanitizeReasonHints(value) {
+  if (!Array.isArray(value)) {
+    return ["プレースタイルに個性が出ていた"];
+  }
+
+  return value
+      .map((item) => String(item || "").trim())
+      .filter((item) => item.length > 0)
+      .slice(0, 3);
+}
+
+/**
+ * AIが選んだ成長ポイントを整形する。
+ * @param {*} value 成長ポイント配列
+ * @return {Object[]} 整形済み成長ポイント
+ */
+function sanitizeGrowthPoints(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+      .map((item) => ({
+        label: String(item && item.label ? item.label : "").trim(),
+        detail: String(item && item.detail ? item.detail : "").trim(),
+        valueText: String(
+            item && item.valueText ? item.valueText : "",
+        ).trim(),
+      }))
+      .filter((item) => item.label.length > 0)
+      .slice(0, 3);
+}
+
+/**
+ * AI失敗時のフォールバック称号。
+ * @param {string} reason 理由
+ * @return {Object} 称号データ
+ */
+function buildFallbackMonthlyAward(reason) {
+  return {
+    title: "今日もフル稼働",
+    description: "今月もなんだかんだ、グラウンドでよく見かけました。",
+    encourage: "来月も自分らしく野球を楽しんでいきましょう。",
+    reasonHints: ["今月のプレーに個性が出ていた"],
+    growthPoints: [],
+    source: `fallback:${reason}`,
+    model: null,
+  };
+}
+
+/**
+ * 数値が減ったときに成長候補を追加する。
+ * @param {Object[]} candidates 成長候補配列
+ * @param {*} previousValue 前月値
+ * @param {*} targetValue 対象月値
+ * @param {string} label ラベル
+ * @param {string} detail 詳細文
+ * @param {number} threshold 閾値
+ * @param {string} unit 単位
+ */
+function addDecreaseCandidate(
+    candidates,
+    previousValue,
+    targetValue,
+    label,
+    detail,
+    threshold,
+    unit,
+) {
+  const previous = toNumberOrNull(previousValue);
+  const target = toNumberOrNull(targetValue);
+  if (previous === null || target === null) return;
+  const diff = previous - target;
+  if (diff >= threshold) {
+    candidates.push({
+      label,
+      detail,
+      previousValue: previous,
+      targetValue: target,
+      diff: -diff,
+      valueText: `${formatGrowthNumber(previous)} → ` +
+        `${formatGrowthNumber(target)}（-${formatGrowthNumber(diff)}${unit}）`,
+    });
+  }
+}

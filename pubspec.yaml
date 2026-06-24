@@ -4,7 +4,7 @@ description: "A new Flutter project."
 publish_to: 'none'
 
 
-version: 2.0.0+27
+version: 2.5.0+28
 
 environment:
   sdk: ^3.5.3
@@ -53,14 +53,10 @@ flutter:
     - assets/pitcher.png
     - assets/logo.png
     - assets/stadium.png
-    - assets/Subscription_personal1month.png
-    - assets/Subscription_personal12month.png
-    - assets/Subscription_teamGold.png
-    - assets/Subscription_teamGold12month.png
-    - assets/Subscription_teamPlatina.png
-    - assets/Subscription_teamPlatina12month.png
     - assets/icon.png
     - assets/icon-sp.png
+    - assets/arrow_drop_down.png
+    - assets/swap_horiz.png
 
 flutter_launcher_icons:
   android: true

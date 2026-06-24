@@ -285,8 +285,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       orElse: () => null,
     );
 
-    const int monthlyPrice = 480;
-    const int yearlyPrice = 4980;
+    const int monthlyPrice = 280;
+    const int yearlyPrice = 1980;
     const int yearlySavings = monthlyPrice * 12 - yearlyPrice; // 780
     final int yearlyPerMonth = (yearlyPrice / 12).round(); // 415
 
@@ -447,7 +447,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                           ),
                                           SizedBox(height: 6),
                                           Text(
-                                            "記録・分析・目標・ランキングなど、成長が見える。\n野球がもっと面白くなる機能が解放されます。",
+                                            "ランキングや目標は無料で楽しめます。\nプレミアムでは、さらに詳しい分析で自分の野球を深く振り返れます。",
                                             style: TextStyle(
                                               fontSize: 13,
                                               height: 1.45,
@@ -553,40 +553,28 @@ class PremiumFeaturesSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final features = [
       _PremiumFeatureCard(
-        icon: Icons.leaderboard,
-        title: 'ランキングに参加しよう！',
-        description: '数字で成長が見えると、野球がもっと楽しくなる。\n'
-            'あなたもランキングに参加してみよう！',
-      ),
-      _PremiumFeatureCard(
-        icon: Icons.flag_circle,
-        title: '都道府県対抗ヒットバトル',
-        description: 'あなたの一打が地元のスコアに加算される。\n'
-            '都道府県ごとのヒット合計で順位が決まる白熱バトル！',
-      ),
-      _PremiumFeatureCard(
-        icon: Icons.workspace_premium,
-        title: '全国トップ選手を覗いてみよう',
-        description: '全国の強者の成績を見ると、刺激と発見がある。\n'
-            'あなたの次の目標が自然と見つかります。',
-      ),
-      _PremiumFeatureCard(
         icon: Icons.analytics,
         title: '打撃のさらに詳細がわかる',
         description: '打球の分布や打撃傾向など、\n'
             'いつもの成績表では見えない打撃のクセが見えてきます。',
       ),
       _PremiumFeatureCard(
-        icon: Icons.stadium,
-        title: 'チーム別・球場別の成績も見られる',
-        description: 'どのチーム相手に強いか、\n'
-            'どの球場と相性がいいかをデータで分析できます。',
+        icon: Icons.workspace_premium,
+        title: '月間称号を振り返れる',
+        description: '毎月の称号や成長ポイントを保存。\n'
+            '自分の成長の軌跡をいつでも振り返れます。',
       ),
       _PremiumFeatureCard(
-        icon: Icons.flag,
-        title: '目標を決めると、野球がもっと楽しくなる',
-        description: '月の目標や、1年のテーマを決めるだけで、\n'
-            '野球に取り組む毎日がもっとワクワクします。',
+        icon: Icons.groups,
+        title: 'チーム別の成績が見られる',
+        description: 'どのチーム相手に強いか、\n'
+            '相手ごとの得意・苦手をデータで振り返れます。',
+      ),
+      _PremiumFeatureCard(
+        icon: Icons.stadium,
+        title: '球場別の成績が見られる',
+        description: 'どの球場と相性がいいか、\n'
+            '場所ごとの成績をデータで確認できます。',
       ),
     ];
 
@@ -607,7 +595,7 @@ class PremiumFeaturesSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            "有料プランでできること",
+            "もっと深く楽しむプレミアム機能",
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,

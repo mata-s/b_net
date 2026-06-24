@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:b_net/common/post_page.dart';
 import 'package:b_net/common/profile_dialog.dart';
 import 'package:b_net/login/login_page.dart';
@@ -133,41 +131,38 @@ class _ProfilePageState extends State<ProfilePage> {
     return '不明なプラン';
   }
 
-  Future<void> _loadSubscriptionStatus() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+Future<void> _loadSubscriptionStatus() async {
+  final user = _auth.currentUser;
+  if (user == null) return;
 
-    final platform = Platform.isIOS ? 'iOS' : 'Android';
-    final doc = await _firestore
+  final userDoc = await _firestore.collection('users').doc(user.uid).get();
+  final userData = userDoc.data();
+  final isPremium = userData?['isPremium'] == true;
+
+  String? planName;
+
+  if (isPremium) {
+    final subDoc = await _firestore
         .collection('users')
         .doc(user.uid)
         .collection('subscription')
-        .doc(platform)
+        .doc('current')
         .get();
 
-    if (doc.exists) {
-      final data = doc.data();
-      final status = data?['status'];
-      final productId = data?['productId'];
-
-      if (status == 'active' && productId != null) {
-        setState(() {
-          _isPersonalSubscribed = true;
-          _personalPlanName = _personalPlanNameFromProductId(productId);
-        });
-      } else {
-        setState(() {
-          _isPersonalSubscribed = false;
-          _personalPlanName = null;
-        });
-      }
+    final productId = subDoc.data()?['productId'];
+    if (productId != null) {
+      planName = _personalPlanNameFromProductId(productId.toString());
     } else {
-      setState(() {
-        _isPersonalSubscribed = false;
-        _personalPlanName = null;
-      });
+      planName = 'プレミアム';
     }
   }
+
+  if (!mounted) return;
+  setState(() {
+    _isPersonalSubscribed = isPremium;
+    _personalPlanName = planName;
+  });
+}
 
   Future<String?> _getTeamName(String teamId) async {
     final teamDoc = await _firestore.collection('teams').doc(teamId).get();

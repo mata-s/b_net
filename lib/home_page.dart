@@ -3,6 +3,7 @@ import 'package:b_net/common/notices/notices_page.dart';
 import 'package:b_net/common/post_list_page.dart';
 import 'package:b_net/common/search_page.dart';
 import 'package:b_net/pages/private/annual_results.dart';
+import 'package:b_net/pages/private/monthly_awards_history_page.dart';
 import 'package:b_net/pages/private/predict_analysis_page.dart';
 import 'package:b_net/pages/private/director_and_manager.dart';
 import 'package:b_net/pages/private/director/director_calendar.dart';
@@ -17,7 +18,7 @@ import 'package:b_net/pages/team/member_parts/team_invite_identify_member_page.d
 import 'package:b_net/pages/team/team_account.dart';
 import 'package:b_net/services/subscription_screen.dart';
 import 'package:flutter/material.dart';
-import 'pages/private/individual_home.dart';
+import 'pages/private/player_page.dart';
 import 'pages/private/profile_page.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -414,23 +415,22 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-    /// 個人サブスクが「active」かどうかチェック
+  /// isPremium をチェック
   Future<void> _checkSubscriptionStatus() async {
     final uid = widget.userUid;
     if (uid.isEmpty) return;
 
-    final snapshot = await FirebaseFirestore.instance
+    final userDoc = await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
-        .collection('subscription')
-        .where('status', isEqualTo: 'active')
-        .limit(1)
         .get();
+
+    final userData = userDoc.data();
 
     if (!mounted) return;
 
     setState(() {
-      _hasActiveSubscription = snapshot.docs.isNotEmpty;
+      _hasActiveSubscription = userData?['isPremium'] == true;
     });
   }
 
@@ -529,10 +529,10 @@ class _HomePageState extends State<HomePage> {
               userUid: widget.userUid,
               userPosition: widget.userPosition,
             )
-          : IndividualHome(
+      : PlayerPage(
               userUid: widget.userUid,
               userPosition: widget.userPosition,
-              hasActiveSubscription: _hasActiveSubscription
+              hasActiveSubscription: _hasActiveSubscription,
             ),
       widget.userPosition.contains('マネージャー')
           ? ManagerGemePage(
@@ -545,12 +545,10 @@ class _HomePageState extends State<HomePage> {
       RankingPage(
         uid: widget.userUid,
         prefecture: widget.userPrefecture,
-        hasActiveSubscription: _hasActiveSubscription,
       ),
       NationalPage(
         uid: widget.userUid,
         prefecture: widget.userPrefecture,
-        hasActiveSubscription: _hasActiveSubscription,
       ),
       ChatRoomListScreen(onUnreadCountChanged: _updateUnreadChatCount),
     ];
@@ -620,10 +618,351 @@ class _HomePageState extends State<HomePage> {
     final hasTeam = (widget.userTeamId != null && widget.userTeamId!.trim().isNotEmpty);
     return Scaffold(
       appBar: AppBar(
-        title: Image.asset(
-          'assets/logo.png',
-          height: 40,
-          fit: BoxFit.contain,
+        title: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('users')
+              .doc(widget.userUid)
+              .collection('monthlyAwards')
+              .doc('current')
+              .snapshots(),
+          builder: (context, snapshot) {
+            final data = snapshot.data?.data();
+            final title = (data?['title'] as String?)?.trim();
+            final monthKey = (data?['monthKey'] as String?)?.trim() ?? '';
+            String monthLabel = '月間称号';
+            final monthParts = monthKey.split('-');
+            if (monthParts.length == 2) {
+              final year = int.tryParse(monthParts[0]);
+              final month = int.tryParse(monthParts[1]);
+              if (year != null && month != null) {
+                monthLabel = '$year年$month月 月間称号';
+              }
+            }
+
+            if (title == null || title.isEmpty) {
+              return Image.asset(
+                'assets/logo.png',
+                height: 40,
+                fit: BoxFit.contain,
+              );
+            }
+
+            return GestureDetector(
+              onTap: () {
+                final description =
+                    (data?['description'] as String?)?.trim() ?? '';
+                final encourage =
+                    (data?['encourage'] as String?)?.trim() ?? '';
+                final rawGrowthPoints = data?['growthPoints'];
+                final growthPoints = rawGrowthPoints is List
+                    ? rawGrowthPoints.whereType<Map>().map((item) {
+                        return Map<String, dynamic>.from(item);
+                      }).toList()
+                    : <Map<String, dynamic>>[];
+
+                showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) {
+                    return AlertDialog(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      titlePadding: const EdgeInsets.fromLTRB(22, 20, 22, 0),
+                      contentPadding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
+                      actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                      title: Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF3CD),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.workspace_premium,
+                              color: Color(0xFFFFA000),
+                              size: 21,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      content: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.of(dialogContext).size.height * 0.62,
+                        ),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (description.isNotEmpty)
+                                Text(
+                                  description,
+                                  style: TextStyle(
+                                    color: Colors.grey[850],
+                                    fontSize: 14,
+                                    height: 1.55,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              if (growthPoints.isNotEmpty) ...[
+                                const SizedBox(height: 18),
+                                Row(
+                                  children: const [
+                                    Icon(
+                                      Icons.trending_up,
+                                      color: Color(0xFFD84315),
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 7),
+                                    Text(
+                                      '成長ポイント',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                ...growthPoints.map((point) {
+                                  final label =
+                                      (point['label'] as String?)?.trim() ?? '';
+                                  final detail =
+                                      (point['detail'] as String?)?.trim() ?? '';
+                                  final valueText =
+                                      (point['valueText'] as String?)?.trim() ?? '';
+
+                                  if (label.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
+
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Container(
+                                          width: 24,
+                                          height: 24,
+                                          margin: const EdgeInsets.only(top: 2),
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFF16A34A),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.check,
+                                            color: Colors.white,
+                                            size: 16,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      label,
+                                                      style: const TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight:
+                                                            FontWeight.w900,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  if (valueText.isNotEmpty) ...[
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      valueText,
+                                                      textAlign: TextAlign.right,
+                                                      style: const TextStyle(
+                                                        color: Color(0xFFD84315),
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w900,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                              if (detail.isNotEmpty) ...[
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  detail,
+                                                  style: TextStyle(
+                                                    color: Colors.grey[700],
+                                                    fontSize: 12,
+                                                    height: 1.35,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
+                              if (encourage.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(13),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEFFAF3),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: const Color(0xFFBFE8CC),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Icon(
+                                        Icons.lightbulb_outline,
+                                        color: Color(0xFF16A34A),
+                                        size: 21,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          encourage,
+                                          style: const TextStyle(
+                                            color: Color(0xFF15803D),
+                                            fontSize: 13,
+                                            height: 1.45,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(dialogContext).pop();
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => MonthlyAwardsHistoryPage(userUid: widget.userUid),
+                              ),
+                            );
+                          },
+                          child: const Text('一覧を見る'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          child: const Text('閉じる'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 260),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 13,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFFFFF8E1),
+                      Color(0xFFFFECB3),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: Color(0xFFFFD54F),
+                    width: 1.4,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.emoji_events,
+                      color: Color(0xFFFFD54F),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF2B211A),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                              height: 1.05,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            monthLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF8D6E63),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              height: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.keyboard_arrow_down,
+                      color: Color(0xFF6D4C41),
+                      size: 17,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
         actions: [
           IconButton(
@@ -857,7 +1196,6 @@ class _HomePageState extends State<HomePage> {
                           MaterialPageRoute(
                             builder: (context) => MissionPage(
                               userUid: widget.userUid,
-                              hasActiveSubscription: _hasActiveSubscription,
                             ),
                           ),
                         );
@@ -873,6 +1211,21 @@ class _HomePageState extends State<HomePage> {
                           MaterialPageRoute(
                             builder: (context) => AnnualResultsPage(
                               userPosition: widget.userPosition,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    _RichDrawerTile(
+                      icon: Icons.workspace_premium,
+                      title: '月間称号',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => MonthlyAwardsHistoryPage(
+                              userUid: widget.userUid,
                             ),
                           ),
                         );

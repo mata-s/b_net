@@ -3,14 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:b_net/pages/private/national/national_batting.dart';
 import 'package:b_net/pages/private/national/national_pitching.dart';
 import 'package:b_net/pages/private/national/national_hit.dart';
-import 'package:b_net/common/subscription_guard.dart';
 
 class NationalPage extends StatefulWidget {
   final String uid;
   final String prefecture;
-  final bool hasActiveSubscription;
 
-  const NationalPage({super.key, required this.uid, required this.prefecture, required this.hasActiveSubscription});
+  const NationalPage({
+    super.key,
+    required this.uid,
+    required this.prefecture,
+  });
 
   @override
   State<NationalPage> createState() => _NationalPageState();
@@ -19,16 +21,13 @@ class NationalPage extends StatefulWidget {
 class _NationalPageState extends State<NationalPage> {
   int _currentIndex = 0; // 現在のインデックス
   final List<String> selectTypes = [
-    'みんなのヒット！',
-    '打撃(各県1位)',
-    '投手(各県1位)',
+    'みんなのヒット',
+    '各県トップ打者',
+    '各県トップ投手',
   ];
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.hasActiveSubscription) {
-      return const SubscriptionGuard(isLocked: true, initialPage: 1);
-    }
     return Scaffold(
       body: Column(
         children: [
@@ -37,12 +36,15 @@ class _NationalPageState extends State<NationalPage> {
               _showCupertinoPicker(context); // ピッカーを表示
             },
             child: Container(
-              decoration: const BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: Colors.black54,
-                    width: 2,
-                  ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.grey.shade300,
                 ),
               ),
               child: Row(
@@ -50,12 +52,13 @@ class _NationalPageState extends State<NationalPage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    selectTypes[_currentIndex], // 現在の選択タイプを表示
+                    selectTypes[_currentIndex],
                     style: const TextStyle(
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                  const SizedBox(width: 4),
                   const Icon(
                     Icons.arrow_drop_down,
                     color: Colors.black,
@@ -97,7 +100,7 @@ class _NationalPageState extends State<NationalPage> {
       builder: (BuildContext context) {
         int tempIndex = _currentIndex;
 
-        return Container(
+        return SizedBox(
           height: 300,
           child: Column(
             children: [
@@ -140,7 +143,7 @@ class _NationalPageState extends State<NationalPage> {
                   },
                   children: selectTypes.map((type) {
                     return Center(
-                      child: Text(type, style: TextStyle(fontSize: 22)),
+                      child: Text(type, style: const TextStyle(fontSize: 22)),
                     );
                   }).toList(),
                 ),

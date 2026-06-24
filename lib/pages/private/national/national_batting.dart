@@ -152,18 +152,22 @@ class _NationalBattingState extends State<NationalBatting> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            Container(
-              alignment: Alignment.center,
-              child: Text(
-                '全国',
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            const SizedBox(height: 8),
+            const Text(
+              '全国トップ打者',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: 4),
             Text(
-              '$_year年',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              '$_year年シーズン',
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 5),
             Row(
@@ -230,12 +234,24 @@ class _NationalBattingState extends State<NationalBatting> {
               ],
             ),
             Container(
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              alignment: Alignment.center,
-              child: Text(
-                '$_totalPlayersCount人ランキングに参加中',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 14,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F7F7),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.black12),
+              ),
+              child: Center(
+                child: Text(
+                  '$_totalPlayersCount人がランキングに参加中',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
             _players.isEmpty

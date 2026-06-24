@@ -305,10 +305,13 @@ class _GradeDetailTabState extends State<GradeDetailTab>
                       onTap: () {
                         Navigator.pop(context);
                       },
-                      child: const Padding(
-                        padding: EdgeInsets.only(left: 8.0),
-                        child: Icon(Icons.swap_horiz,
-                            color: Colors.orange, size: 30),
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
+                        child: Image.asset(
+                          'assets/swap_horiz.png',
+                          width: 20,
+                          height: 20,
+                        ),
                       ),
                     ),
                     GestureDetector(

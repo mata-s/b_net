@@ -438,18 +438,40 @@ String? _prevYearLabelForChallenge;
   }
 
 
-  double _maxYForAvg(List<FlSpot> spots) {
-    if (spots.isEmpty) return 0.4;
-    final maxV = spots.map((e) => e.y).reduce((a, b) => a > b ? a : b);
-    // round up to the next 0.05, with a minimum of 0.35 and max 0.6
-    final rounded = ((maxV / 0.05).ceil() * 0.05).toDouble();
-    return rounded.clamp(0.35, 0.6);
-  }
+double _maxYForAvg(List<FlSpot> spots) {
+  if (spots.isEmpty) return 0.4;
 
-  double _maxSpotY(List<FlSpot> spots) {
-    if (spots.isEmpty) return 0;
-    return spots.map((e) => e.y).reduce((a, b) => a > b ? a : b);
-  }
+  final maxV = spots.map((e) => e.y).reduce((a, b) => a > b ? a : b);
+
+  final interval = maxV >= 0.65 ? 0.1 : 0.05;
+  final rounded = ((maxV / interval).ceil() * interval).toDouble();
+
+  return rounded.clamp(0.35, 1.0).toDouble();
+}
+
+double? _bestAvgY(List<FlSpot> spots) {
+  if (spots.isEmpty) return null;
+  return spots.map((spot) => spot.y).reduce((a, b) => a > b ? a : b);
+}
+
+double? _bestEraY(List<FlSpot> spots) {
+  if (spots.isEmpty) return null;
+  return spots.map((spot) => spot.y).reduce((a, b) => a < b ? a : b);
+}
+
+double _maxYForEra(List<FlSpot> spots) {
+  if (spots.isEmpty) return 5;
+
+  final maxV = spots
+      .map((e) => e.y)
+      .reduce((a, b) => a > b ? a : b);
+
+  if (maxV <= 3) return 4;
+  if (maxV <= 5) return 6;
+  if (maxV <= 8) return 9;
+
+  return ((maxV / 2).ceil() * 2).toDouble();
+}
 
   int? _extractMonthFromDocId(String id, int year) {
     final prefix = 'results_stats_${year}_';
@@ -588,12 +610,6 @@ String? _prevYearLabelForChallenge;
     return null;
   }
 
-  double _maxYForEra(List<FlSpot> spots) {
-    if (spots.isEmpty) return 9;
-    final maxV = spots.map((e) => e.y).reduce((a, b) => a > b ? a : b);
-    final rounded = ((maxV / 0.5).ceil() * 0.5).toDouble();
-    return rounded.clamp(1.0, 20.0);
-  }
   Future<void> _loadPitchingMonthlyEras() async {
     setState(() {
       _isMonthlyEraLoading = true;
@@ -3283,10 +3299,14 @@ final diff = projectedAvg - prevAvg;
                                           dotData: FlDotData(
                                             show: true,
                                             getDotPainter: (spot, percent, barData, index) {
-                                              final maxY = _maxSpotY((_graphMode == _GraphMode.year) ? _yearlySpots : _monthlySpots);
-                                              final isMax = (spot.y - maxY).abs() < 0.0000001;
+                                            final avgSpots = (_graphMode == _GraphMode.year)
+                                                ? _yearlySpots
+                                                : _monthlySpots;
+                                            final bestAvgY = _bestAvgY(avgSpots);
+                                            final isBest =
+                                                bestAvgY != null && (spot.y - bestAvgY).abs() < 0.0001;
 
-                                              if (isMax) {
+                                            if (isBest) {
                                                 return const _StarDotPainter(
                                                   radius: 7,
                                                   color: Colors.amber,
@@ -3445,6 +3465,30 @@ final diff = projectedAvg - prevAvg;
                                           color: Colors.blue,
                                           dotData: FlDotData(
                                             show: true,
+                                            getDotPainter: (spot, percent, barData, index) {
+                                              final eraSpots = (_graphMode == _GraphMode.year)
+                                                  ? _yearlyEraSpots
+                                                  : _monthlyEraSpots;
+                                              final bestEraY = _bestEraY(eraSpots);
+                                              final isBest =
+                                                  bestEraY != null && (spot.y - bestEraY).abs() < 0.0001;
+
+                                              if (isBest) {
+                                                return const _StarDotPainter(
+                                                  radius: 7,
+                                                 color: Colors.amber,
+                                                  strokeColor: Colors.white,
+                                                  strokeWidth: 2,
+                                                );
+                                              }
+
+                                              return FlDotCirclePainter(
+                                                radius: 4,
+                                                color: Colors.blue,
+                                                strokeWidth: 2,
+                                                strokeColor: Colors.white,
+                                              );
+                                            },
                                           ),
                                           belowBarData: BarAreaData(
                                             show: true,

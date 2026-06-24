@@ -313,7 +313,7 @@ class BattingTab extends StatelessWidget {
                                       color: Colors.orange,
                                     ),
                                     child: const Text(
-                                      '打',
+                                      '点',
                                       style: TextStyle(
                                         color: Colors.white,
                                         fontSize: 12,
