@@ -253,15 +253,32 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
                   final monthData =
                       snapshot.data?[1].data() ?? <String, dynamic>{};
 
-                  final seasonAtBats =
-                      _statNumber(seasonData, ['totalBats', 'atBats', 'totalAtBats']);
+                  final seasonAtBats = _statNumber(
+                    seasonData,
+                    ['totalBats', 'atBats', 'totalAtBats'],
+                  );
                   final seasonInnings = _statNumber(seasonData, [
                     'inningsPitched',
                     'totalInningsPitched',
                     'innings',
                   ]);
-                  final monthAtBats =
-                      _statNumber(monthData, ['totalBats', 'atBats', 'totalAtBats']);
+                  final seasonBattingAverage = _statNumber(
+                    seasonData,
+                    ['battingAverage'],
+                  );
+                  final seasonHomeRuns = _statNumber(
+                    seasonData,
+                    ['totalHomeRuns', 'homeRuns'],
+                  );
+                  final seasonEra = _statNumber(seasonData, ['era']);
+                  final seasonStrikeouts = _statNumber(
+                    seasonData,
+                    ['totalPStrikeouts', 'strikeouts'],
+                  );
+                  final monthAtBats = _statNumber(
+                    monthData,
+                    ['totalBats', 'atBats', 'totalAtBats'],
+                  );
                   final monthInnings = _statNumber(monthData, [
                     'inningsPitched',
                     'totalInningsPitched',
@@ -279,6 +296,10 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
                           _RankingSummaryCard(
                             summary: summary,
                             isPitcher: _isPitcher,
+                            seasonBattingAverage: seasonBattingAverage,
+                            seasonHomeRuns: seasonHomeRuns,
+                            seasonEra: seasonEra,
+                            seasonStrikeouts: seasonStrikeouts,
                             seasonAtBats: seasonAtBats,
                             requiredSeasonAtBats: _requiredSeasonAtBats(),
                             monthAtBats: monthAtBats,
@@ -607,6 +628,10 @@ class _PlayerRankingSummary {
 class _RankingSummaryCard extends StatelessWidget {
   final _PlayerRankingSummary summary;
   final bool isPitcher;
+  final num seasonBattingAverage;
+  final num seasonHomeRuns;
+  final num seasonEra;
+  final num seasonStrikeouts;
   final num seasonAtBats;
   final num requiredSeasonAtBats;
   final num monthAtBats;
@@ -619,6 +644,10 @@ class _RankingSummaryCard extends StatelessWidget {
   const _RankingSummaryCard({
     required this.summary,
     required this.isPitcher,
+    required this.seasonBattingAverage,
+    required this.seasonHomeRuns,
+    required this.seasonEra,
+    required this.seasonStrikeouts,
     required this.seasonAtBats,
     required this.requiredSeasonAtBats,
     required this.monthAtBats,
@@ -640,18 +669,22 @@ class _RankingSummaryCard extends StatelessWidget {
             _RankingGroup(
               title: 'シーズン',
               firstLabel: '打率',
-              firstValue: _rankText(summary.seasonBattingAverageRank),
+              firstValue: _formatDashboardRate(seasonBattingAverage),
+              firstRankText: _rankText(summary.seasonBattingAverageRank),
               secondLabel: '本塁打',
-              secondValue: _rankText(summary.seasonHomeRunsRank),
+              secondValue: '${seasonHomeRuns.toInt()}本',
+              secondRankText: _rankText(summary.seasonHomeRunsRank),
             ),
             if (summary.ageGroupLabel != null) ...[
               const SizedBox(height: 10),
               _RankingGroup(
                 title: '年齢別（${summary.ageGroupLabel}）',
                 firstLabel: '打率',
-                firstValue: _rankText(summary.ageBattingAverageRank),
+                firstValue: _formatDashboardRate(seasonBattingAverage),
+                firstRankText: _rankText(summary.ageBattingAverageRank),
                 secondLabel: '本塁打',
-                secondValue: _rankText(summary.ageHomeRunsRank),
+                secondValue: '${seasonHomeRuns.toInt()}本',
+                secondRankText: _rankText(summary.ageHomeRunsRank),
               ),
             ],
             const SizedBox(height: 10),
@@ -674,18 +707,22 @@ class _RankingSummaryCard extends StatelessWidget {
               _RankingGroup(
                 title: 'シーズン',
                 firstLabel: '防御率',
-                firstValue: _rankText(summary.seasonEraRank),
+                firstValue: _formatDashboardEra(seasonEra),
+                firstRankText: _rankText(summary.seasonEraRank),
                 secondLabel: '奪三振',
-                secondValue: _rankText(summary.seasonStrikeoutsRank),
+                secondValue: seasonStrikeouts.toInt().toString(),
+                secondRankText: _rankText(summary.seasonStrikeoutsRank),
               ),
               if (summary.ageGroupLabel != null) ...[
                 const SizedBox(height: 10),
                 _RankingGroup(
                   title: '年齢別（${summary.ageGroupLabel}）',
                   firstLabel: '防御率',
-                  firstValue: _rankText(summary.ageEraRank),
+                  firstValue: _formatDashboardEra(seasonEra),
+                  firstRankText: _rankText(summary.ageEraRank),
                   secondLabel: '奪三振',
-                  secondValue: _rankText(summary.ageStrikeoutsRank),
+                  secondValue: seasonStrikeouts.toInt().toString(),
+                  secondRankText: _rankText(summary.ageStrikeoutsRank),
                 ),
               ],
               const SizedBox(height: 10),
@@ -759,15 +796,17 @@ class _RankingTypeCard extends StatelessWidget {
 class _RankingMiniItem extends StatelessWidget {
   final String title;
   final String value;
+  final String rankText;
 
   const _RankingMiniItem({
     required this.title,
     required this.value,
+    required this.rankText,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isOutOfRank = value == '圏外';
+    final isOutOfRank = rankText == '圏外';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -792,8 +831,21 @@ class _RankingMiniItem extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 20,
+              color: Color(0xFF1565C0),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            isOutOfRank ? 'ランキング対象外' : rankText,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 12,
               color: isOutOfRank ? Colors.black45 : Colors.black87,
               fontWeight: FontWeight.w900,
             ),
@@ -1275,15 +1327,19 @@ class _RankingGroup extends StatelessWidget {
   final String title;
   final String firstLabel;
   final String firstValue;
+  final String firstRankText;
   final String secondLabel;
   final String secondValue;
+  final String secondRankText;
 
   const _RankingGroup({
     required this.title,
     required this.firstLabel,
     required this.firstValue,
+    required this.firstRankText,
     required this.secondLabel,
     required this.secondValue,
+    required this.secondRankText,
   });
 
   @override
@@ -1306,6 +1362,7 @@ class _RankingGroup extends StatelessWidget {
               child: _RankingMiniItem(
                 title: firstLabel,
                 value: firstValue,
+                rankText: firstRankText,
               ),
             ),
             const SizedBox(width: 10),
@@ -1313,6 +1370,7 @@ class _RankingGroup extends StatelessWidget {
               child: _RankingMiniItem(
                 title: secondLabel,
                 value: secondValue,
+                rankText: secondRankText,
               ),
             ),
           ],
