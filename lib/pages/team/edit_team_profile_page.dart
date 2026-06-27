@@ -1,11 +1,12 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'dart:io';
-import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 
 class EditTeamProfilePage extends StatefulWidget {
   final String teamId;
@@ -77,7 +78,7 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
     '大分県',
     '宮崎県',
     '鹿児島県',
-    '沖縄県'
+    '沖縄県',
   ];
 
   @override
@@ -88,20 +89,22 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
 
   Future<void> _loadTeamData() async {
     try {
-      DocumentSnapshot teamSnapshot = await FirebaseFirestore.instance
+      final teamSnapshot = await FirebaseFirestore.instance
           .collection('teams')
           .doc(widget.teamId)
           .get();
 
       if (teamSnapshot.exists) {
-        Map<String, dynamic> teamData =
-            teamSnapshot.data() as Map<String, dynamic>;
+        final teamData = teamSnapshot.data() as Map<String, dynamic>;
 
         setState(() {
-          _teamNameController.text = teamData['teamName'];
-          _teamDescriptionController.text = teamData['teamDescription'];
+          _teamNameController.text = teamData['teamName'] ?? '';
+          _teamDescriptionController.text =
+              teamData['teamDescription'] ?? '';
           _selectedPrefecture = teamData['prefecture'];
-          _achievements = List<String>.from(teamData['achievements']);
+          _achievements = List<String>.from(
+            teamData['achievements'] ?? <String>[],
+          );
           _profileImageUrl = teamData['profileImage'];
         });
       }
@@ -116,15 +119,13 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
     final pickedFile =
         await ImagePicker().pickImage(source: ImageSource.gallery);
     if (pickedFile != null) {
-      File originalImage = File(pickedFile.path);
-      img.Image? image = img.decodeImage(originalImage.readAsBytesSync());
+      final originalImage = File(pickedFile.path);
+      final image = img.decodeImage(originalImage.readAsBytesSync());
 
       if (image != null) {
-        img.Image resizedImage =
-            img.copyResize(image, width: 600); // 幅を600pxにリサイズ
-        File compressedImage = File(pickedFile.path)
-          ..writeAsBytesSync(
-              img.encodeJpg(resizedImage, quality: 85)); // 圧縮して保存
+        final resizedImage = img.copyResize(image, width: 600);
+        final compressedImage = File(pickedFile.path)
+          ..writeAsBytesSync(img.encodeJpg(resizedImage, quality: 85));
 
         setState(() {
           _profileImage = compressedImage;
@@ -134,90 +135,143 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
   }
 
   Future<void> _updateTeamProfile() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
+    if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedPrefecture == null || _selectedPrefecture!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('都道府県を選択してください')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      String? imageUrl;
+      if (_profileImage != null) {
+        final fileName =
+            '${FirebaseAuth.instance.currentUser!.uid}_team_profile.jpg';
+        final uploadTask = FirebaseStorage.instance
+            .ref()
+            .child('team_images/$fileName')
+            .putFile(_profileImage!);
+
+        final snapshot = await uploadTask;
+        imageUrl = await snapshot.ref.getDownloadURL();
+      }
+
+      await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(widget.teamId)
+          .update({
+        'teamName': _teamNameController.text,
+        'teamDescription': _teamDescriptionController.text,
+        'prefecture': _selectedPrefecture,
+        'achievements': _achievements,
+        'profileImage': imageUrl ?? _profileImageUrl,
       });
 
-      try {
-        String? imageUrl;
-        if (_profileImage != null) {
-          String fileName =
-              '${FirebaseAuth.instance.currentUser!.uid}_team_profile.jpg';
-          UploadTask uploadTask = FirebaseStorage.instance
-              .ref()
-              .child('team_images/$fileName')
-              .putFile(_profileImage!);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('チームプロフィールが更新されました')),
+      );
 
-          TaskSnapshot snapshot = await uploadTask;
-          imageUrl = await snapshot.ref.getDownloadURL();
-        }
-
-        await FirebaseFirestore.instance
-            .collection('teams')
-            .doc(widget.teamId)
-            .update({
-          'teamName': _teamNameController.text,
-          'teamDescription': _teamDescriptionController.text,
-          'prefecture': _selectedPrefecture,
-          'achievements': _achievements,
-          'profileImage': imageUrl ?? _profileImageUrl,
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('チームプロフィールが更新されました')),
-        );
-
-        Navigator.of(context).pop(); // プロフィールページに戻る
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('更新中にエラーが発生しました: $e')),
-        );
-      } finally {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      Navigator.of(context).pop();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('更新中にエラーが発生しました: $e')),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
   void _showCupertinoPrefecturePicker(BuildContext context) {
-    int initialIndex = _selectedPrefecture != null
-        ? _prefectures.indexOf(_selectedPrefecture!)
-        : 0;
+    FocusScope.of(context).requestFocus(FocusNode());
 
-    showModalBottomSheet(
-      context: context,
-      builder: (BuildContext context) {
-        return SizedBox(
-          height: 300,
-          child: CupertinoPicker(
-            backgroundColor: Colors.white,
-            itemExtent: 40.0,
-            scrollController: FixedExtentScrollController(
-              initialItem: initialIndex,
-            ),
-            onSelectedItemChanged: (int index) {},
-            children: _prefectures.map((prefecture) {
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedPrefecture = prefecture;
-                  });
-                  Navigator.pop(context);
-                },
-                child: Center(
-                  child: Text(
-                    prefecture,
-                    style: const TextStyle(fontSize: 18),
+    // 少し遅らせてからモーダルを開く
+    Future.delayed(const Duration(milliseconds: 100), () {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.white,
+        builder: (BuildContext context) {
+          int tempIndex =
+              _prefectures.indexOf(_selectedPrefecture ?? _prefectures[0]);
+
+          return SizedBox(
+            height: 300,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text(
+                          'キャンセル',
+                          style: TextStyle(fontSize: 16),
+                        ),
+                      ),
+                      const Text(
+                        '都道府県を選択',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _selectedPrefecture = _prefectures[tempIndex];
+                          });
+                          Navigator.pop(context);
+                        },
+                        child: const Text(
+                          '決定',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              );
-            }).toList(),
-          ),
-        );
-      },
-    );
+                const Divider(height: 1),
+                Expanded(
+                  child: CupertinoPicker(
+                    backgroundColor: Colors.white,
+                    itemExtent: 40.0,
+                    scrollController: FixedExtentScrollController(
+                      initialItem: tempIndex,
+                    ),
+                    onSelectedItemChanged: (int index) {
+                      tempIndex = index;
+                    },
+                    children: _prefectures.map((p) {
+                      return Center(
+                        child: Text(
+                          p,
+                          style: const TextStyle(fontSize: 22),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    });
   }
 
   @override
@@ -244,8 +298,7 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
                             ? FileImage(_profileImage!)
                             : (_profileImageUrl != null &&
                                     _profileImageUrl!.isNotEmpty
-                                ? NetworkImage(
-                                    _profileImageUrl!) // ✅ Firestore の画像を適用
+                                ? NetworkImage(_profileImageUrl!)
                                 : const AssetImage(
                                         'assets/default_team_avatar.png')
                                     as ImageProvider),
@@ -256,14 +309,16 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
                         child: CircleAvatar(
                           radius: 18,
                           backgroundColor: Colors.black54,
-                          child: Icon(Icons.camera_alt,
-                              color: Colors.white, size: 18),
+                          child: Icon(
+                            Icons.camera_alt,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                // 🔹 チームプロフィール写真削除ボタン（画像があるときだけ表示）
                 if (_profileImage != null ||
                     (_profileImageUrl != null &&
                         _profileImageUrl!.isNotEmpty))
@@ -315,8 +370,7 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
                       decoration: const InputDecoration(
                         labelText: '都道府県',
                         border: UnderlineInputBorder(),
-                        suffixIcon:
-                            Icon(Icons.arrow_drop_down), // 🔽 右側に下矢印アイコン追加
+                        suffixIcon: Icon(Icons.arrow_drop_down),
                       ),
                       controller: TextEditingController(
                         text: _selectedPrefecture ?? '選択してください',
@@ -325,9 +379,13 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text('実績',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Text(
+                  '実績',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 ListView.builder(
                   shrinkWrap: true,
                   itemCount: _achievements.length,
@@ -385,7 +443,8 @@ class _EditTeamProfilePageState extends State<EditTeamProfilePage> {
       bottomNavigationBar: MediaQuery.of(context).viewInsets.bottom > 0
           ? Padding(
               padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewInsets.bottom),
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
               child: Container(
                 height: 44,
                 color: Colors.grey[100],

@@ -28,48 +28,42 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
   // 「有料プランでできること」リスト
   final List<_FeaturePage> _pages = const [
     _FeaturePage(
-      title: 'ランキングに参加できる',
-      description: '数字で成長が見えると、野球がもっと楽しくなる。\n'
-          'あなたもランキングに参加してみよう！',
-      icon: Icons.leaderboard,
+      title: '詳しい成績まで見られる',
+      description: '打率や本塁打だけでは見えない細かな成績まで確認。\n'
+          '自分のプレーをもっと深く振り返れます。',
+      icon: Icons.analytics,
+    ),
+     _FeaturePage(
+      title: '月間称号を獲得できる',
+      description: '毎月の成績から、あなたの活躍や成長を分析。\n'
+          'あなただけの称号と成長ポイントを振り返れます。',
+      icon: Icons.emoji_events,
     ),
     _FeaturePage(
-      title: '都道府県対抗ヒットバトル',
-      description: 'あなたの一打が地元のスコアに加算される。\n'
-          '都道府県ごとのヒット合計で順位が決まる白熱バトル！',
-      icon: Icons.flag_circle,
-    ),
-    _FeaturePage(
-      title: '全国トップ選手を覗いてみよう',
-      description: '全国の強者の成績を見ると、刺激と発見がある。\n'
-          'あなたの次の目標が自然と見つかります。',
+      title: '称号履歴を振り返れる',
+      description: '過去の月間称号や成長候補を保存。\n'
+          '試合を重ねるほど、自分の成長の軌跡が残ります。',
       icon: Icons.workspace_premium,
     ),
     _FeaturePage(
-      title: '打撃のさらに詳細がわかる',
-      description: '打球の分布や打撃傾向など、\n'
-          'いつもの成績表では見えない打撃のクセが見えてきます。',
-      icon: Icons.analytics,
+      title: '相手別の成績を分析できる',
+      description: 'どのチーム相手に強いか、苦手なのか。\n'
+          '対戦相手ごとの相性をデータで確認できます。',
+      icon: Icons.groups,
     ),
     _FeaturePage(
-      title: 'チーム別・球場別の成績も見られる',
-      description: 'どのチーム相手に強いか、\n'
-          'どの球場と相性がいいかをデータで分析できます。',
+      title: '球場別の成績を分析できる',
+      description: 'どの球場で調子がいいか、どの場所と相性がいいか。\n'
+          '球場ごとの傾向を振り返れます。',
       icon: Icons.stadium,
-    ),
-    _FeaturePage(
-      title: '目標を決めると、野球がもっと楽しくなる',
-      description: '月の目標や、1年のテーマを決めるだけで、\n'
-          '野球に取り組む毎日がもっとワクワクします。',
-      icon: Icons.flag,
     ),
   ];
 
   @override
   void initState() {
     super.initState();
-    _currentPage = widget.initialPage;
-    _pageController = PageController(initialPage: widget.initialPage);
+    _currentPage = 0;
+    _pageController = PageController(initialPage: 0);
 
     _hintController = AnimationController(
       vsync: this,

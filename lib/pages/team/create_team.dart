@@ -353,6 +353,12 @@ class _CreateTeamAccountPageState extends State<CreateTeamAccountPage> {
 
   Future<void> _createTeamAccount() async {
   if (!_formKey.currentState!.validate()) return;
+  if (_selectedPrefecture == null || _selectedPrefecture!.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('都道府県を選択してください')),
+    );
+    return;
+  }
 
   setState(() {
     _isLoading = true;

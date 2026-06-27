@@ -339,35 +339,47 @@ class _TeamProfilePageState extends State<TeamProfilePage> {
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             // チーム名
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                            Column(
                               children: [
                                 Text(
                                   '${_teamData!['teamName']}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  softWrap: true,
+                                  textAlign: TextAlign.center,
                                   style: const TextStyle(
-                                      fontSize: 25,
-                                      fontWeight: FontWeight.bold),
+                                    fontSize: 25,
+                                    fontWeight: FontWeight.bold,
+                                    height: 1.2,
+                                  ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(height: 8),
                                 if (_isTeamSubscribed) ...[
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.amber.withOpacity(0.2),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
                                     child: Row(
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const Icon(Icons.verified,
-                                            size: 16, color: Colors.amber),
+                                        const Icon(
+                                          Icons.verified,
+                                          size: 16,
+                                          color: Colors.amber,
+                                        ),
                                         const SizedBox(width: 4),
                                         Text(
                                           _teamPlanName ?? '',
                                           style: const TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.amber),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.amber,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -375,24 +387,23 @@ class _TeamProfilePageState extends State<TeamProfilePage> {
                                 ] else ...[
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.grey.withOpacity(0.2),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
-                                    child: Row(
-                                      children: [
-                                        const Text(
-                                          'ベーシック',
-                                          style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w400,
-                                              color: Colors.grey),
-                                        ),
-                                      ],
+                                    child: const Text(
+                                      'ベーシック',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w400,
+                                        color: Colors.grey,
+                                      ),
                                     ),
                                   ),
-                                ]
+                                ],
                               ],
                             ),
                             const SizedBox(height: 8),
