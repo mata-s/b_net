@@ -377,6 +377,7 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
                     value: _goalTitle(goalData),
                     progressText: _goalProgressText(goalData),
                     isAchieved: goalData['isAchieved'] == true,
+                    achievementLabel: _goalAchievementLabel(goalData),
                     progress: _goalProgress(goalData),
                   );
                 },
@@ -399,6 +400,7 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
                     value: _goalTitle(goalData),
                     progressText: _goalProgressText(goalData),
                     isAchieved: goalData['isAchieved'] == true,
+                    achievementLabel: _goalAchievementLabel(goalData),
                     progress: _goalProgress(goalData),
                   );
                 },
@@ -503,6 +505,17 @@ double? _goalProgress(Map<String, dynamic> goalData) {
   }
 
   return (actual / target).clamp(0.0, 1.0).toDouble();
+}
+
+String _goalAchievementLabel(Map<String, dynamic> goalData) {
+  final isRatio = goalData['isRatio'] == true;
+  final compareType = (goalData['compareType'] ?? '').toString();
+
+  if (isRatio || compareType == 'less') {
+    return '達成中';
+  }
+
+  return '達成済み';
 }
 
 String _formatGoalValue(dynamic statField, dynamic value) {
@@ -1206,6 +1219,52 @@ class _StatsSummaryItem {
   });
 }
 
+class _GoalProgressText extends StatelessWidget {
+  final String text;
+
+  const _GoalProgressText({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = text.split(' / ');
+
+    if (parts.length != 2) {
+      return Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Colors.black54,
+          fontWeight: FontWeight.w700,
+        ),
+      );
+    }
+
+    return RichText(
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: const TextStyle(
+          fontSize: 12,
+          color: Colors.black54,
+          fontWeight: FontWeight.w700,
+        ),
+        children: [
+          TextSpan(text: '${parts[0]} / '),
+          TextSpan(
+            text: parts[1],
+            style: const TextStyle(
+              color: Color(0xFF1565C0),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _GoalTile extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1213,6 +1272,7 @@ class _GoalTile extends StatelessWidget {
   final String progressText;
   final bool isAchieved;
   final double? progress;
+  final String achievementLabel;
 
   const _GoalTile({
     required this.icon,
@@ -1220,6 +1280,7 @@ class _GoalTile extends StatelessWidget {
     required this.value,
     this.progressText = '',
     this.isAchieved = false,
+    this.achievementLabel = '達成済み',
     this.progress,
   });
 
@@ -1241,8 +1302,6 @@ class _GoalTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 22, color: Colors.black54),
-          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1261,58 +1320,91 @@ class _GoalTile extends StatelessWidget {
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
+                          horizontal: 9,
+                          vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: Color(0xFFE8F5E9),
+                          color: const Color(0xFFE8F5E9),
                           borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: const Text(
-                          '達成済み',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.green,
+                          border: Border.all(
+                            color: const Color(0xFF81C784),
                           ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              achievementLabel == '達成中'
+                                  ? Icons.track_changes
+                                  : Icons.emoji_events,
+                              size: 13,
+                              color: const Color(0xFF2E7D32),
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              achievementLabel,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF2E7D32),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ],
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
+                Row(
+                  children: [
+                    Icon(
+                      icon,
+                      size: 18,
+                      color: const Color(0xFF1565C0),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 if (progress != null) ...[
                   const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 8,
-                      backgroundColor: Colors.black12,
+                  Container(
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: (progress ?? 0).clamp(0.0, 1.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(999),
+                          gradient: const LinearGradient(
+                            colors: [
+                              Color(0xFF1565C0),
+                              Color(0xFF7E57C2),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ],
                 if (progressText.isNotEmpty) ...[
                   const SizedBox(height: 3),
-                  Text(
-                    progressText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black54,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                  _GoalProgressText(text: progressText),
                 ],
               ],
             ),
