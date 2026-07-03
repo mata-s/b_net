@@ -534,7 +534,7 @@ String _goalSupportMessage(Map<String, dynamic> goalData) {
     if (goalData['isAchieved'] == true) {
       return 'この調子をキープ！';
     }
-    return '目標ラインまであと少し！';
+    return '目標に挑戦中！';
   }
 
   if (target is num && actual is num) {
@@ -551,12 +551,13 @@ String _goalSupportMessage(Map<String, dynamic> goalData) {
 String _goalAchievementLabel(Map<String, dynamic> goalData) {
   final isRatio = goalData['isRatio'] == true;
   final compareType = (goalData['compareType'] ?? '').toString();
+  final isAchieved = goalData['isAchieved'] == true;
 
   if (isRatio || compareType == 'less') {
-    return '達成中';
+    return isAchieved ? '達成中' : '挑戦中';
   }
 
-  return '達成済み';
+  return isAchieved ? '達成済み' : '挑戦中';
 }
 
 bool _isMaintainGoal(Map<String, dynamic> goalData) {
