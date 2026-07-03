@@ -376,8 +376,11 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
                     label: '今年の目標',
                     value: _goalTitle(goalData),
                     progressText: _goalProgressText(goalData),
+                    supportMessage: _goalSupportMessage(goalData),
+                    progressBadgeText: _goalProgressBadgeText(goalData),
                     isAchieved: goalData['isAchieved'] == true,
                     achievementLabel: _goalAchievementLabel(goalData),
+                    showProgressBar: !_isMaintainGoal(goalData),
                     progress: _goalProgress(goalData),
                   );
                 },
@@ -399,8 +402,11 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
                     label: '今月の目標',
                     value: _goalTitle(goalData),
                     progressText: _goalProgressText(goalData),
+                    supportMessage: _goalSupportMessage(goalData),
+                    progressBadgeText: _goalProgressBadgeText(goalData),
                     isAchieved: goalData['isAchieved'] == true,
                     achievementLabel: _goalAchievementLabel(goalData),
+                    showProgressBar: !_isMaintainGoal(goalData),
                     progress: _goalProgress(goalData),
                   );
                 },
@@ -496,6 +502,7 @@ String _goalProgressText(Map<String, dynamic> goalData) {
   return '現在 ${_formatGoalValue(statField, actual)} / 目標 ${_formatGoalValue(statField, target)}';
 }
 
+
 double? _goalProgress(Map<String, dynamic> goalData) {
   final target = goalData['target'];
   final actual = goalData['actualValue'];
@@ -507,6 +514,40 @@ double? _goalProgress(Map<String, dynamic> goalData) {
   return (actual / target).clamp(0.0, 1.0).toDouble();
 }
 
+String _goalProgressBadgeText(Map<String, dynamic> goalData) {
+  if (_isMaintainGoal(goalData)) {
+    return _goalAchievementLabel(goalData);
+  }
+
+  final progress = _goalProgress(goalData);
+  if (progress == null) return '';
+
+  return '${(progress * 100).round()}%達成';
+}
+
+String _goalSupportMessage(Map<String, dynamic> goalData) {
+  final statField = goalData['statField'];
+  final target = goalData['target'];
+  final actual = goalData['actualValue'] ?? 0;
+
+  if (_isMaintainGoal(goalData)) {
+    if (goalData['isAchieved'] == true) {
+      return 'この調子をキープ！';
+    }
+    return '目標ラインまであと少し！';
+  }
+
+  if (target is num && actual is num) {
+    final remaining = (target - actual).clamp(0, target).toDouble();
+    if (remaining <= 0) {
+      return '目標達成！ナイスプレー！';
+    }
+    return 'あと${_formatGoalValue(statField, remaining)}で達成！';
+  }
+
+  return '';
+}
+
 String _goalAchievementLabel(Map<String, dynamic> goalData) {
   final isRatio = goalData['isRatio'] == true;
   final compareType = (goalData['compareType'] ?? '').toString();
@@ -516,6 +557,13 @@ String _goalAchievementLabel(Map<String, dynamic> goalData) {
   }
 
   return '達成済み';
+}
+
+bool _isMaintainGoal(Map<String, dynamic> goalData) {
+  final isRatio = goalData['isRatio'] == true;
+  final compareType = (goalData['compareType'] ?? '').toString();
+
+  return isRatio || compareType == 'less';
 }
 
 String _formatGoalValue(dynamic statField, dynamic value) {
@@ -1219,196 +1267,207 @@ class _StatsSummaryItem {
   });
 }
 
-class _GoalProgressText extends StatelessWidget {
-  final String text;
-
-  const _GoalProgressText({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    final parts = text.split(' / ');
-
-    if (parts.length != 2) {
-      return Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          fontSize: 12,
-          color: Colors.black54,
-          fontWeight: FontWeight.w700,
-        ),
-      );
-    }
-
-    return RichText(
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      text: TextSpan(
-        style: const TextStyle(
-          fontSize: 12,
-          color: Colors.black54,
-          fontWeight: FontWeight.w700,
-        ),
-        children: [
-          TextSpan(text: '${parts[0]} / '),
-          TextSpan(
-            text: parts[1],
-            style: const TextStyle(
-              color: Color(0xFF1565C0),
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _GoalTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
   final String progressText;
+  final String supportMessage;
+  final String progressBadgeText;
   final bool isAchieved;
   final double? progress;
   final String achievementLabel;
+  final bool showProgressBar;
 
   const _GoalTile({
     required this.icon,
     required this.label,
     required this.value,
     this.progressText = '',
+    this.supportMessage = '',
+    this.progressBadgeText = '',
     this.isAchieved = false,
     this.achievementLabel = '達成済み',
+    this.showProgressBar = true,
     this.progress,
   });
 
   @override
   Widget build(BuildContext context) {
+    final accentColor = showProgressBar
+        ? const Color(0xFF1565C0)
+        : const Color(0xFF2E7D32);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isAchieved
-            ? const Color(0xFFEFFAF1)
-            : const Color(0xFFF7F7F7),
-        borderRadius: BorderRadius.circular(16),
+        color: showProgressBar
+            ? const Color(0xFFF4F8FF)
+            : const Color(0xFFEFFAF1),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isAchieved
-              ? const Color(0xFFB7E4C7)
-              : Colors.black12,
+          color: showProgressBar
+              ? const Color(0xFFBFDBFE)
+              : const Color(0xFFB7E4C7),
         ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 3),
+          ),
+        ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w700,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: accentColor.withOpacity(0.22)),
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: accentColor,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              if (progressBadgeText.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: accentColor.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: accentColor.withOpacity(0.25)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        showProgressBar
+                            ? Icons.bolt_rounded
+                            : Icons.check_circle_rounded,
+                        size: 13,
+                        color: accentColor,
                       ),
-                    ),
-                    if (isAchieved) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 9,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E9),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: const Color(0xFF81C784),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              achievementLabel == '達成中'
-                                  ? Icons.track_changes
-                                  : Icons.emoji_events,
-                              size: 13,
-                              color: const Color(0xFF2E7D32),
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              achievementLabel,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF2E7D32),
-                              ),
-                            ),
-                          ],
+                      const SizedBox(width: 3),
+                      Text(
+                        progressBadgeText,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          color: accentColor,
                         ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    Icon(
-                      icon,
-                      size: 18,
-                      color: const Color(0xFF1565C0),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.2,
+            ),
+          ),
+          if (progressText.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(
+              progressText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+          if (showProgressBar && progress != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              height: 9,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: (progress ?? 0).clamp(0.0, 1.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    gradient: const LinearGradient(
+                      colors: [
+                        Color(0xFF1565C0),
+                        Color(0xFF7E57C2),
+                      ],
                     ),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Text(
-                        value,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                if (progress != null) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: Colors.black12,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: (progress ?? 0).clamp(0.0, 1.0),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(999),
-                          gradient: const LinearGradient(
-                            colors: [
-                              Color(0xFF1565C0),
-                              Color(0xFF7E57C2),
-                            ],
-                          ),
-                        ),
+              ),
+            ),
+          ],
+          if (supportMessage.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.82),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    showProgressBar
+                        ? Icons.star_rounded
+                        : Icons.thumb_up_alt_rounded,
+                    size: 17,
+                    color: showProgressBar
+                        ? const Color(0xFFFFA000)
+                        : const Color(0xFF2E7D32),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      supportMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: showProgressBar
+                            ? Colors.black87
+                            : const Color(0xFF2E7D32),
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ),
                 ],
-                if (progressText.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  _GoalProgressText(text: progressText),
-                ],
-              ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
