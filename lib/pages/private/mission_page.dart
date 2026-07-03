@@ -566,6 +566,7 @@ Future<QuerySnapshot> _fetchMonthGoal() {
                           const Text('達成指標'),
                           GestureDetector(
                             onTap: () {
+                              FocusScope.of(context).requestFocus(FocusNode());
                               final leftOptions =
                                   categorizedStatFieldOptions.keys.toList();
                               final rightOptionsMap = <String, List<String>>{};
@@ -979,6 +980,7 @@ Future<QuerySnapshot> _fetchMonthGoal() {
                         const Text('達成指標'),
                         GestureDetector(
                           onTap: () {
+                            FocusScope.of(context).requestFocus(FocusNode());
                             final leftOptions =
                                 categorizedStatFieldOptions.keys.toList();
                             final rightOptionsMap = <String, List<String>>{};
