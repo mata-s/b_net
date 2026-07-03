@@ -1531,13 +1531,50 @@ class _GameInputPageState extends State<GameInputPage> {
         padding: const EdgeInsets.only(top: 40),
         child: Column(
           children: [
-            const Text(
-              '試合タイプは必須項目',
-              style: TextStyle(fontSize: 10, color: Colors.red),
-            ),
-            const Text(
-              '0の場合は記入しなくてもよい',
-              style: TextStyle(fontSize: 10, color: Colors.red),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFFBFDBFE),
+                ),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                 Row(
+                   children: [
+                      Icon(
+                        Icons.lightbulb_rounded,
+                        color: Color(0xFF1565C0),
+                        size: 18,
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        'まずは分かる範囲だけでOK！',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                         color: Color(0xFF1565C0),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    '・試合タイプのみ必須です\n'
+                    '・0の場合は入力不要です\n'
+                    '・詳しく入力すると分析がより正確になります',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.black87,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
             ),
             Text(
               '${i + 1}試合目',
