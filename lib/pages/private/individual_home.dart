@@ -1,4 +1,6 @@
 import 'package:b_net/pages/private/grade_details/grade_detail_tab.dart';
+import 'package:b_net/pages/private/first_game_value_preview.dart';
+import 'package:b_net/pages/private/game_input_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +13,10 @@ class IndividualHome extends StatefulWidget {
   final bool hasActiveSubscription;
 
   const IndividualHome(
-      {super.key, required this.userUid, required this.userPosition, required this.hasActiveSubscription});
+      {super.key,
+      required this.userUid,
+      required this.userPosition,
+      required this.hasActiveSubscription});
 
   @override
   _IndividualHomeState createState() => _IndividualHomeState();
@@ -29,6 +34,7 @@ class _IndividualHomeState extends State<IndividualHome>
   final List<String> _periodOptions = ['通算', '今月', '先月', '今年', '去年', '年を選択'];
   final List<String> _gameTypeOptions = ['全試合', '練習試合', '公式戦'];
   List<int> _availableYears = [];
+  bool? _hasAnyGame;
 
   @override
   void initState() {
@@ -36,6 +42,38 @@ class _IndividualHomeState extends State<IndividualHome>
     _tabController = TabController(length: 2, vsync: this);
     _setFilterDates(); // 初期のフィルタ設定
     fetchAvailableYears(); // Firestoreから年一覧取得
+    _checkForGames();
+  }
+
+  Future<void> _checkForGames() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userUid)
+          .collection('games')
+          .limit(1)
+          .get();
+      if (!mounted) return;
+      setState(() => _hasAnyGame = snapshot.docs.isNotEmpty);
+    } catch (_) {
+      if (!mounted) return;
+      // 判定に失敗した場合は、既存の成績画面を妨げない。
+      setState(() => _hasAnyGame = true);
+    }
+  }
+
+  Future<void> _startFirstGame() async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => GameInputPage(
+          selectedDate: DateTime.now(),
+          positions: widget.userPosition,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _checkForGames();
+    if (_hasAnyGame == true) await fetchAvailableYears();
   }
 
   // Firestoreに存在する年を収集
@@ -60,7 +98,8 @@ class _IndividualHomeState extends State<IndividualHome>
 
     // ✅ 今年デフォ。ただし「今年のstatsが存在しない（0件）」なら通算に自動切替
     final currentYear = DateTime.now().year;
-    final shouldFallbackToCareer = years.isEmpty || !years.contains(currentYear);
+    final shouldFallbackToCareer =
+        years.isEmpty || !years.contains(currentYear);
 
     setState(() {
       _availableYears = years;
@@ -183,172 +222,181 @@ class _IndividualHomeState extends State<IndividualHome>
 
   @override
   Widget build(BuildContext context) {
+    if (_hasAnyGame == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_hasAnyGame == false) {
+      return Scaffold(
+        body: FirstGameValuePreview(
+          isPitcher: widget.userPosition.contains('投手'),
+          onStart: _startFirstGame,
+        ),
+      );
+    }
+
     return Scaffold(
       body: Column(
         children: [
-          PreferredSize(
-            preferredSize: const Size.fromHeight(80),
-            child: SafeArea(
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            // 期間フィルタ
-                            GestureDetector(
-                              onTap: () => _showCupertinoPicker(
-                                context,
-                                _periodOptions,
-                                selectedPeriodFilter,
-                                (newValue) {
-                                  setState(() {
-                                    selectedPeriodFilter = newValue;
-                                    _setFilterDates();
-                                  });
-                                },
-                              ),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Text(selectedPeriodFilter,
-                                        style: const TextStyle(fontSize: 16)),
-                                    const Icon(Icons.arrow_drop_down),
-                                  ],
-                                ),
-                              ),
+                        // 期間フィルタ
+                        GestureDetector(
+                          onTap: () => _showCupertinoPicker(
+                            context,
+                            _periodOptions,
+                            selectedPeriodFilter,
+                            (newValue) {
+                              setState(() {
+                                selectedPeriodFilter = newValue;
+                                _setFilterDates();
+                              });
+                            },
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                            SizedBox(width: 10),
-                            // **試合タイプフィルタ**
-                            GestureDetector(
-                              onTap: () => _showCupertinoPicker(
-                                context,
-                                _gameTypeOptions,
-                                selectedGameTypeFilter,
-                                (newValue) {
-                                  setState(() {
-                                    selectedGameTypeFilter = newValue;
-                                  });
-                                },
-                              ),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Text(selectedGameTypeFilter,
-                                        style: const TextStyle(fontSize: 16)),
-                                    const Icon(Icons.arrow_drop_down),
-                                  ],
-                                ),
-                              ),
+                            child: Row(
+                              children: [
+                                Text(selectedPeriodFilter,
+                                    style: const TextStyle(fontSize: 16)),
+                                const Icon(Icons.arrow_drop_down),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                        Row(
-                          children: [
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => GradeDetailTab(
-                                        userUid: widget.userUid,
-                                        userPosition: widget.userPosition,
-                                        hasActiveSubscription: widget.hasActiveSubscription
-                                        ),
-                                  ),
-                                );
-                              },
-                              child: Row(
-                                children: [
-                                  Image.asset(
-                                    'assets/swap_horiz.png',
-                                    width: 20,
-                                    height: 20,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  const Text(
-                                    '詳細へ',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.orange,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                        SizedBox(width: 10),
+                        // **試合タイプフィルタ**
+                        GestureDetector(
+                          onTap: () => _showCupertinoPicker(
+                            context,
+                            _gameTypeOptions,
+                            selectedGameTypeFilter,
+                            (newValue) {
+                              setState(() {
+                                selectedGameTypeFilter = newValue;
+                              });
+                            },
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                          ],
+                            child: Row(
+                              children: [
+                                Text(selectedGameTypeFilter,
+                                    style: const TextStyle(fontSize: 16)),
+                                const Icon(Icons.arrow_drop_down),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    // 年を選択 横スクロール年セレクタ（Firestoreから取得した年がある場合のみ表示）
-                    if (selectedPeriodFilter == '年を選択' &&
-                        _availableYears.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: SizedBox(
-                          height: 40,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _availableYears.length,
-                            itemBuilder: (context, index) {
-                              final int year = _availableYears[index];
-                              return GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    selectedPeriodFilter = '年を選択';
-                                    _startDate = DateTime(year, 1, 1);
-                                    _endDate = DateTime(year, 12, 31);
-                                  });
-                                },
-                                child: Container(
-                                  margin:
-                                      const EdgeInsets.symmetric(horizontal: 6),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: _startDate.year == year
-                                        ? Colors.blue
-                                        : Colors.grey[200],
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '$year年',
-                                      style: TextStyle(
-                                        color: _startDate.year == year
-                                            ? Colors.white
-                                            : Colors.black,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => GradeDetailTab(
+                                    userUid: widget.userUid,
+                                    userPosition: widget.userPosition,
+                                    hasActiveSubscription:
+                                        widget.hasActiveSubscription),
+                              ),
+                            );
+                          },
+                          child: Row(
+                            children: [
+                              Image.asset(
+                                'assets/swap_horiz.png',
+                                width: 20,
+                                height: 20,
+                              ),
+                              const SizedBox(width: 4),
+                              const Text(
+                                '詳細へ',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.orange,
+                                  fontWeight: FontWeight.bold,
                                 ),
-                              );
-                            },
+                              ),
+                            ],
                           ),
                         ),
-                      ),
+                      ],
+                    ),
                   ],
                 ),
-              ),
+                // 年を選択 横スクロール年セレクタ（Firestoreから取得した年がある場合のみ表示）
+                if (selectedPeriodFilter == '年を選択' &&
+                    _availableYears.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: SizedBox(
+                      height: 40,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _availableYears.length,
+                        itemBuilder: (context, index) {
+                          final int year = _availableYears[index];
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                selectedPeriodFilter = '年を選択';
+                                _startDate = DateTime(year, 1, 1);
+                                _endDate = DateTime(year, 12, 31);
+                              });
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _startDate.year == year
+                                    ? Colors.blue
+                                    : Colors.grey[200],
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$year年',
+                                  style: TextStyle(
+                                    color: _startDate.year == year
+                                        ? Colors.white
+                                        : Colors.black,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           TabBar(

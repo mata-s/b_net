@@ -1,17 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:b_net/pages/private/mission_page.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:b_net/widgets/ranking_update_card.dart';
+import 'package:b_net/pages/private/first_game_dashboard_empty.dart';
+import 'package:b_net/pages/private/game_input_page.dart';
 
 class PlayerDashboardPage extends StatefulWidget {
   final String userUid;
   final List<String> userPosition;
+  final bool hasTeam;
+  final VoidCallback? onTeamValueTap;
 
   const PlayerDashboardPage({
     super.key,
     required this.userUid,
     required this.userPosition,
+    this.hasTeam = false,
+    this.onTeamValueTap,
   });
 
   @override
@@ -19,15 +26,21 @@ class PlayerDashboardPage extends StatefulWidget {
 }
 
 class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
-  late final Future<List<DocumentSnapshot<Map<String, dynamic>>>> _statsFuture;
-  late final Future<_PlayerRankingSummary> _rankingSummaryFuture;
-  late final Future<QuerySnapshot<Map<String, dynamic>>> _yearGoalFuture;
-  late final Future<QuerySnapshot<Map<String, dynamic>>> _monthGoalFuture;
-  late final Future<DocumentSnapshot<Map<String, dynamic>>> _seasonStatsFuture;
+  late Future<List<DocumentSnapshot<Map<String, dynamic>>>> _statsFuture;
+  late Future<_PlayerRankingSummary> _rankingSummaryFuture;
+  late Future<QuerySnapshot<Map<String, dynamic>>> _yearGoalFuture;
+  late Future<QuerySnapshot<Map<String, dynamic>>> _monthGoalFuture;
+  late Future<DocumentSnapshot<Map<String, dynamic>>> _seasonStatsFuture;
+  late Future<bool> _hasGamesFuture;
+  late Future<bool> _hasTodayGameFuture;
 
   @override
   void initState() {
     super.initState();
+    _loadDashboard();
+  }
+
+  void _loadDashboard() {
     _statsFuture = Future.wait([
       _fetchSeasonStats(),
       _fetchMonthStats(),
@@ -36,6 +49,63 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
     _yearGoalFuture = _fetchYearGoal();
     _monthGoalFuture = _fetchMonthGoal();
     _seasonStatsFuture = _fetchSeasonStats();
+    _hasGamesFuture = _hasAnyGame();
+    _hasTodayGameFuture = _hasTodayGame();
+  }
+
+  Future<bool> _hasAnyGame() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.userUid)
+        .collection('games')
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
+  }
+
+  Future<bool> _hasTodayGame() async {
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    final startOfTomorrow = startOfToday.add(const Duration(days: 1));
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.userUid)
+        .collection('games')
+        .where(
+          'gameDate',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday),
+        )
+        .where('gameDate', isLessThan: Timestamp.fromDate(startOfTomorrow))
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
+  }
+
+  Future<void> _refreshDashboard() async {
+    setState(_loadDashboard);
+    await Future.wait<dynamic>([
+      _statsFuture,
+      _rankingSummaryFuture,
+      _yearGoalFuture,
+      _monthGoalFuture,
+      _seasonStatsFuture,
+      _hasGamesFuture,
+      _hasTodayGameFuture,
+    ]);
+  }
+
+  Future<void> _openGameInput() async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => GameInputPage(
+          selectedDate: DateTime.now(),
+          positions: widget.userPosition,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _refreshDashboard();
   }
 
   Future<QuerySnapshot<Map<String, dynamic>>> _fetchYearGoal() {
@@ -169,7 +239,8 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
 
       final padDoc = await FirebaseFirestore.instance
           .collection('battingAverageRanking')
-          .doc('${candidate.year}_${candidate.month.toString().padLeft(2, '0')}')
+          .doc(
+              '${candidate.year}_${candidate.month.toString().padLeft(2, '0')}')
           .collection(prefecture)
           .doc(widget.userUid)
           .get();
@@ -191,293 +262,399 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        RankingUpdateCard(userUid: widget.userUid),
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEAF6FF),
-                      borderRadius: BorderRadius.circular(18),
+    return FutureBuilder<bool>(
+      future: _hasGamesFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return _buildDashboard();
+        }
+        if (snapshot.data != true) {
+          return FirstGameDashboardEmpty(
+            onStart: _openGameInput,
+          );
+        }
+        return _buildDashboard();
+      },
+    );
+  }
+
+  Widget _buildDashboard() {
+    return RefreshIndicator(
+      onRefresh: _refreshDashboard,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          BNetFloatingTabBar.bodyClearance(context),
+        ),
+        children: [
+          FutureBuilder<bool>(
+            future: _hasTodayGameFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done ||
+                  snapshot.data == true) {
+                return const SizedBox.shrink();
+              }
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
                     ),
-                    child: const Icon(
-                      Icons.sports_baseball,
-                      size: 32,
-                      color: Color(0xFF1565C0),
-                    ),
+                    borderRadius: BorderRadius.circular(22),
                   ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '選手カード',
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '今日の試合を記録',
                           style: TextStyle(
-                            fontSize: 22,
+                            color: Colors.white,
+                            fontSize: 19,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
-                        SizedBox(height: 2),
-                        Text(
-                          'ランキングと規定到達状況',
-                          style: TextStyle(
-                            color: Colors.black54,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: _openGameInput,
+                        icon: const Icon(Icons.add),
+                        label: const Text('入力'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF1D4ED8),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              FutureBuilder<List<DocumentSnapshot<Map<String, dynamic>>>>(
-                future: _statsFuture,
-                builder: (context, snapshot) {
-                  final seasonData =
-                      snapshot.data?[0].data() ?? <String, dynamic>{};
-                  final monthData =
-                      snapshot.data?[1].data() ?? <String, dynamic>{};
-
-                  final seasonAtBats = _statNumber(
-                    seasonData,
-                    ['totalBats', 'atBats', 'totalAtBats'],
-                  );
-                  final seasonInnings = _statNumber(seasonData, [
-                    'inningsPitched',
-                    'totalInningsPitched',
-                    'innings',
-                  ]);
-                  final seasonBattingAverage = _statNumber(
-                    seasonData,
-                    ['battingAverage'],
-                  );
-                  final seasonHomeRuns = _statNumber(
-                    seasonData,
-                    ['totalHomeRuns', 'homeRuns'],
-                  );
-                  final seasonEra = _statNumber(seasonData, ['era']);
-                  final seasonStrikeouts = _statNumber(
-                    seasonData,
-                    ['totalPStrikeouts', 'strikeouts'],
-                  );
-                  final monthAtBats = _statNumber(
-                    monthData,
-                    ['totalBats', 'atBats', 'totalAtBats'],
-                  );
-                  final monthInnings = _statNumber(monthData, [
-                    'inningsPitched',
-                    'totalInningsPitched',
-                    'innings',
-                  ]);
-                  
-                  return FutureBuilder<_PlayerRankingSummary>(
-                    future: _rankingSummaryFuture,
-                    builder: (context, rankingSnapshot) {
-                      final summary =
-                          rankingSnapshot.data ?? const _PlayerRankingSummary();
-
-                      return Column(
+                ),
+              );
+            },
+          ),
+          RankingUpdateCard(userUid: widget.userUid),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 58,
+                      height: 58,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEAF6FF),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Icon(
+                        Icons.sports_baseball,
+                        size: 32,
+                        color: Color(0xFF1565C0),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _RankingSummaryCard(
-                            summary: summary,
-                            isPitcher: _isPitcher,
-                            seasonBattingAverage: seasonBattingAverage,
-                            seasonHomeRuns: seasonHomeRuns,
-                            seasonEra: seasonEra,
-                            seasonStrikeouts: seasonStrikeouts,
-                            seasonAtBats: seasonAtBats,
-                            requiredSeasonAtBats: _requiredSeasonAtBats(),
-                            monthAtBats: monthAtBats,
-                            requiredMonthAtBats: _requiredMonthAtBats(),
-                            seasonInnings: seasonInnings,
-                            requiredSeasonInnings: _requiredSeasonInnings(),
-                            monthInnings: monthInnings,
-                            requiredMonthInnings: _requiredMonthInnings(),
+                          Text(
+                            '選手カード',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'ランキングと規定到達状況',
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
-                      );
-                    },
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.flag_circle_outlined,
-                    color: Color(0xFF1565C0),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    '目標',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => MissionPage(
-                            userUid: widget.userUid,
+                  ],
+                ),
+                const SizedBox(height: 10),
+                FutureBuilder<List<DocumentSnapshot<Map<String, dynamic>>>>(
+                  future: _statsFuture,
+                  builder: (context, snapshot) {
+                    final seasonData =
+                        snapshot.data?[0].data() ?? <String, dynamic>{};
+                    final monthData =
+                        snapshot.data?[1].data() ?? <String, dynamic>{};
+
+                    final seasonAtBats = _statNumber(
+                      seasonData,
+                      ['totalBats', 'atBats', 'totalAtBats'],
+                    );
+                    final seasonInnings = _statNumber(seasonData, [
+                      'inningsPitched',
+                      'totalInningsPitched',
+                      'innings',
+                    ]);
+                    final seasonBattingAverage = _statNumber(
+                      seasonData,
+                      ['battingAverage'],
+                    );
+                    final seasonHomeRuns = _statNumber(
+                      seasonData,
+                      ['totalHomeRuns', 'homeRuns'],
+                    );
+                    final seasonEra = _statNumber(seasonData, ['era']);
+                    final seasonStrikeouts = _statNumber(
+                      seasonData,
+                      ['totalPStrikeouts', 'strikeouts'],
+                    );
+                    final monthAtBats = _statNumber(
+                      monthData,
+                      ['totalBats', 'atBats', 'totalAtBats'],
+                    );
+                    final monthInnings = _statNumber(monthData, [
+                      'inningsPitched',
+                      'totalInningsPitched',
+                      'innings',
+                    ]);
+
+                    return FutureBuilder<_PlayerRankingSummary>(
+                      future: _rankingSummaryFuture,
+                      builder: (context, rankingSnapshot) {
+                        final summary = rankingSnapshot.data ??
+                            const _PlayerRankingSummary();
+
+                        return Column(
+                          children: [
+                            _RankingSummaryCard(
+                              summary: summary,
+                              isPitcher: _isPitcher,
+                              seasonBattingAverage: seasonBattingAverage,
+                              seasonHomeRuns: seasonHomeRuns,
+                              seasonEra: seasonEra,
+                              seasonStrikeouts: seasonStrikeouts,
+                              seasonAtBats: seasonAtBats,
+                              requiredSeasonAtBats: _requiredSeasonAtBats(),
+                              monthAtBats: monthAtBats,
+                              requiredMonthAtBats: _requiredMonthAtBats(),
+                              seasonInnings: seasonInnings,
+                              requiredSeasonInnings: _requiredSeasonInnings(),
+                              monthInnings: monthInnings,
+                              requiredMonthInnings: _requiredMonthInnings(),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.flag_circle_outlined,
+                      color: Color(0xFF1565C0),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      '目標',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => MissionPage(
+                              userUid: widget.userUid,
+                            ),
                           ),
-                        ),
+                        );
+                      },
+                      child: const Text('設定する'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  future: _yearGoalFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return const _GoalTile(
+                        icon: Icons.flag_outlined,
+                        label: '今年の目標',
+                        value: '未設定',
                       );
-                    },
-                    child: const Text('設定する'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                future: _yearGoalFuture,
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                    return const _GoalTile(
+                    }
+
+                    final goalData = snapshot.data!.docs.first.data();
+                    return _GoalTile(
                       icon: Icons.flag_outlined,
                       label: '今年の目標',
-                      value: '未設定',
+                      value: _goalTitle(goalData),
+                      progressText: _goalProgressText(goalData),
+                      supportMessage: _goalSupportMessage(goalData),
+                      progressBadgeText: _goalProgressBadgeText(goalData),
+                      isAchieved: goalData['isAchieved'] == true,
+                      achievementLabel: _goalAchievementLabel(goalData),
+                      showProgressBar: !_isMaintainGoal(goalData),
+                      progress: _goalProgress(goalData),
                     );
-                  }
+                  },
+                ),
+                FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  future: _monthGoalFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return const _GoalTile(
+                        icon: Icons.calendar_month_outlined,
+                        label: '今月の目標',
+                        value: '未設定',
+                      );
+                    }
 
-                  final goalData = snapshot.data!.docs.first.data();
-                  return _GoalTile(
-                    icon: Icons.flag_outlined,
-                    label: '今年の目標',
-                    value: _goalTitle(goalData),
-                    progressText: _goalProgressText(goalData),
-                    supportMessage: _goalSupportMessage(goalData),
-                    progressBadgeText: _goalProgressBadgeText(goalData),
-                    isAchieved: goalData['isAchieved'] == true,
-                    achievementLabel: _goalAchievementLabel(goalData),
-                    showProgressBar: !_isMaintainGoal(goalData),
-                    progress: _goalProgress(goalData),
-                  );
-                },
-              ),
-              FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                future: _monthGoalFuture,
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                    return const _GoalTile(
+                    final goalData = snapshot.data!.docs.first.data();
+                    return _GoalTile(
                       icon: Icons.calendar_month_outlined,
                       label: '今月の目標',
-                      value: '未設定',
+                      value: _goalTitle(goalData),
+                      progressText: _goalProgressText(goalData),
+                      supportMessage: _goalSupportMessage(goalData),
+                      progressBadgeText: _goalProgressBadgeText(goalData),
+                      isAchieved: goalData['isAchieved'] == true,
+                      achievementLabel: _goalAchievementLabel(goalData),
+                      showProgressBar: !_isMaintainGoal(goalData),
+                      progress: _goalProgress(goalData),
                     );
-                  }
-
-                  final goalData = snapshot.data!.docs.first.data();
-                  return _GoalTile(
-                    icon: Icons.calendar_month_outlined,
-                    label: '今月の目標',
-                    value: _goalTitle(goalData),
-                    progressText: _goalProgressText(goalData),
-                    supportMessage: _goalSupportMessage(goalData),
-                    progressBadgeText: _goalProgressBadgeText(goalData),
-                    isAchieved: goalData['isAchieved'] == true,
-                    achievementLabel: _goalAchievementLabel(goalData),
-                    showProgressBar: !_isMaintainGoal(goalData),
-                    progress: _goalProgress(goalData),
-                  );
-                },
-              ),
-            ],
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.analytics_outlined,
-                    color: Color(0xFF1565C0),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${DateTime.now().year}年 主要成績',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.analytics_outlined,
+                      color: Color(0xFF1565C0),
                     ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${DateTime.now().year}年 主要成績',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  '今シーズンの成績サマリー',
+                  style: TextStyle(
+                    color: Colors.black54,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                '今シーズンの成績サマリー',
-                style: TextStyle(
-                  color: Colors.black54,
-                  fontWeight: FontWeight.w600,
+                ),
+                const SizedBox(height: 12),
+                FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  future: _seasonStatsFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData || !snapshot.data!.exists) {
+                      return const Text(
+                        '今シーズンの成績はまだありません',
+                        style: TextStyle(
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      );
+                    }
+
+                    final data = snapshot.data!.data() ?? {};
+                    return Column(
+                      children: [
+                        _BattingStatsCard(data: data),
+                        if (_isPitcher) ...[
+                          const SizedBox(height: 10),
+                          _PitchingStatsCard(data: data),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          if (!widget.hasTeam && widget.onTeamValueTap != null) ...[
+            const SizedBox(height: 12),
+            Material(
+              color: const Color(0xFFF2F7FF),
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                onTap: widget.onTeamValueTap,
+                borderRadius: BorderRadius.circular(16),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.groups_rounded, color: Color(0xFF155EEF)),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'チームに参加すると、個人記録がチーム成績に自動反映',
+                          style: TextStyle(
+                            color: Color(0xFF233F68),
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 6),
+                      Icon(Icons.chevron_right_rounded,
+                          color: Color(0xFF155EEF)),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 12),
-              FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                future: _seasonStatsFuture,
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData || !snapshot.data!.exists) {
-                    return const Text(
-                      '今シーズンの成績はまだありません',
-                      style: TextStyle(
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    );
-                  }
-
-                  final data = snapshot.data!.data() ?? {};
-                  return Column(
-                    children: [
-                      _BattingStatsCard(data: data),
-                      if (_isPitcher) ...[
-                        const SizedBox(height: 10),
-                        _PitchingStatsCard(data: data),
-                      ],
-                    ],
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -501,7 +678,6 @@ String _goalProgressText(Map<String, dynamic> goalData) {
 
   return '現在 ${_formatGoalValue(statField, actual)} / 目標 ${_formatGoalValue(statField, target)}';
 }
-
 
 double? _goalProgress(Map<String, dynamic> goalData) {
   final target = goalData['target'];
@@ -608,9 +784,8 @@ String? _ageGroupFromUserData(Map<String, dynamic> userData) {
     return _ageGroupFromAge(rawAge.toInt());
   }
 
-  final rawBirthday = userData['birthday'] ??
-      userData['birthDate'] ??
-      userData['dateOfBirth'];
+  final rawBirthday =
+      userData['birthday'] ?? userData['birthDate'] ?? userData['dateOfBirth'];
 
   final birthday = _dateTimeFromDynamic(rawBirthday);
   if (birthday == null) return null;
@@ -928,7 +1103,9 @@ num _statNumber(Map<String, dynamic> data, List<String> keys) {
 
 String _formatDashboardRate(num value) {
   final formatted = value.toDouble().toStringAsFixed(3);
-  return formatted.startsWith('0') ? formatted.replaceFirst('0', '') : formatted;
+  return formatted.startsWith('0')
+      ? formatted.replaceFirst('0', '')
+      : formatted;
 }
 
 String _formatDashboardEra(num value) {
@@ -994,8 +1171,7 @@ int _requiredMonthAtBats() {
   final year = now.year;
   final month = now.month;
 
-  final maxRequiredBats =
-      (month == 12 || month == 1 || month == 2) ? 4 : 8;
+  final maxRequiredBats = (month == 12 || month == 1 || month == 2) ? 4 : 8;
 
   final monthStart = DateTime(year, month, 1);
   final monthEnd = DateTime(year, month + 1, 0, 23, 59, 59);
@@ -1009,9 +1185,7 @@ int _requiredMonthAtBats() {
 
   monthProgress = monthProgress.clamp(0.0, 1.0);
 
-  return (maxRequiredBats * monthProgress)
-      .ceil()
-      .clamp(1, maxRequiredBats);
+  return (maxRequiredBats * monthProgress).ceil().clamp(1, maxRequiredBats);
 }
 
 num _requiredMonthInnings() {
@@ -1019,8 +1193,7 @@ num _requiredMonthInnings() {
   final year = now.year;
   final month = now.month;
 
-  final maxRequiredInnings =
-      (month == 12 || month == 1 || month == 2) ? 6 : 12;
+  final maxRequiredInnings = (month == 12 || month == 1 || month == 2) ? 6 : 12;
 
   final monthStart = DateTime(year, month, 1);
   final monthEnd = DateTime(year, month + 1, 0, 23, 59, 59);
@@ -1057,7 +1230,7 @@ class _BattingStatsCard extends StatelessWidget {
       icon: FontAwesomeIcons.baseballBatBall,
       mainValue: _formatDashboardRate(average),
       mainLabel: '打率',
-       subValue: '(${atBats.toInt()}-${hits.toInt()})',
+      subValue: '(${atBats.toInt()}-${hits.toInt()})',
       items: [
         _StatsSummaryItem(label: '安打', value: hits.toInt().toString()),
         _StatsSummaryItem(label: '本塁打', value: homeRuns.toInt().toString()),
@@ -1074,16 +1247,16 @@ class _PitchingStatsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-   final era = _statNumber(data, ['era']);
-   final appearances = _statNumber(data, ['totalAppearances', 'appearances']);
-   final wins = _statNumber(data, ['wins', 'totalWins']);
-   final strikeouts = _statNumber(data, ['totalPStrikeouts', 'strikeouts']);
-   final earnedRuns = _statNumber(data, ['totalEarnedRuns', 'earnedRuns']);
-   final innings = _statNumber(data, [
-    'inningsPitched',
-    'totalInningsPitched',
-    'innings',
-  ]);
+    final era = _statNumber(data, ['era']);
+    final appearances = _statNumber(data, ['totalAppearances', 'appearances']);
+    final wins = _statNumber(data, ['wins', 'totalWins']);
+    final strikeouts = _statNumber(data, ['totalPStrikeouts', 'strikeouts']);
+    final earnedRuns = _statNumber(data, ['totalEarnedRuns', 'earnedRuns']);
+    final innings = _statNumber(data, [
+      'inningsPitched',
+      'totalInningsPitched',
+      'innings',
+    ]);
 
     return _StatsSummaryCard(
       title: '投手成績',
@@ -1092,10 +1265,10 @@ class _PitchingStatsCard extends StatelessWidget {
       mainLabel: '防御率',
       subValue: '(${_formatInnings(innings)}回)',
       items: [
-               _StatsSummaryItem(label: '登板', value: appearances.toInt().toString()),
-               _StatsSummaryItem(label: '勝利', value: wins.toInt().toString()),
-               _StatsSummaryItem(label: '奪三振', value: strikeouts.toInt().toString()),
-               _StatsSummaryItem(label: '自責点', value: earnedRuns.toInt().toString()),
+        _StatsSummaryItem(label: '登板', value: appearances.toInt().toString()),
+        _StatsSummaryItem(label: '勝利', value: wins.toInt().toString()),
+        _StatsSummaryItem(label: '奪三振', value: strikeouts.toInt().toString()),
+        _StatsSummaryItem(label: '自責点', value: earnedRuns.toInt().toString()),
       ],
     );
   }
@@ -1295,17 +1468,15 @@ class _GoalTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accentColor = showProgressBar
-        ? const Color(0xFF1565C0)
-        : const Color(0xFF2E7D32);
+    final accentColor =
+        showProgressBar ? const Color(0xFF1565C0) : const Color(0xFF2E7D32);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: showProgressBar
-            ? const Color(0xFFF4F8FF)
-            : const Color(0xFFEFFAF1),
+        color:
+            showProgressBar ? const Color(0xFFF4F8FF) : const Color(0xFFEFFAF1),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: showProgressBar
@@ -1531,6 +1702,7 @@ class _RankingGroup extends StatelessWidget {
     );
   }
 }
+
 class _QualificationTextLine extends StatelessWidget {
   final String title;
   final num annualCurrent;
@@ -1550,8 +1722,10 @@ class _QualificationTextLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final annualRemaining = (annualRequired - annualCurrent).clamp(0, annualRequired);
-    final monthlyRemaining = (monthlyRequired - monthlyCurrent).clamp(0, monthlyRequired);
+    final annualRemaining =
+        (annualRequired - annualCurrent).clamp(0, annualRequired);
+    final monthlyRemaining =
+        (monthlyRequired - monthlyCurrent).clamp(0, monthlyRequired);
     final annualReached = annualRemaining <= 0;
     final monthlyReached = monthlyRemaining <= 0;
 
@@ -1580,8 +1754,10 @@ class _QualificationTextLine extends StatelessWidget {
               Expanded(
                 child: _QualificationTextPart(
                   label: '年間',
-                  value: '${formatter(annualCurrent)} / ${formatter(annualRequired)}',
-                  status: annualReached ? '到達' : 'あと${formatter(annualRemaining)}',
+                  value:
+                      '${formatter(annualCurrent)} / ${formatter(annualRequired)}',
+                  status:
+                      annualReached ? '到達' : 'あと${formatter(annualRemaining)}',
                   isReached: annualReached,
                 ),
               ),
@@ -1589,8 +1765,11 @@ class _QualificationTextLine extends StatelessWidget {
               Expanded(
                 child: _QualificationTextPart(
                   label: '今月',
-                  value: '${formatter(monthlyCurrent)} / ${formatter(monthlyRequired)}',
-                  status: monthlyReached ? '到達' : 'あと${formatter(monthlyRemaining)}',
+                  value:
+                      '${formatter(monthlyCurrent)} / ${formatter(monthlyRequired)}',
+                  status: monthlyReached
+                      ? '到達'
+                      : 'あと${formatter(monthlyRemaining)}',
                   isReached: monthlyReached,
                 ),
               ),
@@ -1636,9 +1815,7 @@ class _QualificationTextPart extends StatelessWidget {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w800,
-            color: isReached
-                ? Colors.green
-                : const Color(0xFF1565C0),
+            color: isReached ? Colors.green : const Color(0xFF1565C0),
           ),
         ),
         const SizedBox(height: 2),

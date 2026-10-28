@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
-import 'package:b_net/login/login_page.dart';
+import 'package:b_net/login/welcome_page.dart';
 
 class DeleteAccountPage extends StatefulWidget {
   const DeleteAccountPage({super.key});
@@ -23,6 +24,14 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
 
   User? get _currentUser => _auth.currentUser;
 
+  Future<String?> _requestPassword() {
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _PasswordReauthenticationDialog(),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -34,11 +43,10 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     if (user == null) return;
 
     try {
-      final doc =
-          await _firestore.collection('users').doc(user.uid).get();
+      final doc = await _firestore.collection('users').doc(user.uid).get();
       if (!doc.exists) return;
 
-     final data = doc.data();
+      final data = doc.data();
 
       if (!mounted) return;
       setState(() {
@@ -88,20 +96,35 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     );
 
     if (confirmed != true) return;
+    if (!mounted) return;
+
+    final email = user.email;
+    if (email == null || email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('再認証に必要なメールアドレスが見つかりません。')),
+      );
+      return;
+    }
+
+    final password = await _requestPassword();
+    if (password == null || password.isEmpty) return;
+    if (!mounted) return;
 
     setState(() {
       _isDeleting = true;
     });
 
     try {
-      final uid = user.uid;
+      final credential = EmailAuthProvider.credential(
+        email: email,
+        password: password,
+      );
+      await user.reauthenticateWithCredential(credential);
 
-      // Firestore 上のユーザーデータを削除
-      // TODO: 必要であれば Cloud Functions などでサブコレクションも含めて一括削除する
-      await _firestore.collection('users').doc(uid).delete();
-
-      // Firebase Authentication のアカウント削除
-      await user.delete();
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'deleteOwnAccount',
+      );
+      await callable.call<void>();
 
       // 念のためサインアウト
       await _auth.signOut();
@@ -109,18 +132,20 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('アカウントを削除しました。')), 
+        const SnackBar(content: Text('アカウントを削除しました。')),
       );
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginPage()),
+        MaterialPageRoute(builder: (_) => const WelcomePage()),
         (route) => false,
       );
     } on FirebaseAuthException catch (e) {
       debugPrint('⚠️ Failed to delete account (auth): $e');
       String message = 'アカウントの削除に失敗しました。';
-      if (e.code == 'requires-recent-login') {
-        message = 'セキュリティのため、再ログインが必要です。もう一度ログインしてからお試しください。';
+      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        message = 'パスワードが正しくありません。';
+      } else if (e.code == 'too-many-requests') {
+        message = '試行回数が多すぎます。時間をおいて再度お試しください。';
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -153,179 +178,244 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
       appBar: AppBar(
         title: const Text('アカウントを削除'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ① 大きめの警告ブロック
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.red),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'アカウントと関連するデータを完全に削除します。\n'
-                      '一度削除すると元に戻すことはできません。',
-                      style: TextStyle(fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
+        children: [
+          // ① 大きめの警告ブロック
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.withOpacity(0.3)),
             ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'アカウントと関連するデータを完全に削除します。\n'
+                    '一度削除すると元に戻すことはできません。',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
 
-            // ② アカウントサマリー
-            if (email.isNotEmpty)
-              Card(
-                margin: const EdgeInsets.only(bottom: 16),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '削除対象のアカウント',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
+          // ② アカウントサマリー
+          if (email.isNotEmpty)
+            Card(
+              margin: const EdgeInsets.only(bottom: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '削除対象のアカウント',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(height: 8),
-                      // メールアドレス（Auth）
+                    ),
+                    const SizedBox(height: 8),
+                    // メールアドレス（Auth）
+                    Row(
+                      children: [
+                        const Icon(Icons.email, size: 18, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            email,
+                            style: const TextStyle(fontSize: 14),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // 名前
+                    if (_userName != null && _userName!.isNotEmpty)
                       Row(
                         children: [
-                          const Icon(Icons.email, size: 18, color: Colors.grey),
+                          const Icon(Icons.person,
+                              size: 18, color: Colors.grey),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              email,
-                              style: const TextStyle(fontSize: 14),
+                              _userName!,
+                              style: const TextStyle(fontSize: 13),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      // 名前
-                      if (_userName != null && _userName!.isNotEmpty)
-                        Row(
-                          children: [
-                            const Icon(Icons.person, size: 18, color: Colors.grey),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _userName!,
-                                style: const TextStyle(fontSize: 13),
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                    if (_userName != null && _userName!.isNotEmpty)
+                      const SizedBox(height: 4),
+                    // ポジション（配列）
+                    if (_userPositions.isNotEmpty)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.sports_baseball,
+                              size: 18, color: Colors.grey),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _userPositions.join(' / '),
+                              style: const TextStyle(fontSize: 13),
                             ),
-                          ],
-                        ),
-                      if (_userName != null && _userName!.isNotEmpty)
-                        const SizedBox(height: 4),
-                      // ポジション（配列）
-                      if (_userPositions.isNotEmpty)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.sports_baseball,
-                                size: 18, color: Colors.grey),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _userPositions.join(' / '),
-                                style: const TextStyle(fontSize: 13),
-                              ),
+                          ),
+                        ],
+                      ),
+                    if (_userPositions.isNotEmpty) const SizedBox(height: 4),
+                    // 都道府県
+                    if (_userPrefecture != null && _userPrefecture!.isNotEmpty)
+                      Row(
+                        children: [
+                          const Icon(Icons.place, size: 18, color: Colors.grey),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _userPrefecture!,
+                              style: const TextStyle(fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ],
-                        ),
-                      if (_userPositions.isNotEmpty)
-                        const SizedBox(height: 4),
-                      // 都道府県
-                      if (_userPrefecture != null &&
-                          _userPrefecture!.isNotEmpty)
-                        Row(
-                          children: [
-                            const Icon(Icons.place, size: 18, color: Colors.grey),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _userPrefecture!,
-                                style: const TextStyle(fontSize: 13),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
+                          ),
+                        ],
+                      ),
+                  ],
                 ),
               ),
-
-            // ③ 削除されるデータリスト
-            const Text(
-              '削除されるデータ',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const _BulletText('ログイン用アカウント情報（メールアドレスなど）'),
-            const _BulletText('プロフィール情報（名前、ポジション、都道府県など）'),
-            const _BulletText('あなたに紐づくチーム・個人成績データ'),
-            const SizedBox(height: 16),
-
-            // 注意事項チェック
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Checkbox(
-                  value: _agreed,
-                  onChanged: _isDeleting
-                      ? null
-                      : (v) {
-                          setState(() {
-                            _agreed = v ?? false;
-                          });
-                        },
-                ),
-                const Expanded(
-                  child: Text(
-                    '注意事項を理解し、アカウントと関連データを削除することに同意します。',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                ),
-              ],
             ),
 
-            const Spacer(),
+          // ③ 削除されるデータリスト
+          const Text(
+            '削除されるデータ',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const _BulletText('ログイン用アカウント情報（メールアドレスなど）'),
+          const _BulletText('プロフィール情報（名前、ポジション、都道府県など）'),
+          const _BulletText('あなたに紐づくチーム・個人成績データ'),
+          const SizedBox(height: 16),
 
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.tonal(
-                style: FilledButton.styleFrom(
-                  foregroundColor: Colors.red,
-                ),
-                onPressed: _isDeleting ? null : _deleteAccount,
-                child: _isDeleting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('アカウントを削除する'),
+          // 注意事項チェック
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Checkbox(
+                value: _agreed,
+                onChanged: _isDeleting
+                    ? null
+                    : (v) {
+                        setState(() {
+                          _agreed = v ?? false;
+                        });
+                      },
               ),
+              const Expanded(
+                child: Text(
+                  '注意事項を理解し、アカウントと関連データを削除することに同意します。',
+                  style: TextStyle(fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonal(
+              style: FilledButton.styleFrom(
+                foregroundColor: Colors.red,
+              ),
+              onPressed: _isDeleting ? null : _deleteAccount,
+              child: _isDeleting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('アカウントを削除する'),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _PasswordReauthenticationDialog extends StatefulWidget {
+  const _PasswordReauthenticationDialog();
+
+  @override
+  State<_PasswordReauthenticationDialog> createState() =>
+      _PasswordReauthenticationDialogState();
+}
+
+class _PasswordReauthenticationDialogState
+    extends State<_PasswordReauthenticationDialog> {
+  final _controller = TextEditingController();
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final password = _controller.text;
+    if (password.isNotEmpty) {
+      Navigator.of(context).pop(password);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('本人確認'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('安全のため、現在のパスワードを入力してください。'),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _controller,
+            obscureText: _obscure,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+            decoration: InputDecoration(
+              labelText: 'パスワード',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(
+                  _obscure ? Icons.visibility_off : Icons.visibility,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('本人確認'),
+        ),
+      ],
     );
   }
 }

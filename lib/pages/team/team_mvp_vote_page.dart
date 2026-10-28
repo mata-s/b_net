@@ -9,7 +9,12 @@ class TeamMvpVotePage extends StatelessWidget {
   final bool hasActiveTeamSubscription;
   final TeamPlanTier teamPlanTier;
 
-  const TeamMvpVotePage({Key? key, required this.teamId, required this.hasActiveTeamSubscription, required this.teamPlanTier}) : super(key: key);
+  const TeamMvpVotePage(
+      {Key? key,
+      required this.teamId,
+      required this.hasActiveTeamSubscription,
+      required this.teamPlanTier})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +30,6 @@ class TeamMvpVotePage extends StatelessWidget {
       child: Scaffold(
         body: Column(
           children: [
-            const SizedBox(height: 40), // Top padding instead of AppBar
             const TabBar(
               tabs: [
                 Tab(text: '月間MVP'),

@@ -1,6 +1,7 @@
 import 'package:b_net/pages/private/director/schedule_input_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:table_calendar/table_calendar.dart';
 
 class DirectoCalendar extends StatefulWidget {
@@ -68,22 +69,27 @@ class _DirectoCalendarState extends State<DirectoCalendar> {
         automaticallyImplyLeading: false,
         title: const Text('オーダーを考える'),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          if (_selectedDay != null) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ScheduleInputPage(
-                  selectedDate: _selectedDay!,
-                  userUid: widget.userUid,
-                  teamId: widget.teamId,
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
+        child: FloatingActionButton(
+          onPressed: () {
+            if (_selectedDay != null) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ScheduleInputPage(
+                    selectedDate: _selectedDay!,
+                    userUid: widget.userUid,
+                    teamId: widget.teamId,
+                  ),
                 ),
-              ),
-            );
-          }
-        },
-        child: const Icon(Icons.add),
+              );
+            }
+          },
+          child: const Icon(Icons.add),
+        ),
       ),
       body: Column(
         children: [

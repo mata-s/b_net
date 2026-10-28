@@ -1,4 +1,5 @@
 import 'package:b_net/services/subscription_screen.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:flutter/material.dart';
 
 class SubscriptionGuard extends StatefulWidget {
@@ -17,7 +18,8 @@ class SubscriptionGuard extends StatefulWidget {
   State<SubscriptionGuard> createState() => _SubscriptionGuardState();
 }
 
-class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTickerProviderStateMixin {
+class _SubscriptionGuardState extends State<SubscriptionGuard>
+    with SingleTickerProviderStateMixin {
   late final PageController _pageController;
   int _currentPage = 0;
 
@@ -33,7 +35,7 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
           '自分のプレーをもっと深く振り返れます。',
       icon: Icons.analytics,
     ),
-     _FeaturePage(
+    _FeaturePage(
       title: '月間称号を獲得できる',
       description: '毎月の成績から、あなたの活躍や成長を分析。\n'
           'あなただけの称号と成長ポイントを振り返れます。',
@@ -109,16 +111,14 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
 
     // iPad の時だけ全体を少し大きく（SPはそのまま）
     // 600〜: iPad相当 / 900〜: 大きめタブレット
-    final double contentMaxWidth = !isTablet
-        ? double.infinity
-        : (size.width >= 900 ? 820 : 720);
+    final double contentMaxWidth =
+        !isTablet ? double.infinity : (size.width >= 900 ? 820 : 720);
 
     final double titleFont = isTablet ? 30 : 22;
     final double subtitleFont = isTablet ? 18 : 14;
     final double buttonHeight = isTablet ? 56 : 48;
-    final double cardAreaHeight = !isTablet
-        ? 320
-        : (size.width >= 900 ? 480 : 420);
+    final double cardAreaHeight =
+        !isTablet ? 320 : (size.width >= 900 ? 480 : 420);
     final EdgeInsets contentPadding = EdgeInsets.symmetric(
       horizontal: isTablet ? 40 : 24,
       vertical: isTablet ? 20 : 16,
@@ -135,53 +135,57 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
           end: Alignment.bottomCenter,
           colors: [
             Color(0xFFE3F2FD), // 薄い青
-            Colors.white,      // 下は白
+            Colors.white, // 下は白
           ],
         ),
       ),
       child: SafeArea(
+        bottom: false,
         child: Center(
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: contentMaxWidth),
             child: Padding(
               padding: contentPadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (widget.showCloseButton)
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.of(context).maybePop(),
-                        ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'あなたの野球が、もっと面白くなる。',
-                      style: TextStyle(
-                        fontSize: titleFont,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      softWrap: false,
-                     overflow: TextOverflow.clip,
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(
+                  bottom: BNetFloatingTabBar.bodyClearance(context),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (widget.showCloseButton)
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(context).maybePop(),
+                          ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 8),
 
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 20),
 
-                  // ===== Feature Section (subtitle + card + dots as one unit) =====
-                  Expanded(
-                    child: Center(
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'あなたの野球が、もっと面白くなる。',
+                        style: TextStyle(
+                          fontSize: titleFont,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.clip,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    const SizedBox(height: 12),
+
+                    // ===== Feature Section (subtitle + card + dots as one unit) =====
+                    Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -196,7 +200,7 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
                           const SizedBox(height: 6),
                           // カード
                           SizedBox(
-                            height: cardAreaHeight - 60,
+                            height: cardAreaHeight,
                             child: PageView.builder(
                               controller: _pageController,
                               itemCount: _pages.length,
@@ -222,11 +226,18 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
                                   final isActive = index == _currentPage;
                                   return AnimatedContainer(
                                     duration: const Duration(milliseconds: 200),
-                                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                                    width: isTablet ? (isActive ? 14 : 8) : (isActive ? 10 : 6),
-                                    height: isTablet ? (isActive ? 14 : 8) : (isActive ? 10 : 6),
+                                    margin: const EdgeInsets.symmetric(
+                                        horizontal: 4),
+                                    width: isTablet
+                                        ? (isActive ? 14 : 8)
+                                        : (isActive ? 10 : 6),
+                                    height: isTablet
+                                        ? (isActive ? 14 : 8)
+                                        : (isActive ? 10 : 6),
                                     decoration: BoxDecoration(
-                                      color: isActive ? Colors.blueAccent : Colors.grey[300],
+                                      color: isActive
+                                          ? Colors.blueAccent
+                                          : Colors.grey[300],
                                       shape: BoxShape.circle,
                                     ),
                                   );
@@ -243,7 +254,8 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
                             child: AnimatedBuilder(
                               animation: _hintController,
                               builder: (context, _) {
-                                final v = _hintAnimating ? _hintOffset.value : 0.0;
+                                final v =
+                                    _hintAnimating ? _hintOffset.value : 0.0;
                                 final leftDx = -v; // 左は左へ
                                 final rightDx = v; // 右は右へ
 
@@ -275,42 +287,45 @@ class _SubscriptionGuardState extends State<SubscriptionGuard> with SingleTicker
                         ],
                       ),
                     ),
-                  ),
 
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
 
-                  // 購読ボタン
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => SubscriptionScreen()),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: Size(double.infinity, buttonHeight),
-                        padding: EdgeInsets.symmetric(vertical: isTablet ? 16 : 14),
-                        backgroundColor: Colors.blueAccent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    // 購読ボタン
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => SubscriptionScreen()),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: Size(double.infinity, buttonHeight),
+                          padding: EdgeInsets.symmetric(
+                              vertical: isTablet ? 16 : 14),
+                          backgroundColor: Colors.blueAccent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          '有料プランをチェックする',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                       ),
-                      child: const Text(
-                        '有料プランをチェックする',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
                     ),
-                  ),
 
-                  const SizedBox(height: 8),
-                  const Text(
-                    '※ すでに購読中の方は、一度アプリを再起動してください。',
-                    style: TextStyle(fontSize: 11, color: Colors.black45),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    const Text(
+                      '※ すでに購読中の方は、一度アプリを再起動してください。',
+                      style: TextStyle(fontSize: 11, color: Colors.black45),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

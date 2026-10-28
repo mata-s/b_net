@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
@@ -130,9 +131,11 @@ class FieldingPitchingTab extends StatelessWidget {
           bool isPitcher = stats['isPitcher'];
           return SingleChildScrollView(
             child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: horizontalPadding,
-                vertical: 16.0,
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                16,
+                horizontalPadding,
+                BNetFloatingTabBar.bodyClearance(context),
               ),
               child: Align(
                 alignment: Alignment.topCenter,
@@ -197,14 +200,17 @@ class FieldingPitchingTab extends StatelessWidget {
                                   ],
                                 ),
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Row(
                                       children: [
                                         Container(
                                           decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.orange),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                                color: Colors.orange),
                                             color: Colors.orange,
                                           ),
                                           child: const Text(
@@ -236,8 +242,10 @@ class FieldingPitchingTab extends StatelessWidget {
                                       children: [
                                         Container(
                                           decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.orange),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                                color: Colors.orange),
                                             color: Colors.orange,
                                           ),
                                           child: const Text(
@@ -263,8 +271,10 @@ class FieldingPitchingTab extends StatelessWidget {
                                       children: [
                                         Container(
                                           decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.orange),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                                color: Colors.orange),
                                             color: Colors.orange,
                                           ),
                                           child: const Text(
@@ -304,67 +314,83 @@ class FieldingPitchingTab extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn(
-                                        '被安打', '${stats['totalHitsAllowed'] ?? 0}', 60),
-                                    buildStatColumn('被本塁打',
-                                        '${stats['totalHomeRunsAllowed'] ?? 0}', 60),
+                                        '被安打',
+                                        '${stats['totalHitsAllowed'] ?? 0}',
+                                        60),
                                     buildStatColumn(
-                                        '与四球', '${stats['totalWalks'] ?? 0}', 60),
-                                    buildStatColumn(
-                                        '与死球', '${stats['totalHitByPitch'] ?? 0}', 60),
+                                        '被本塁打',
+                                        '${stats['totalHomeRunsAllowed'] ?? 0}',
+                                        60),
+                                    buildStatColumn('与四球',
+                                        '${stats['totalWalks'] ?? 0}', 60),
+                                    buildStatColumn('与死球',
+                                        '${stats['totalHitByPitch'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn(
-                                        '失点', '${stats['totalRunsAllowed'] ?? 0}', 60),
+                                        '失点',
+                                        '${stats['totalRunsAllowed'] ?? 0}',
+                                        60),
                                     buildStatColumn(
-                                        '打者', '${stats['totalBattersFaced'] ?? 0}', 60),
-                                    buildStatColumn(
-                                        '先発', '${stats['totalStarts'] ?? 0}', 60),
-                                    buildStatColumn(
-                                        '中継ぎ', '${stats['totalReliefs'] ?? 0}', 60),
+                                        '打者',
+                                        '${stats['totalBattersFaced'] ?? 0}',
+                                        60),
+                                    buildStatColumn('先発',
+                                        '${stats['totalStarts'] ?? 0}', 60),
+                                    buildStatColumn('中継ぎ',
+                                        '${stats['totalReliefs'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
+                                    buildStatColumn('抑え',
+                                        '${stats['totalClosures'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '抑え', '${stats['totalClosures'] ?? 0}', 60),
-                                    buildStatColumn(
-                                        '完投', '${stats['totalCompleteGames'] ?? 0}', 60),
-                                    buildStatColumn(
-                                        '完封', '${stats['totalShutouts'] ?? 0}', 60),
-                                    buildStatColumn(
-                                        'ホールド', '${stats['totalHolds'] ?? 0}', 60),
+                                        '完投',
+                                        '${stats['totalCompleteGames'] ?? 0}',
+                                        60),
+                                    buildStatColumn('完封',
+                                        '${stats['totalShutouts'] ?? 0}', 60),
+                                    buildStatColumn('ホールド',
+                                        '${stats['totalHolds'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    buildStatColumn(
-                                        'セーブ', '${stats['totalSaves'] ?? 0}', 60),
+                                    buildStatColumn('セーブ',
+                                        '${stats['totalSaves'] ?? 0}', 60),
                                     SizedBox(width: 30),
-                                    buildStatColumn(
-                                        '救援勝利', '${stats['totalReliefWins'] ?? 0}', 60),
+                                    buildStatColumn('救援勝利',
+                                        '${stats['totalReliefWins'] ?? 0}', 60),
                                   ],
                                 ),
                                 const SizedBox(height: 20),
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     buildStatColumn(
                                         '勝利', '${stats['totalWins'] ?? 0}', 60),
+                                    buildStatColumn('敗北',
+                                        '${stats['totalLosses'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '敗北', '${stats['totalLosses'] ?? 0}', 60),
-                                    buildStatColumn('勝率',
-                                        '${formatPercentage(stats['winRate'])}', 60),
+                                        '勝率',
+                                        '${formatPercentage(stats['winRate'])}',
+                                        60),
                                   ],
                                 ),
                               ],
@@ -375,7 +401,8 @@ class FieldingPitchingTab extends StatelessWidget {
                       if (isPitcher)
                         const Text(
                           '守備',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.bold),
                         ),
                       Card(
                         color: Colors.white,
@@ -389,7 +416,8 @@ class FieldingPitchingTab extends StatelessWidget {
                                   Text(
                                     '${stats['totalGames'] ?? 0} 試合',
                                     style: const TextStyle(
-                                        fontSize: 20, fontWeight: FontWeight.bold),
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold),
                                   ),
                                 ],
                               ),
@@ -405,12 +433,13 @@ class FieldingPitchingTab extends StatelessWidget {
                               ),
                               const SizedBox(height: 20),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  buildStatColumn(
-                                      '刺殺', '${stats['totalPutouts'] ?? 0}', 60),
-                                  buildStatColumn(
-                                      '捕殺', '${stats['totalAssists'] ?? 0}', 60),
+                                  buildStatColumn('刺殺',
+                                      '${stats['totalPutouts'] ?? 0}', 60),
+                                  buildStatColumn('捕殺',
+                                      '${stats['totalAssists'] ?? 0}', 60),
                                   buildStatColumn(
                                       '失策', '${stats['totalErrors'] ?? 0}', 60),
                                 ],
@@ -418,12 +447,17 @@ class FieldingPitchingTab extends StatelessWidget {
                               if (stats['isCatcher'] == true) ...[
                                 const SizedBox(height: 20),
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
-                                    buildStatColumn('盗塁企図',
-                                        '${stats['totalStolenBaseAttempts'] ?? 0}', 60),
                                     buildStatColumn(
-                                        '盗塁刺', '${stats['totalCaughtStealing'] ?? 0}', 60),
+                                        '盗塁企図',
+                                        '${stats['totalStolenBaseAttempts'] ?? 0}',
+                                        60),
+                                    buildStatColumn(
+                                        '盗塁刺',
+                                        '${stats['totalCaughtStealing'] ?? 0}',
+                                        60),
                                     buildStatColumn(
                                         '阻止率',
                                         '${formatPercentage(stats['catcherStealingRate'])}',

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:b_net/common/chat_utils.dart';
 import 'package:b_net/main.dart';
 
@@ -7,7 +8,8 @@ void showProfileDialog(
     BuildContext context, String accountId, bool isTeamAccount,
     {String? currentUserUid,
     String? currentUserName,
-    bool isFromSearch = false}) {
+    bool isFromSearch = false,
+    bool applyRankingTeamPrivacy = false}) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -18,6 +20,7 @@ void showProfileDialog(
       currentUserUid: currentUserUid,
       currentUserName: currentUserName,
       isFromSearch: isFromSearch, // 🔹 検索ページから開いたかどうかのフラグ
+      applyRankingTeamPrivacy: applyRankingTeamPrivacy,
     ),
   );
 }
@@ -28,6 +31,7 @@ class ProfileDialog extends StatefulWidget {
   final String? currentUserUid;
   final String? currentUserName;
   final bool isFromSearch; // 🔹 検索ページから開いたかどうか
+  final bool applyRankingTeamPrivacy;
 
   const ProfileDialog({
     Key? key,
@@ -36,6 +40,7 @@ class ProfileDialog extends StatefulWidget {
     this.currentUserUid,
     this.currentUserName,
     this.isFromSearch = false, // 🔹 デフォルトは false（検索から開いた時だけ true）
+    this.applyRankingTeamPrivacy = false,
   }) : super(key: key);
 
   @override
@@ -48,6 +53,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
   String? teamAdminUid; // 🔹 チームの管理者ID
   String? teamAdminName; // 🔹 チーム管理者の名前
   List<Map<String, String>> _teamNames = [];
+  String? _joinRequestStatus;
+  bool _isRequestingJoin = false;
 
   @override
   void initState() {
@@ -57,6 +64,86 @@ class _ProfileDialogState extends State<ProfileDialog> {
       _fetchCurrentUserName(); // 🔹 送信者名を取得
     } else {
       currentUserName = widget.currentUserName;
+    }
+    _loadJoinRequestStatus();
+  }
+
+  Future<void> _loadJoinRequestStatus() async {
+    if (!widget.isTeamAccount || widget.currentUserUid == null) return;
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.currentUserUid)
+        .collection('teamJoinRequests')
+        .doc(widget.accountId)
+        .get();
+    if (!mounted) return;
+    setState(() {
+      _joinRequestStatus = snapshot.data()?['status'] as String?;
+    });
+  }
+
+  Future<void> _requestToJoinTeam() async {
+    if (_isRequestingJoin || widget.currentUserUid == null) return;
+    String message = '';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('チームへ参加申請'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '代表者の承認後、選手情報を確認するとチーム参加が完了します。',
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              maxLength: 300,
+              maxLines: 3,
+              onChanged: (value) => message = value,
+              decoration: const InputDecoration(
+                labelText: 'ひとこと（任意）',
+                hintText: '例：入団を希望しています',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('申請する'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isRequestingJoin = true);
+    try {
+      await FirebaseFunctions.instance.httpsCallable('requestTeamJoin').call({
+        'teamId': widget.accountId,
+        'message': message,
+      });
+      if (!mounted) return;
+      setState(() => _joinRequestStatus = 'pending');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('参加申請を送信しました。')),
+      );
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      final message = error.code == 'already-exists'
+          ? 'すでにこのチームのメンバーです。'
+          : '参加申請を送信できませんでした。';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      if (mounted) setState(() => _isRequestingJoin = false);
     }
   }
 
@@ -86,7 +173,12 @@ class _ProfileDialogState extends State<ProfileDialog> {
     if (!snapshot.exists) return null;
     var data = snapshot.data() as Map<String, dynamic>?;
 
-    if (!widget.isTeamAccount && data != null && data['teams'] != null) {
+    final canShowTeams = !widget.applyRankingTeamPrivacy ||
+        data?['showTeamNameInRanking'] == true;
+    if (!widget.isTeamAccount &&
+        data != null &&
+        data['teams'] != null &&
+        canShowTeams) {
       _fetchTeamNames(List<String>.from(data['teams']));
     }
 
@@ -223,8 +315,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
     // root ScaffoldMessenger に対して SnackBar を表示
     Future.microtask(() {
-      final messenger = ScaffoldMessenger.maybeOf(
-          navigatorKey.currentContext ?? context);
+      final messenger =
+          ScaffoldMessenger.maybeOf(navigatorKey.currentContext ?? context);
       messenger?.showSnackBar(
         const SnackBar(content: Text('ユーザーをブロックしました')),
       );
@@ -248,7 +340,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 items: const [
                   DropdownMenuItem(value: 'spam', child: Text('スパム')),
                   DropdownMenuItem(value: 'abuse', child: Text('暴言・嫌がらせ')),
-                  DropdownMenuItem(value: 'inappropriate', child: Text('不適切な内容')),
+                  DropdownMenuItem(
+                      value: 'inappropriate', child: Text('不適切な内容')),
                 ],
                 onChanged: (v) {
                   if (v != null) selectedReason = v;
@@ -322,35 +415,35 @@ class _ProfileDialogState extends State<ProfileDialog> {
           child: FutureBuilder<Map<String, dynamic>?>(
             future: _profileData,
             builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-          if (!snapshot.hasData) {
-            return const Center(child: Text('データが見つかりません'));
-          }
+              if (!snapshot.hasData) {
+                return const Center(child: Text('データが見つかりません'));
+              }
 
-          var data = snapshot.data!;
-          String name = widget.isTeamAccount
-              ? data['teamName'] ?? 'チーム名不明'
-              : data['name'] ?? '名前不明';
-          String recipientId =
-              widget.isTeamAccount ? teamAdminUid ?? '' : widget.accountId;
-          String recipientName =
-              widget.isTeamAccount ? teamAdminName ?? '不明' : name;
+              var data = snapshot.data!;
+              String name = widget.isTeamAccount
+                  ? data['teamName'] ?? 'チーム名不明'
+                  : data['name'] ?? '名前不明';
+              String recipientId =
+                  widget.isTeamAccount ? teamAdminUid ?? '' : widget.accountId;
+              String recipientName =
+                  widget.isTeamAccount ? teamAdminName ?? '不明' : name;
 
-          // **デフォルト画像処理**
-          String profileImageUrl = data['profileImage'] ?? '';
-          profileImageUrl = profileImageUrl.isNotEmpty
-              ? profileImageUrl
-              : (widget.isTeamAccount
-                  ? 'assets/default_team_avatar.png'
-                  : 'assets/default_avatar.png');
+              // **デフォルト画像処理**
+              String profileImageUrl = data['profileImage'] ?? '';
+              profileImageUrl = profileImageUrl.isNotEmpty
+                  ? profileImageUrl
+                  : (widget.isTeamAccount
+                      ? 'assets/default_team_avatar.png'
+                      : 'assets/default_avatar.png');
 
-          return SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+              return SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     // ===== Header =====
                     if (widget.isTeamAccount)
                       ClipRRect(
@@ -430,12 +523,9 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                     ),
                                   ),
                                   if (data['prefecture'] != null &&
-                                      data['prefecture']
-                                          .toString()
-                                          .isNotEmpty)
+                                      data['prefecture'].toString().isNotEmpty)
                                     Padding(
-                                      padding:
-                                          const EdgeInsets.only(top: 6.0),
+                                      padding: const EdgeInsets.only(top: 6.0),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -461,8 +551,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                     ),
                                   if (data['averageAge'] != null)
                                     Padding(
-                                      padding:
-                                          const EdgeInsets.only(top: 2.0),
+                                      padding: const EdgeInsets.only(top: 2.0),
                                       child: Text(
                                         '平均年齢: ${data['averageAge']}歳',
                                         style: const TextStyle(
@@ -519,8 +608,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                               Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
                                     const SizedBox(height: 18),
 
@@ -579,14 +667,12 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                               ),
                                               const SizedBox(width: 4),
                                               Text(
-                                                data['prefecture']
-                                                    .toString(),
+                                                data['prefecture'].toString(),
                                                 style: TextStyle(
                                                   color: Colors.white
                                                       .withOpacity(0.90),
                                                   fontSize: 12,
-                                                  fontWeight:
-                                                      FontWeight.w600,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                               ),
                                             ],
@@ -633,8 +719,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                                     color: Colors.white
                                                         .withOpacity(0.85),
                                                     fontSize: 12,
-                                                    fontWeight:
-                                                        FontWeight.w600,
+                                                    fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
                                               ],
@@ -658,17 +743,21 @@ class _ProfileDialogState extends State<ProfileDialog> {
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 420),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16.0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if (data['startYear'] != null &&
-                                    data['startYear'].toString().isNotEmpty) ...[
+                                    data['startYear']
+                                        .toString()
+                                        .isNotEmpty) ...[
                                   const SizedBox(height: 12),
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.start,
                                     children: const [
-                                      Icon(Icons.flag, size: 18, color: Colors.grey),
+                                      Icon(Icons.flag,
+                                          size: 18, color: Colors.grey),
                                       SizedBox(width: 6),
                                       Text(
                                         'チーム結成',
@@ -685,7 +774,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                     style: const TextStyle(fontSize: 15),
                                   ),
                                 ],
-
                                 if (data['achievements'] != null &&
                                     data['achievements'].isNotEmpty) ...[
                                   const SizedBox(height: 16),
@@ -698,7 +786,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                   ),
                                   const SizedBox(height: 4),
                                   Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: List.generate(
                                       data['achievements'].length,
                                       (index) => Text(
@@ -708,9 +797,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                     ),
                                   ),
                                 ],
-
                                 if (data['teamDescription'] != null &&
-                                    data['teamDescription'].toString().isNotEmpty) ...[
+                                    data['teamDescription']
+                                        .toString()
+                                        .isNotEmpty) ...[
                                   const SizedBox(height: 16),
                                   const Text(
                                     'チーム紹介文',
@@ -734,8 +824,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                       Center(
                         child: Container(
                           constraints: BoxConstraints(
-                            maxHeight:
-                                MediaQuery.of(context).size.height * 0.6,
+                            maxHeight: MediaQuery.of(context).size.height * 0.6,
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 16.0),
                           child: SingleChildScrollView(
@@ -745,8 +834,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                 // ✅ 所属チーム（データがある場合のみ表示）
                                 if (_teamNames.isNotEmpty) ...[
                                   Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.center,
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: const [
                                       Icon(Icons.groups,
                                           size: 18, color: Colors.grey),
@@ -794,9 +882,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
                                 // ✅ 自己紹介（データがある場合のみ表示）
                                 if (data['include'] != null &&
-                                    data['include']
-                                        .toString()
-                                        .isNotEmpty) ...[
+                                    data['include'].toString().isNotEmpty) ...[
                                   const SizedBox(height: 20),
                                   const SizedBox(height: 3),
                                   Padding(
@@ -820,6 +906,45 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     ],
 
                     const SizedBox(height: 20),
+                    if (widget.isTeamAccount &&
+                        widget.currentUserUid != null &&
+                        widget.currentUserUid != teamAdminUid &&
+                        !(data['members'] is List &&
+                            (data['members'] as List)
+                                .contains(widget.currentUserUid))) ...[
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 260),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _joinRequestStatus == 'pending' ||
+                                      _joinRequestStatus == 'approved' ||
+                                      _isRequestingJoin
+                                  ? null
+                                  : _requestToJoinTeam,
+                              icon: _isRequestingJoin
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.person_add_alt_1_rounded),
+                              label: Text(
+                                _joinRequestStatus == 'pending'
+                                    ? '参加申請中'
+                                    : _joinRequestStatus == 'approved'
+                                        ? '承認済み・招待を確認'
+                                        : 'このチームに参加申請',
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     // 🔹 **チーム / ユーザー共通の「メッセージを送る」ボタン**
                     if (recipientId.isNotEmpty &&
                         widget.currentUserUid != null &&
@@ -844,8 +969,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                     print("⚠️ 送信者情報が不足しています");
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content:
-                                            Text("エラー: 送信者情報が不足しています"),
+                                        content: Text("エラー: 送信者情報が不足しています"),
                                       ),
                                     );
                                     return;
@@ -856,8 +980,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                                     print("⚠️ 受信者情報が不足しています");
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content:
-                                            Text("エラー: 受信者情報が不足しています"),
+                                        content: Text("エラー: 受信者情報が不足しています"),
                                       ),
                                     );
                                     return;
@@ -1008,8 +1131,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                             style: TextButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 6),
-                              tapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               minimumSize: const Size(0, 0),
                             ),
                           ),
@@ -1019,10 +1141,10 @@ class _ProfileDialogState extends State<ProfileDialog> {
                     const SizedBox(height: 24),
                   ],
                 ),
-          );
-        },
-      ),
-      ),
+              );
+            },
+          ),
+        ),
       ),
     );
   }

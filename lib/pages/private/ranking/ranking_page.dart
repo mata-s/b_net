@@ -24,66 +24,66 @@ class _RankingPageState extends State<RankingPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Column(
-            children: [
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.black12),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _RankingTypeButton(
-                          label: '打撃ランキング',
-                          icon: FontAwesomeIcons.baseballBatBall,
-                          isSelected: _currentIndex == 0,
-                          onTap: () {
-                            setState(() {
-                              _currentIndex = 0;
-                            });
-                          },
-                        ),
-                      ),
-                      Expanded(
-                        child: _RankingTypeButton(
-                          label: '投手ランキング',
-                          icon: Icons.sports_baseball,
-                          isSelected: _currentIndex == 1,
-                          onTap: () {
-                            setState(() {
-                              _currentIndex = 1;
-                            });
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
+        children: [
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.black12),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: IndexedStack(
-                  index: _currentIndex,
+                child: Row(
                   children: [
-                    BattingRanking(
-                      uid: widget.uid,
-                      prefecture: widget.prefecture,
+                    Expanded(
+                      child: _RankingTypeButton(
+                        label: '打撃ランキング',
+                        icon: FontAwesomeIcons.baseballBatBall,
+                        isSelected: _currentIndex == 0,
+                        onTap: () {
+                          setState(() {
+                            _currentIndex = 0;
+                          });
+                        },
+                      ),
                     ),
-                    PitchingRanking(
-                      uid: widget.uid,
-                      prefecture: widget.prefecture,
+                    Expanded(
+                      child: _RankingTypeButton(
+                        label: '投手ランキング',
+                        icon: Icons.sports_baseball,
+                        isSelected: _currentIndex == 1,
+                        onTap: () {
+                          setState(() {
+                            _currentIndex = 1;
+                          });
+                        },
+                      ),
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
-      );
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: IndexedStack(
+                index: _currentIndex,
+                children: [
+                  BattingRanking(
+                    uid: widget.uid,
+                    prefecture: widget.prefecture,
+                  ),
+                  PitchingRanking(
+                    uid: widget.uid,
+                    prefecture: widget.prefecture,
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 

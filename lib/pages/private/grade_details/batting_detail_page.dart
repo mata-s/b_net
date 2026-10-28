@@ -70,7 +70,7 @@ class _BattingDetailPageState extends State<BattingDetailPage> {
   }
 
   String formatPercentage(dynamic value) {
-    if (value == null) return '0%';
+    if (value == null) return '—';
     if (value is num) {
       double percent = value * 100;
       return percent % 1 == 0
@@ -534,7 +534,7 @@ class _BattingDetailPageState extends State<BattingDetailPage> {
                                         _buildStatColumn(
                                             '盗塁成功率',
                                             formatAverage(
-                                                adv['stealSuccessRate'] ?? 0),
+                                                adv['stealSuccessRate']),
                                             100),
                                       ],
                                     ),

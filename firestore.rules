@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTeamOwner(teamId) {
+      return isSignedIn()
+          && get(/databases/$(database)/documents/teams/$(teamId)).data.createdBy
+              == request.auth.uid;
+    }
+
+    // 参加申請は Cloud Functions からのみ作成・更新する。
+    // チーム側の申請一覧は、そのチームの作成者だけが閲覧できる。
+    match /teams/{teamId}/joinRequests/{userId} {
+      allow read: if isTeamOwner(teamId);
+      allow write: if false;
+    }
+
+    // 申請者側の控えは、申請した本人だけが閲覧できる。
+    match /users/{userId}/teamJoinRequests/{teamId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // 生の招待トークン情報はクライアントへ公開せず、Functionsだけで扱う。
+    match /teamInviteLinks/{linkId} {
+      allow read, write: if false;
+    }
+
+    // teams 配下の既存機能は、参加申請以外は従来どおり認証済みユーザーに許可する。
+    match /teams/{teamId} {
+      allow read, write: if isSignedIn();
+
+      match /{subcollection}/{document=**} {
+        allow read, write: if isSignedIn() && subcollection != 'joinRequests';
+      }
+    }
+
+    // users 配下の既存機能も、申請者側の控え以外は従来どおり許可する。
+    match /users/{userId} {
+      allow read, write: if isSignedIn();
+
+      match /{subcollection}/{document=**} {
+        allow read, write: if isSignedIn() && subcollection != 'teamJoinRequests';
+      }
+    }
+
+    // その他のコレクションは現在の挙動を維持する。
+    match /{collection}/{document=**} {
+      allow read, write: if isSignedIn()
+          && collection != 'teams'
+          && collection != 'users'
+          && collection != 'teamInviteLinks';
+    }
+  }
+}

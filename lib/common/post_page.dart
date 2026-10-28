@@ -115,6 +115,7 @@ class _PostPageState extends State<PostPage> {
 
   /// **投稿を作成または更新**
   Future<void> _submitPost() async {
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
     });
@@ -173,75 +174,79 @@ class _PostPageState extends State<PostPage> {
       appBar: AppBar(
         title: Text(widget.postId != null ? '投稿を編集' : '新規投稿'),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            TextFormField(
-              controller: _titleController,
-              decoration: const InputDecoration(
-                labelText: 'タイトル',
-                hintText: '例: 練習試合相手の募集、助っ人募集',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            _buildTeamSelectionField(),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _dateController,
-              readOnly: true,
-              decoration: InputDecoration(
-                labelText: '日付を選択',
-                hintText: '例: 2024/10/01',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.calendar_today),
-                  onPressed: () => _selectDate(context),
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            children: [
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(
+                  labelText: 'タイトル',
+                  hintText: '例: 練習試合相手の募集、助っ人募集',
+                  border: OutlineInputBorder(),
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _timeRangeController,
-              readOnly: true,
-              decoration: InputDecoration(
-                labelText: '時間範囲を選択',
-                hintText: '例: 14:00 - 16:00',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.access_time),
-                  onPressed: () => _selectTimeRange(context),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _prefectureController,
-              decoration: const InputDecoration(
-                labelText: '募集都道府県',
-                hintText: '例: 大阪、兵庫',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _postController,
-              decoration: const InputDecoration(
-                labelText: '詳細',
-                hintText: '例: 助っ人募集していませんか？\n球場抑えてる方試合しませんか？',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 5,
-            ),
-            const SizedBox(height: 20),
-            _isLoading
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _submitPost,
-                    child: Text(widget.postId != null ? '更新する' : '投稿する'),
+              const SizedBox(height: 20),
+              _buildTeamSelectionField(),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _dateController,
+                readOnly: true,
+                decoration: InputDecoration(
+                  labelText: '日付を選択',
+                  hintText: '例: 2024/10/01',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.calendar_today),
+                    onPressed: () => _selectDate(context),
                   ),
-          ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _timeRangeController,
+                readOnly: true,
+                decoration: InputDecoration(
+                  labelText: '時間範囲を選択',
+                  hintText: '例: 14:00 - 16:00',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.access_time),
+                    onPressed: () => _selectTimeRange(context),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _prefectureController,
+                decoration: const InputDecoration(
+                  labelText: '募集都道府県',
+                  hintText: '例: 大阪、兵庫',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _postController,
+                decoration: const InputDecoration(
+                  labelText: '詳細',
+                  hintText: '例: 助っ人募集していませんか？\n球場抑えてる方試合しませんか？',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 5,
+              ),
+              const SizedBox(height: 20),
+              _isLoading
+                  ? const CircularProgressIndicator()
+                  : ElevatedButton(
+                      onPressed: _submitPost,
+                      child: Text(widget.postId != null ? '更新する' : '投稿する'),
+                    ),
+            ],
+          ),
         ),
       ),
     );

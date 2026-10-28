@@ -20,6 +20,8 @@ class _SettingsPageState extends State<SettingsPage> {
   static const String _webBaseUrl = 'https://baseball-net.vercel.app';
 
   bool _notificationsEnabled = true;
+  bool _showTeamNameInRanking = false;
+  bool _isUpdatingRankingPrivacy = false;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   User? get _currentUser => FirebaseAuth.instance.currentUser;
@@ -32,6 +34,70 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {});
     });
     _loadNotificationSetting();
+    _loadRankingPrivacySetting();
+  }
+
+  Future<void> _loadRankingPrivacySetting() async {
+    final user = _currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = doc.data() ?? {};
+      if (!mounted) return;
+      setState(() {
+        // 未設定のユーザーはプライバシーを優先して非公開にする。
+        _showTeamNameInRanking = data['showTeamNameInRanking'] == true;
+      });
+    } catch (e) {
+      debugPrint('⚠️ Failed to load ranking privacy setting: $e');
+    }
+  }
+
+  Future<void> _updateRankingPrivacySetting(bool value) async {
+    final user = _currentUser;
+    if (user == null || _isUpdatingRankingPrivacy) return;
+
+    final previousValue = _showTeamNameInRanking;
+    setState(() {
+      _showTeamNameInRanking = value;
+      _isUpdatingRankingPrivacy = true;
+    });
+
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+        {
+          'showTeamNameInRanking': value,
+        },
+        SetOptions(merge: true),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            value ? '次回のランキング更新からチーム名を公開します' : '次回のランキング更新からチーム名を非公開にします',
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('⚠️ Failed to update ranking privacy setting: $e');
+      if (!mounted) return;
+      setState(() {
+        _showTeamNameInRanking = previousValue;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('設定を保存できませんでした。もう一度お試しください。')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUpdatingRankingPrivacy = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadNotificationSetting() async {
@@ -64,10 +130,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (user == null) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
         {
           'notificationsEnabled': value,
         },
@@ -190,6 +253,34 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   const SizedBox(height: 18),
 
+                  // ===== プライバシー =====
+                  _sectionTitle('プライバシー'),
+                  _cardGroup(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.shield_outlined),
+                        title: const Text('ランキングでチーム名を公開する'),
+                        subtitle: const Text(
+                          '全国・都道府県の個人ランキングに反映されます。変更は次回のランキング更新時に反映されます',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: _isUpdatingRankingPrivacy
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Switch(
+                                value: _showTeamNameInRanking,
+                                onChanged: _updateRankingPrivacySetting,
+                              ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 18),
+
                   // ===== アカウント =====
                   _sectionTitle('アカウント'),
                   _cardGroup(
@@ -198,8 +289,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         leading: const Icon(Icons.mail_outline),
                         title: const Text('メールアドレス'),
                         subtitle: Text(
-                          FirebaseAuth.instance.currentUser?.email?.isNotEmpty ==
-                                      true
+                          FirebaseAuth.instance.currentUser?.email
+                                      ?.isNotEmpty ==
+                                  true
                               ? FirebaseAuth.instance.currentUser!.email!
                               : '未登録',
                           style:
@@ -293,8 +385,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 purchaserInfo.originalAppUserId;
 
                             if (currentAppUserID.contains('anonymous')) {
-                              debugPrint(
-                                  '👻 匿名ユーザーなので RevenueCat logOut スキップ');
+                              debugPrint('👻 匿名ユーザーなので RevenueCat logOut スキップ');
                             } else {
                               await Purchases.logOut();
                               debugPrint('✅ RevenueCat: logOut 完了');
@@ -309,7 +400,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           // ログイン画面へ遷移（スタックをすべてクリア）
                           if (!context.mounted) return;
                           Navigator.of(context).pushAndRemoveUntil(
-                            MaterialPageRoute(builder: (_) => const LoginPage()),
+                            MaterialPageRoute(
+                                builder: (_) => const LoginPage()),
                             (route) => false,
                           );
                         },

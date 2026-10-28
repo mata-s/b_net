@@ -3,6 +3,7 @@ import 'package:b_net/pages/team/input_schedule_calendar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'dart:collection';
 
@@ -15,6 +16,8 @@ class Event {
   final String? time;
   final String createdBy;
   final String createdName;
+  final DateTime? date;
+  final String eventType;
   List<Map<String, dynamic>> stamps;
   List<Map<String, dynamic>> comments;
 
@@ -28,8 +31,10 @@ class Event {
     this.createdBy,
     this.createdName,
     this.stamps,
-    this.comments,
-  );
+    this.comments, {
+    this.date,
+    this.eventType = 'その他',
+  });
 
   Event copyWith(
       {List<Map<String, dynamic>>? newStamps,
@@ -45,6 +50,8 @@ class Event {
       createdName,
       newStamps ?? stamps,
       newComments ?? comments,
+      date: date,
+      eventType: eventType,
     );
   }
 
@@ -134,6 +141,8 @@ class _TeamScheduleCalendarState extends State<TeamScheduleCalendar> {
         .collection('schedule')
         .get();
 
+    kEvents.clear();
+
     for (var doc in snapshot.docs) {
       DateTime gameDate = (doc['game_date'] as Timestamp).toDate();
       String title = doc['title'] ?? 'タイトルなし';
@@ -149,6 +158,11 @@ class _TeamScheduleCalendarState extends State<TeamScheduleCalendar> {
           data.containsKey('createdBy') ? data['createdBy'] : '不明';
       String createdName =
           data.containsKey('createdName') ? data['createdName'] : '不明';
+      String eventType = (data['eventType'] ?? '').toString().trim();
+      if (eventType.isEmpty) {
+        eventType =
+            opponent.trim().isNotEmpty && opponent != '不明' ? '試合' : 'その他';
+      }
 
       // 🔹 stamps フィールドがあるか確認し、存在しない場合は空リストにする
       List<Map<String, dynamic>> stamps = data.containsKey('stamps')
@@ -163,8 +177,20 @@ class _TeamScheduleCalendarState extends State<TeamScheduleCalendar> {
       String id = doc.id;
 
       List<Event> events = [
-        Event(id, title, opponent, location, details, time, createdBy,
-            createdName, stamps, comments),
+        Event(
+          id,
+          title,
+          opponent,
+          location,
+          details,
+          time,
+          createdBy,
+          createdName,
+          stamps,
+          comments,
+          date: gameDate,
+          eventType: eventType,
+        ),
       ];
 
       if (kEvents.containsKey(gameDate)) {
@@ -179,33 +205,36 @@ class _TeamScheduleCalendarState extends State<TeamScheduleCalendar> {
     });
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push<Map<String, dynamic>>(
-            context,
-            MaterialPageRoute(
-              builder: (context) => InputScheduleCalendar(
-                selectedDate: _selectedDay!,
-                teamId: widget.teamId,
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
+        child: FloatingActionButton(
+          onPressed: () async {
+            final result = await Navigator.push<Map<String, dynamic>>(
+              context,
+              MaterialPageRoute(
+                builder: (context) => InputScheduleCalendar(
+                  selectedDate: _selectedDay!,
+                  teamId: widget.teamId,
+                ),
               ),
-            ),
-          );
-          if (result != null &&
-              result['saved'] == true &&
-              result['selectedDate'] != null) {
-            setState(() {
-              _selectedDay = result['selectedDate'];
-              _focusedDay = result['selectedDate'];
-            });
-            _loadTeamData(); // 🔹 再読込でカレンダーを更新
-          }
-        },
-        child: const Icon(Icons.add),
+            );
+            if (result != null &&
+                result['saved'] == true &&
+                result['selectedDate'] != null) {
+              setState(() {
+                _selectedDay = result['selectedDate'];
+                _focusedDay = result['selectedDate'];
+              });
+              _loadTeamData(); // 🔹 再読込でカレンダーを更新
+            }
+          },
+          child: const Icon(Icons.add),
+        ),
       ),
       body: Column(
         children: [
@@ -253,6 +282,9 @@ class _TeamScheduleCalendarState extends State<TeamScheduleCalendar> {
                   );
                 }
                 return ListView.builder(
+                  padding: EdgeInsets.only(
+                    bottom: BNetFloatingTabBar.bodyClearance(context),
+                  ),
                   itemCount: value.length,
                   itemBuilder: (context, index) {
                     final event = value[index];
@@ -347,6 +379,7 @@ class _TeamScheduleCalendarState extends State<TeamScheduleCalendar> {
                                             initialOpponent: event.opponent,
                                             initialDetails: event.details,
                                             initialTime: event.time,
+                                            initialEventType: event.eventType,
                                           ),
                                         ),
                                       );

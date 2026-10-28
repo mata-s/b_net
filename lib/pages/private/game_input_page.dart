@@ -1,14 +1,26 @@
 import 'package:b_net/pages/explanation/pitcher_info_screen.dart';
+import 'package:b_net/pages/private/game_save_result_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class GameInputPage extends StatefulWidget {
   final DateTime selectedDate;
   final List<String> positions;
-  const GameInputPage({super.key, required this.selectedDate, required this.positions,});
+  final String? gameId;
+  final Map<String, dynamic>? initialGameData;
+  const GameInputPage({
+    super.key,
+    required this.selectedDate,
+    required this.positions,
+    this.gameId,
+    this.initialGameData,
+  });
+
+  bool get isEditing => gameId != null && initialGameData != null;
 
   @override
   State<GameInputPage> createState() => _GameInputPageState();
@@ -21,6 +33,9 @@ class _GameInputPageState extends State<GameInputPage> {
   int numberOfMatches = 0;
   String? errorMessage;
   bool _isSaving = false;
+  bool _isDetailedInput = false;
+  bool _inputModeChangedByUser = false;
+  final List<Map<String, dynamic>> _lastSavedGames = [];
   List<String> _positions = [];
 
   @override
@@ -28,10 +43,75 @@ class _GameInputPageState extends State<GameInputPage> {
     super.initState();
     _selectedDay = widget.selectedDate;
     _positions = widget.positions;
+    _loadInputModePreference();
     _initFromTentative();
   }
 
-  Future<QueryDocumentSnapshot<Map<String, dynamic>>?> _getLatestTentativeDoc() async {
+  String get _inputModePreferenceKey {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    return 'game_input_detailed_mode_$uid';
+  }
+
+  Future<void> _loadInputModePreference() async {
+    if (widget.isEditing) {
+      final initialData = widget.initialGameData ?? const <String, dynamic>{};
+      final sections = initialData['recordedSections'];
+      final wasSimple = initialData['inputMode'] == 'simple' ||
+          (sections is Map && sections['pitchingAdvanced'] == false);
+      _isDetailedInput = !wasSimple;
+      return;
+    }
+    final preferences = await SharedPreferences.getInstance();
+    final savedMode = preferences.getBool(_inputModePreferenceKey);
+    if (!mounted || savedMode == null || _inputModeChangedByUser) return;
+    setState(() {
+      _isDetailedInput = savedMode;
+    });
+  }
+
+  Future<void> _rememberInputMode(bool detailed) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_inputModePreferenceKey, detailed);
+  }
+
+  Map<String, bool> _recordedSectionsForSave() {
+    if (widget.isEditing && !_isDetailedInput) {
+      final existing = widget.initialGameData?['recordedSections'];
+      if (existing is Map) {
+        final sections = existing.map(
+          (key, value) => MapEntry(key.toString(), value == true),
+        );
+        // 簡単入力でも守備成績を入力するため、編集保存後は記録済みにする。
+        sections['fielding'] = true;
+        if (_positions.contains('捕手')) {
+          sections['catching'] = true;
+        }
+        return sections;
+      }
+      // 簡単入力導入前の試合は、従来どおり全項目を記録済みとして扱う。
+      return const {
+        'battingCore': true,
+        'battingAdvanced': true,
+        'pitchingCore': true,
+        'pitchingAdvanced': true,
+        'runningAdvanced': true,
+        'fielding': true,
+        'catching': true,
+      };
+    }
+    return {
+      'battingCore': true,
+      'battingAdvanced': _isDetailedInput,
+      'pitchingCore': true,
+      'pitchingAdvanced': _isDetailedInput,
+      'runningAdvanced': _isDetailedInput,
+      'fielding': true,
+      'catching': _isDetailedInput || _positions.contains('捕手'),
+    };
+  }
+
+  Future<QueryDocumentSnapshot<Map<String, dynamic>>?>
+      _getLatestTentativeDoc() async {
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return null;
 
@@ -68,6 +148,10 @@ class _GameInputPageState extends State<GameInputPage> {
   }
 
   Future<void> _initFromTentative() async {
+    if (widget.isEditing) {
+      await _loadTentativeData();
+      return;
+    }
     // まず仮保存データから試合数や各種フィールドを復元
     await _initializeFields();
     // その後、各コントローラ類を詳細に復元
@@ -79,10 +163,14 @@ class _GameInputPageState extends State<GameInputPage> {
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return;
 
-    final latestDoc = await _getLatestTentativeDoc();
+    final latestDoc = widget.isEditing ? null : await _getLatestTentativeDoc();
 
-    if (latestDoc != null) {
-      final docData = latestDoc.data();
+    if (latestDoc != null || widget.initialGameData != null) {
+      final docData = widget.initialGameData != null
+          ? <String, dynamic>{
+              'games': [widget.initialGameData!]
+            }
+          : latestDoc!.data();
       // 仮保存データの形式により'data'キーの有無をチェック
       final data = docData['data'] ?? docData;
 
@@ -433,7 +521,6 @@ class _GameInputPageState extends State<GameInputPage> {
     super.dispose();
   }
 
-
   final Map<String, List<String>> _rightOptions = {
     '打': ['四球', '死球', '見逃し三振', '空振り三振', '振り逃げ', 'スリーバント失敗', '打撃妨害', '守備妨害'],
     '投': [
@@ -575,7 +662,7 @@ class _GameInputPageState extends State<GameInputPage> {
   Widget _buildGameTypePicker(int index, StateSetter setState) {
     return buildCupertinoPickerField(
       context: context,
-      options: ['練習試合','公式戦'],
+      options: ['練習試合', '公式戦'],
       selectedValue: _selectedGameType[index],
       hintText: '試合タイプを選択',
       onSelected: (selected) {
@@ -751,26 +838,29 @@ class _GameInputPageState extends State<GameInputPage> {
   final List<TextEditingController> _battersFacedControllers = [];
   final List<List<bool>> _firstPitchSwingFlags = [];
 
-  Future<void> _saveDataToFirestore() async {
+  Future<bool> _saveDataToFirestore() async {
+    _lastSavedGames.clear();
     setState(() {
       _isSaving = true;
     });
 
     final user = FirebaseAuth.instance.currentUser;
+    bool hasError = user == null;
     if (user != null) {
       final String uid = user.uid;
-      bool hasError = false;
 
       for (int matchIndex = 0; matchIndex < numberOfMatches; matchIndex++) {
         // 試合タイプが選択されていない場合、スキップ
         if (_selectedGameType[matchIndex] == null ||
             _selectedGameType[matchIndex]!.isEmpty) {
+          hasError = true;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('試合タイプを選択してください')),
           );
           continue;
         }
-        print('🚩 _saveDataToFirestore: start building gameData for matchIndex=$matchIndex, gameType=${_selectedGameType[matchIndex]}');
+        print(
+            '🚩 _saveDataToFirestore: start building gameData for matchIndex=$matchIndex, gameType=${_selectedGameType[matchIndex]}');
 
         // 各試合の共通情報を取得
         final location = _locationControllers[matchIndex].text.isNotEmpty
@@ -819,8 +909,8 @@ class _GameInputPageState extends State<GameInputPage> {
 
         try {
           // HttpsCallableを取得
-          HttpsCallable callable =
-              FirebaseFunctions.instance.httpsCallable('addGameData');
+          HttpsCallable callable = FirebaseFunctions.instance.httpsCallable(
+              widget.isEditing ? 'updateGameData' : 'addGameData');
 
           final Map<String, dynamic> gameData = {
             'uid': uid,
@@ -845,6 +935,8 @@ class _GameInputPageState extends State<GameInputPage> {
             'stealsAttempts':
                 int.tryParse(_stealsAttemptsControllers[matchIndex].text) ?? 0,
             'atBats': atBats,
+            'inputMode': _isDetailedInput ? 'detailed' : 'simple',
+            'recordedSections': _recordedSectionsForSave(),
           };
 
           if (_positions.contains('捕手')) {
@@ -888,23 +980,44 @@ class _GameInputPageState extends State<GameInputPage> {
             });
           }
 
-          final response = await callable.call(gameData);
+          final response = await callable.call(
+            widget.isEditing
+                ? {
+                    'uid': uid,
+                    'gameId': widget.gameId,
+                    'gameData': gameData,
+                  }
+                : gameData,
+          );
 
-          print('🚀 _saveDataToFirestore: sending gameData for matchIndex=$matchIndex → $gameData');
+          _lastSavedGames.add(Map<String, dynamic>.from(gameData));
+
+          print(
+              '🚀 _saveDataToFirestore: sending gameData for matchIndex=$matchIndex → $gameData');
 
           print("Cloud Functions response: ${response.data}");
         } catch (e) {
           hasError = true;
           print("Error saving game data: $e");
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(widget.isEditing
+                    ? '修正を保存できませんでした。時間をおいて再度お試しください。'
+                    : '試合を保存できませんでした。時間をおいて再度お試しください。'),
+              ),
+            );
+          }
         }
       }
-      if (!hasError) {
+      if (!hasError && !widget.isEditing) {
         await deleteTentativeData();
       }
     }
     setState(() {
       _isSaving = false;
     });
+    return !hasError;
   }
 
   /// 仮保存データをFirestoreに保存
@@ -926,7 +1039,8 @@ class _GameInputPageState extends State<GameInputPage> {
       final latestDocId = latestDoc.id;
       await tentativeCollection.doc(latestDocId).set({
         'data': data,
-        'createdAt': latestDoc.data()['createdAt'] ?? FieldValue.serverTimestamp(),
+        'createdAt':
+            latestDoc.data()['createdAt'] ?? FieldValue.serverTimestamp(),
         'savedAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -1070,6 +1184,8 @@ class _GameInputPageState extends State<GameInputPage> {
             ? int.tryParse(_stealsAttemptsControllers[matchIndex].text) ?? 0
             : 0,
         'atBats': atBats,
+        'inputMode': _isDetailedInput ? 'detailed' : 'simple',
+        'recordedSections': _recordedSectionsForSave(),
       };
 
       if (_positions.contains('捕手')) {
@@ -1145,9 +1261,9 @@ class _GameInputPageState extends State<GameInputPage> {
     };
   }
 
-
   List<Widget> _atBatGameWidgets(
-      int matchIndex, int atBat, StateSetter setState) {
+      int matchIndex, int atBat, StateSetter setState,
+      {bool showAdvancedFields = true}) {
     // Initialize the lists if they are not long enough
     while (_selectedLeftList.length <= matchIndex) {
       _selectedLeftList.add([]);
@@ -1304,7 +1420,8 @@ class _GameInputPageState extends State<GameInputPage> {
                 ),
               ],
             ),
-            if (_selectedRightList[matchIndex][i] == '犠打') ...[
+            if (showAdvancedFields &&
+                _selectedRightList[matchIndex][i] == '犠打') ...[
               const SizedBox(height: 8),
               Wrap(
                 spacing: 10,
@@ -1370,72 +1487,225 @@ class _GameInputPageState extends State<GameInputPage> {
                 ],
               ),
             ],
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Text('スイング数', style: TextStyle(fontSize: 16)),
-                const SizedBox(width: 10),
-                SizedBox(
-                  width: 50,
-                  child: TextField(
-                    controller: _swingControllers[matchIndex][i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    decoration: const InputDecoration(hintText: '0'),
+            if (showAdvancedFields) const SizedBox(height: 8),
+            if (showAdvancedFields)
+              Row(
+                children: [
+                  const Text('スイング数', style: TextStyle(fontSize: 16)),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 50,
+                    child: TextField(
+                      controller: _swingControllers[matchIndex][i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: const InputDecoration(hintText: '0'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 20),
-                const Text('空振り数', style: TextStyle(fontSize: 16)),
-                const SizedBox(width: 10),
-                SizedBox(
-                  width: 50,
-                  child: TextField(
-                    controller: _missSwingControllers[matchIndex][i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    decoration: const InputDecoration(hintText: '0'),
+                  const SizedBox(width: 20),
+                  const Text('空振り数', style: TextStyle(fontSize: 16)),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 50,
+                    child: TextField(
+                      controller: _missSwingControllers[matchIndex][i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: const InputDecoration(hintText: '0'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Row(
-                  children: [
-                    const Text('球数', style: TextStyle(fontSize: 16)),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 50,
-                      child: TextField(
-                        controller: _batterPitchCountControllers[matchIndex][i],
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        decoration: const InputDecoration(hintText: '0'),
+                ],
+              ),
+            if (showAdvancedFields) const SizedBox(height: 8),
+            if (showAdvancedFields)
+              Row(
+                children: [
+                  Row(
+                    children: [
+                      const Text('球数', style: TextStyle(fontSize: 16)),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 50,
+                        child: TextField(
+                          controller: _batterPitchCountControllers[matchIndex]
+                              [i],
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(hintText: '0'),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 20),
-                Row(
-                  children: [
-                    const Text('初球スイング', style: TextStyle(fontSize: 16)),
-                    Checkbox(
-                      value: _firstPitchSwingFlags[matchIndex][i],
-                      onChanged: (value) {
-                        setState(() {
-                          _firstPitchSwingFlags[matchIndex][i] = value ?? false;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                    ],
+                  ),
+                  const SizedBox(width: 20),
+                  Row(
+                    children: [
+                      const Text('初球スイング', style: TextStyle(fontSize: 16)),
+                      Checkbox(
+                        value: _firstPitchSwingFlags[matchIndex][i],
+                        onChanged: (value) {
+                          setState(() {
+                            _firstPitchSwingFlags[matchIndex][i] =
+                                value ?? false;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
           ],
         ),
       );
     }).toList();
+  }
+
+  Widget _buildCompactNumberField(
+    String label,
+    TextEditingController controller, {
+    double width = 72,
+    ValueChanged<String>? onChanged,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: width,
+          child: TextField(
+            controller: controller,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            onChanged: onChanged,
+            decoration: const InputDecoration(
+              hintText: '0',
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSimplePerformanceFields(int index, StateSetter setState) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_positions.contains('投手')) ...[
+          const SizedBox(height: 24),
+          const Text('投手成績',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _buildAppearanceTypePicker(index, setState),
+              _buildResultPicker(index, setState),
+              _buildCompactNumberField('投球回', _inningsThrowControllers[index]),
+              _buildCompactNumberField('自責点', _earnedRunsControllers[index]),
+              _buildCompactNumberField('奪三振', _strikeoutsControllers[index]),
+            ],
+          ),
+          if (_selectedAppearanceType[index] == '中継ぎ' ||
+              _selectedAppearanceType[index] == '抑え')
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 12,
+                children: [
+                  if (_selectedAppearanceType[index] == '中継ぎ')
+                    FilterChip(
+                      label: const Text('ホールド'),
+                      selected: _isHold[index] ?? false,
+                      onSelected: (value) {
+                        setState(() => _isHold[index] = value);
+                      },
+                    ),
+                  FilterChip(
+                    label: const Text('セーブ'),
+                    selected: _isSave[index] ?? false,
+                    onSelected: (value) {
+                      setState(() => _isSave[index] = value);
+                    },
+                  ),
+                ],
+              ),
+            ),
+        ],
+        const SizedBox(height: 24),
+        const Text('打撃成績',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        _buildCompactNumberField(
+          '打席数',
+          _atBatControllers[index],
+          onChanged: (value) {
+            setState(() {
+              atBatList[index] = int.tryParse(value) ?? 0;
+            });
+          },
+        ),
+        Column(
+          children: _atBatGameWidgets(
+            index,
+            atBatList[index],
+            setState,
+            showAdvancedFields: false,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          children: [
+            _buildCompactNumberField('打点', _rbisControllers[index]),
+            _buildCompactNumberField('得点', _runsControllers[index]),
+            _buildCompactNumberField('盗塁', _stealsControllers[index]),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const Text('守備成績',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          children: [
+            _buildCompactNumberField('刺殺', _putoutsControllers[index]),
+            _buildCompactNumberField('捕殺', _assistsControllers[index]),
+            _buildCompactNumberField('失策', _errorsControllers[index]),
+          ],
+        ),
+        if (_positions.contains('捕手')) ...[
+          const SizedBox(height: 16),
+          const Text('捕手成績',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 16,
+            runSpacing: 12,
+            children: [
+              _buildCompactNumberField(
+                '盗塁企図',
+                _stolenBaseAttemptsControllers[index],
+              ),
+              _buildCompactNumberField(
+                '盗塁阻止',
+                _caughtStealingControllers[index],
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 8),
+        Text(
+          '球数・スイングなどは「詳細入力」から追加できます。',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+        ),
+      ],
+    );
   }
 
   List<Widget> _generateGameWidgets(int numberOfMatches, StateSetter setState) {
@@ -1544,8 +1814,8 @@ class _GameInputPageState extends State<GameInputPage> {
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                 Row(
-                   children: [
+                  Row(
+                    children: [
                       Icon(
                         Icons.lightbulb_rounded,
                         color: Color(0xFF1565C0),
@@ -1557,7 +1827,7 @@ class _GameInputPageState extends State<GameInputPage> {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
-                         color: Color(0xFF1565C0),
+                          color: Color(0xFF1565C0),
                         ),
                       ),
                     ],
@@ -1638,8 +1908,457 @@ class _GameInputPageState extends State<GameInputPage> {
                 ),
               ],
             ),
-            Container(margin: const EdgeInsets.only(top: 30)),
-            if (_positions.contains('投手'))
+            if (!_isDetailedInput) _buildSimplePerformanceFields(i, setState),
+            if (_isDetailedInput) ...[
+              Container(margin: const EdgeInsets.only(top: 30)),
+              if (_positions.contains('投手'))
+                const Row(
+                  children: [
+                    Expanded(
+                      child: Divider(
+                        thickness: 1, // 線の太さ
+                        color: Colors.black, // 線の色
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8.0),
+                      child: Text(
+                        '【投手】',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Divider(
+                        thickness: 1,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ],
+                ),
+              if (_positions.contains('投手'))
+                Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '登板',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(width: 5),
+                            _buildAppearanceTypePicker(i, setState),
+                            const SizedBox(width: 5),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (context) =>
+                                          const PitcherInfoScreen()),
+                                );
+                              },
+                              child: Row(
+                                children: const [
+                                  Icon(Icons.help_outline, size: 14), // アイコン
+                                  SizedBox(width: 5),
+                                  Text(
+                                    '投手について',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '勝敗',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            _buildResultPicker(i, setState),
+                          ],
+                        ),
+                        if (_selectedAppearanceType[i] == '先発') ...[
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _isCompleteGame[i],
+                                onChanged: (bool? value) {
+                                  setState(() {
+                                    _isCompleteGame[i] = value;
+                                  });
+                                },
+                              ),
+                              const Text('完投'),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _isShutoutGame[i],
+                                onChanged: (bool? value) {
+                                  setState(() {
+                                    _isShutoutGame[i] = value;
+                                  });
+                                },
+                              ),
+                              const Text('完封'),
+                            ],
+                          ),
+                        ],
+                        if (_selectedAppearanceType[i] == '中継ぎ') ...[
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _isHold[i],
+                                onChanged: (bool? value) {
+                                  setState(() {
+                                    _isHold[i] = value;
+                                  });
+                                },
+                              ),
+                              const Text('ホールド'),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _isSave[i],
+                                onChanged: (bool? value) {
+                                  setState(() {
+                                    _isSave[i] = value;
+                                  });
+                                },
+                              ),
+                              const Text('セーブ'),
+                            ],
+                          ),
+                        ],
+                        if (_selectedAppearanceType[i] == '抑え') ...[
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _isSave[i],
+                                onChanged: (bool? value) {
+                                  setState(() {
+                                    _isSave[i] = value;
+                                  });
+                                },
+                              ),
+                              const Text('セーブ'),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              // if (_isAppearanceSelected[i])
+              if ((_selectedAppearanceType[i]?.isNotEmpty ?? false))
+                Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '投球回',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _inningsThrowControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            const Text(
+                              'アウト',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            _buildOutFractionPicker(i, setState),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '与四球',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _walksControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            const Text(
+                              '与死球',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _hitByPitchControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '失点',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _runsAllowedControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            const Text(
+                              '自責点',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _earnedRunsControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '被安打',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _hitsAllowedControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            const Text(
+                              '奪三振',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _strikeoutsControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '被本塁打',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _homeRunsAllowedControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            const Text(
+                              '球数',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: TextField(
+                                controller: _pitchCountControllers[i],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Text(
+                          '対戦打者',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        SizedBox(
+                          width: 100,
+                          child: TextField(
+                            controller: _battersFacedControllers[i],
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const Text(
+                          '人',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 30),
               const Row(
                 children: [
                   Expanded(
@@ -1651,7 +2370,7 @@ class _GameInputPageState extends State<GameInputPage> {
                   Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8.0),
                     child: Text(
-                      '【投手】',
+                      '【打者】',
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
@@ -1666,407 +2385,55 @@ class _GameInputPageState extends State<GameInputPage> {
                   ),
                 ],
               ),
-            if (_positions.contains('投手'))
-              Column(
+              const SizedBox(height: 10),
+              Row(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '登板',
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 5),
-                          _buildAppearanceTypePicker(i, setState),
-                          const SizedBox(width: 5),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) =>
-                                        const PitcherInfoScreen()),
-                              );
-                            },
-                            child: Row(
-                              children: const [
-                                Icon(Icons.help_outline, size: 14), // アイコン
-                                SizedBox(width: 5),
-                                Text(
-                                  '投手について',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                  const Text(
+                    '打席数',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '勝敗',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          _buildResultPicker(i, setState),
-                        ],
+                  SizedBox(
+                    width: 100,
+                    child: TextField(
+                      controller: _atBatControllers[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
                       ),
-                      if (_selectedAppearanceType[i] == '先発') ...[
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: _isCompleteGame[i],
-                              onChanged: (bool? value) {
-                                setState(() {
-                                  _isCompleteGame[i] = value;
-                                });
-                              },
-                            ),
-                            const Text('完投'),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: _isShutoutGame[i],
-                              onChanged: (bool? value) {
-                                setState(() {
-                                  _isShutoutGame[i] = value;
-                                });
-                              },
-                            ),
-                            const Text('完封'),
-                          ],
-                        ),
-                      ],
-                      if (_selectedAppearanceType[i] == '中継ぎ') ...[
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: _isHold[i],
-                              onChanged: (bool? value) {
-                                setState(() {
-                                  _isHold[i] = value;
-                                });
-                              },
-                            ),
-                            const Text('ホールド'),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: _isSave[i],
-                              onChanged: (bool? value) {
-                                setState(() {
-                                  _isSave[i] = value;
-                                });
-                              },
-                            ),
-                            const Text('セーブ'),
-                          ],
-                        ),
-                      ],
-                      if (_selectedAppearanceType[i] == '抑え') ...[
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: _isSave[i],
-                              onChanged: (bool? value) {
-                                setState(() {
-                                  _isSave[i] = value;
-                                });
-                              },
-                            ),
-                            const Text('セーブ'),
-                          ],
-                        ),
-                      ],
-                    ],
+                      onChanged: (value) {
+                        setState(() {
+                          atBatList[i] = int.tryParse(value) ?? 0;
+                        });
+                      },
+                    ),
                   ),
                 ],
               ),
-            // if (_isAppearanceSelected[i])
-            if ((_selectedAppearanceType[i]?.isNotEmpty ?? false))
               Column(
+                children: _atBatGameWidgets(i, atBatList[i], setState),
+              ),
+              Container(margin: const EdgeInsets.only(top: 15)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '投球回',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _inningsThrowControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          const Text(
-                            'アウト',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          _buildOutFractionPicker(i, setState),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '与四球',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _walksControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          const Text(
-                            '与死球',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _hitByPitchControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '失点',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _runsAllowedControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          const Text(
-                            '自責点',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _earnedRunsControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '被安打',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _hitsAllowedControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          const Text(
-                            '奪三振',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _strikeoutsControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '被本塁打',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _homeRunsAllowedControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          const Text(
-                            '球数',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: _pitchCountControllers[i],
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
                   Row(
                     children: [
                       const Text(
-                        '対戦打者',
+                        '打点',
                         style: TextStyle(
                           fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(width: 5),
                       SizedBox(
                         width: 100,
                         child: TextField(
-                          controller: _battersFacedControllers[i],
+                          controller: _rbisControllers[i],
                           keyboardType: TextInputType.number,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
@@ -2075,392 +2442,299 @@ class _GameInputPageState extends State<GameInputPage> {
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                  Row(
+                    children: [
                       const Text(
-                        '人',
+                        '得点',
                         style: TextStyle(
                           fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 100,
+                        child: TextField(
+                          controller: _runsControllers[i],
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ],
               ),
-            const SizedBox(height: 30),
-            const Row(
-              children: [
-                Expanded(
-                  child: Divider(
-                    thickness: 1, // 線の太さ
-                    color: Colors.black, // 線の色
-                  ),
-                ),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8.0),
-                  child: Text(
-                    '【打者】',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Divider(
-                    thickness: 1,
-                    color: Colors.black,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Text(
-                  '打席数',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(
-                  width: 100,
-                  child: TextField(
-                    controller: _atBatControllers[i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    onChanged: (value) {
-                      setState(() {
-                        atBatList[i] = int.tryParse(value) ?? 0;
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-            Column(
-              children: _atBatGameWidgets(i, atBatList[i], setState),
-            ),
-            Container(margin: const EdgeInsets.only(top: 15)),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    const Text(
-                      '打点',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 100,
-                      child: TextField(
-                        controller: _rbisControllers[i],
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    const Text(
-                      '得点',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 100,
-                      child: TextField(
-                        controller: _runsControllers[i],
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Text(
-                  '盗塁企図数',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(
-                  width: 100,
-                  child: TextField(
-                    controller: _stealsAttemptsControllers[i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    const Text(
-                      '盗塁成功',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 100,
-                      child: TextField(
-                        controller: _stealsControllers[i],
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    const Text(
-                      '盗塁死',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 100,
-                      child: TextField(
-                        controller: _caughtStealingByRunnerControllers[i],
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            Container(margin: const EdgeInsets.only(top: 30)),
-            const Row(
-              children: [
-                Expanded(
-                  child: Divider(
-                    thickness: 1, // 線の太さ
-                    color: Colors.black, // 線の色
-                  ),
-                ),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8.0),
-                  child: Text(
-                    '【守備】',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Divider(
-                    thickness: 1,
-                    color: Colors.black,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  '刺殺',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(
-                  width: 50,
-                  child: TextField(
-                    controller: _putoutsControllers[i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                    ),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const Text(
-                  '捕殺',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(
-                  width: 50,
-                  child: TextField(
-                    controller: _assistsControllers[i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                    ),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const Text(
-                  '失策',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(
-                  width: 50,
-                  child: TextField(
-                    controller: _errorsControllers[i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                    ),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (_positions.contains('捕手'))
-              Padding(
-                padding: const EdgeInsets.only(top: 12.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      '盗塁企図',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 50,
-                      child: TextField(
-                        controller: _stolenBaseAttemptsControllers[i],
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const Text(
-                      '盗塁刺',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 50,
-                      child: TextField(
-                        controller: _caughtStealingControllers[i],
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.all(10.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(height: 10),
+              Row(
                 children: [
                   const Text(
-                    'メモ',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    '盗塁企図数',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                  const SizedBox(height: 5),
-                  TextField(
-                    controller: _memoControllers[i],
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                  SizedBox(
+                    width: 100,
+                    child: TextField(
+                      controller: _stealsAttemptsControllers[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    maxLines: 3,
-                    onChanged: (String value) {
-                      setState(() {});
-                    },
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        '盗塁成功',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 100,
+                        child: TextField(
+                          controller: _stealsControllers[i],
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      const Text(
+                        '盗塁死',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 100,
+                        child: TextField(
+                          controller: _caughtStealingByRunnerControllers[i],
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Container(margin: const EdgeInsets.only(top: 30)),
+              const Row(
+                children: [
+                  Expanded(
+                    child: Divider(
+                      thickness: 1, // 線の太さ
+                      color: Colors.black, // 線の色
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Text(
+                      '【守備】',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Divider(
+                      thickness: 1,
+                      color: Colors.black,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    '刺殺',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 50,
+                    child: TextField(
+                      controller: _putoutsControllers[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const Text(
+                    '捕殺',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 50,
+                    child: TextField(
+                      controller: _assistsControllers[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const Text(
+                    '失策',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 50,
+                    child: TextField(
+                      controller: _errorsControllers[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (_positions.contains('捕手'))
+                Padding(
+                  padding: const EdgeInsets.only(top: 12.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        '盗塁企図',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 50,
+                        child: TextField(
+                          controller: _stolenBaseAttemptsControllers[i],
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                          ),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const Text(
+                        '盗塁刺',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 50,
+                        child: TextField(
+                          controller: _caughtStealingControllers[i],
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                          ),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.all(10.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'メモ',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 5),
+                    TextField(
+                      controller: _memoControllers[i],
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      maxLines: 3,
+                      onChanged: (String value) {
+                        setState(() {});
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ));
@@ -2472,33 +2746,34 @@ class _GameInputPageState extends State<GameInputPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('試合入力'),
+        title: Text(widget.isEditing ? '試合を修正' : '試合入力'),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8.0), // 右側に8pxの余白
-            child: OutlinedButton(
-              onPressed: _isSaving
-                  ? null
-                  : () async {
-                      await saveTentativeData();
-                    },
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Colors.blue),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
+          if (!widget.isEditing)
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0), // 右側に8pxの余白
+              child: OutlinedButton(
+                onPressed: _isSaving
+                    ? null
+                    : () async {
+                        await saveTentativeData();
+                      },
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Colors.blue),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              ),
-              child: const Text(
-                '仮保存',
-                style: TextStyle(
-                  color: Colors.blue,
-                  fontSize: 15,
+                child: const Text(
+                  '仮保存',
+                  style: TextStyle(
+                    color: Colors.blue,
+                    fontSize: 15,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -2514,110 +2789,196 @@ class _GameInputPageState extends State<GameInputPage> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      '試合数',
-                      style: TextStyle(fontSize: 30),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 100,
-                      child: TextField(
-                        controller: _eventController,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        decoration: const InputDecoration(
-                          hintText: '0',
-                        ),
-                        style: const TextStyle(fontSize: 30),
-                        onChanged: (value) {
-                          setState(() {
-                            numberOfMatches = int.tryParse(value) ?? 0;
-                            while (_atBatControllers.length < numberOfMatches) {
-                              _atBatControllers.add(TextEditingController());
-                              atBatList.add(0);
-                              _selectedLeftList.add([]);
-                              _selectedRightList.add([]);
-                            }
-
-                            while (_selectedGameType.length < numberOfMatches) {
-                              _selectedGameType.add(null);
-                            }
-
-                            // 減らす（重要）
-                            while (_selectedGameType.length > numberOfMatches) {
-                              _selectedGameType.removeLast();
-                            }
-
-                            while (_resultList.length > numberOfMatches) {
-                              _resultList.removeLast();
-                            }
-                            while (_outFractionList.length > numberOfMatches) {
-                              _outFractionList.removeLast();
-                            }
-                            while (_selectedAppearanceType.length >
-                                numberOfMatches) {
-                              _selectedAppearanceType.removeLast();
-                            }
-                            while (_isAppearanceSelected.length >
-                                numberOfMatches) {
-                              _isAppearanceSelected.removeLast();
-                            }
-                            while (_isCompleteGame.length > numberOfMatches) {
-                              _isCompleteGame.removeLast();
-                            }
-                            while (_isShutoutGame.length > numberOfMatches) {
-                              _isShutoutGame.removeLast();
-                            }
-                            while (_isSave.length > numberOfMatches) {
-                              _isSave.removeLast();
-                            }
-                            while (_isHold.length > numberOfMatches) {
-                              _isHold.removeLast();
-                            }
-                            while (_battersFacedControllers.length >
-                                numberOfMatches) {
-                              _battersFacedControllers.removeLast();
-                            }
-
-                            while (
-                                _locationControllers.length > numberOfMatches) {
-                              _locationControllers.removeLast();
-                              _opponentControllers.removeLast();
-                              _stealsControllers.removeLast();
-                              _rbisControllers.removeLast();
-                              _runsControllers.removeLast();
-                              _memoControllers.removeLast();
-                              _inningsThrowControllers.removeLast();
-                              _strikeoutsControllers.removeLast();
-                              _walksControllers.removeLast();
-                              _hitByPitchControllers.removeLast();
-                              _earnedRunsControllers.removeLast();
-                              _runsAllowedControllers.removeLast();
-                              _hitsAllowedControllers.removeLast();
-                              _putoutsControllers.removeLast();
-                              _assistsControllers.removeLast();
-                              _errorsControllers.removeLast();
-                            }
-
-                            while (_atBatControllers.length > numberOfMatches) {
-                              _atBatControllers.removeLast();
-                              atBatList.removeLast();
-                              _selectedLeftList.removeLast();
-                              _selectedRightList.removeLast();
-                            }
-                          });
-                        },
+                if (!widget.isEditing)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        '試合数',
+                        style: TextStyle(fontSize: 30),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 100,
+                        child: TextField(
+                          controller: _eventController,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(
+                            hintText: '0',
+                          ),
+                          style: const TextStyle(fontSize: 30),
+                          onChanged: (value) {
+                            setState(() {
+                              numberOfMatches = int.tryParse(value) ?? 0;
+                              while (
+                                  _atBatControllers.length < numberOfMatches) {
+                                _atBatControllers.add(TextEditingController());
+                                atBatList.add(0);
+                                _selectedLeftList.add([]);
+                                _selectedRightList.add([]);
+                              }
+
+                              while (
+                                  _selectedGameType.length < numberOfMatches) {
+                                _selectedGameType.add(null);
+                              }
+
+                              // 減らす（重要）
+                              while (
+                                  _selectedGameType.length > numberOfMatches) {
+                                _selectedGameType.removeLast();
+                              }
+
+                              while (_resultList.length > numberOfMatches) {
+                                _resultList.removeLast();
+                              }
+                              while (
+                                  _outFractionList.length > numberOfMatches) {
+                                _outFractionList.removeLast();
+                              }
+                              while (_selectedAppearanceType.length >
+                                  numberOfMatches) {
+                                _selectedAppearanceType.removeLast();
+                              }
+                              while (_isAppearanceSelected.length >
+                                  numberOfMatches) {
+                                _isAppearanceSelected.removeLast();
+                              }
+                              while (_isCompleteGame.length > numberOfMatches) {
+                                _isCompleteGame.removeLast();
+                              }
+                              while (_isShutoutGame.length > numberOfMatches) {
+                                _isShutoutGame.removeLast();
+                              }
+                              while (_isSave.length > numberOfMatches) {
+                                _isSave.removeLast();
+                              }
+                              while (_isHold.length > numberOfMatches) {
+                                _isHold.removeLast();
+                              }
+                              while (_battersFacedControllers.length >
+                                  numberOfMatches) {
+                                _battersFacedControllers.removeLast();
+                              }
+
+                              while (_locationControllers.length >
+                                  numberOfMatches) {
+                                _locationControllers.removeLast();
+                                _opponentControllers.removeLast();
+                                _stealsControllers.removeLast();
+                                _rbisControllers.removeLast();
+                                _runsControllers.removeLast();
+                                _memoControllers.removeLast();
+                                _inningsThrowControllers.removeLast();
+                                _strikeoutsControllers.removeLast();
+                                _walksControllers.removeLast();
+                                _hitByPitchControllers.removeLast();
+                                _earnedRunsControllers.removeLast();
+                                _runsAllowedControllers.removeLast();
+                                _hitsAllowedControllers.removeLast();
+                                _putoutsControllers.removeLast();
+                                _assistsControllers.removeLast();
+                                _errorsControllers.removeLast();
+                              }
+
+                              while (
+                                  _atBatControllers.length > numberOfMatches) {
+                                _atBatControllers.removeLast();
+                                atBatList.removeLast();
+                                _selectedLeftList.removeLast();
+                                _selectedRightList.removeLast();
+                              }
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 const SizedBox(height: 20),
-                const Text(
-                  '※後から修正ができませんので、内容に誤りがないか十分ご確認ください。',
-                  style: TextStyle(color: Colors.red, fontSize: 10),
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      for (final detailed in [false, true])
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(9),
+                            onTap: () {
+                              FocusScope.of(context).unfocus();
+                              setState(() {
+                                _inputModeChangedByUser = true;
+                                _isDetailedInput = detailed;
+                              });
+                              _rememberInputMode(detailed);
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(vertical: 11),
+                              decoration: BoxDecoration(
+                                color: _isDetailedInput == detailed
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: _isDetailedInput == detailed
+                                    ? const [
+                                        BoxShadow(
+                                          color: Color(0x1A000000),
+                                          blurRadius: 6,
+                                          offset: Offset(0, 2),
+                                        ),
+                                      ]
+                                    : null,
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    detailed
+                                        ? Icons.tune_rounded
+                                        : Icons.bolt_rounded,
+                                    size: 18,
+                                    color: _isDetailedInput == detailed
+                                        ? Colors.blue.shade700
+                                        : Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    detailed ? '詳細入力' : '簡単入力',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: _isDetailedInput == detailed
+                                          ? Colors.blue.shade700
+                                          : Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _isDetailedInput ? 'すべての成績を記録できます' : 'ランキングに使う主な成績だけを入力できます',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  widget.isEditing
+                      ? '保存すると、この試合をもとに累計成績を再計算します。'
+                      : '保存後も試合詳細から修正できます。',
+                  style: TextStyle(
+                    color:
+                        widget.isEditing ? Colors.orange.shade800 : Colors.grey,
+                    fontSize: 11,
+                  ),
                 ),
                 const SizedBox(height: 20),
 
@@ -2658,13 +3019,24 @@ class _GameInputPageState extends State<GameInputPage> {
                                     _isSaving = true;
                                     errorMessage = null;
                                   });
-                                  await deleteTentativeData();
-                                  await _saveDataToFirestore();
-                                  if (mounted) {
+                                  final saved = await _saveDataToFirestore();
+                                  if (mounted && saved) {
                                     setState(() {
                                       _isSaving = false;
                                     });
-                                    Navigator.of(context).pop(true);
+                                    Navigator.of(context).pushReplacement(
+                                      MaterialPageRoute(
+                                        builder: (_) => GameSaveResultPage(
+                                          gameDate:
+                                              _selectedDay ?? DateTime.now(),
+                                          games: List.unmodifiable(
+                                            _lastSavedGames,
+                                          ),
+                                          isEditing: widget.isEditing,
+                                        ),
+                                      ),
+                                      result: true,
+                                    );
                                   }
                                 }
                               },
@@ -2678,7 +3050,7 @@ class _GameInputPageState extends State<GameInputPage> {
                                   Text("計算して保存しています..."),
                                 ],
                               )
-                            : const Text('保存'),
+                            : Text(widget.isEditing ? '修正を保存' : '保存'),
                       ),
                     ],
                   ),

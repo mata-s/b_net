@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class NationalHit extends StatefulWidget {
   final String uid;
   final String prefecture;
+  final Widget header;
 
-  const NationalHit({Key? key, required this.uid, required this.prefecture})
-      : super(key: key);
+  const NationalHit({
+    Key? key,
+    required this.uid,
+    required this.prefecture,
+    required this.header,
+  }) : super(key: key);
 
   @override
   _NationalHitState createState() => _NationalHitState();
@@ -86,9 +92,12 @@ class _NationalHitState extends State<NationalHit> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
         child: Column(
           children: [
-            const SizedBox(height: 8),
+            widget.header,
             const Text(
               '都道府県ヒットバトル',
               style: TextStyle(

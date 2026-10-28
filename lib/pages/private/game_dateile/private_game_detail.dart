@@ -5,11 +5,13 @@ import 'package:b_net/pages/private/game_dateile/game_detail_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 
 class PrivateGameDetail extends StatefulWidget {
   final String userUid;
   final bool hasActiveSubscription;
-  const PrivateGameDetail({super.key, required this.userUid, required this.hasActiveSubscription});
+  const PrivateGameDetail(
+      {super.key, required this.userUid, required this.hasActiveSubscription});
 
   @override
   State<PrivateGameDetail> createState() => _PrivateGameDetailState();
@@ -156,7 +158,12 @@ class _PrivateGameDetailState extends State<PrivateGameDetail> {
 
     return Expanded(
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          BNetFloatingTabBar.bodyClearance(context),
+        ),
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -357,134 +364,143 @@ class _PrivateGameDetailState extends State<PrivateGameDetail> {
             itemBuilder: (context, index) {
               final game = filteredGames[index];
               return Padding(
-  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-  child: Material(
-    color: Theme.of(context).cardColor,
-    borderRadius: BorderRadius.circular(16),
-    child: InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => GameDetailPage(
-              gameData: game,
-              isPitcher: userPositions.contains('投手'),
-              isCatcher: userPositions.contains('捕手'),
-            ),
-          ),
-        );
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: Theme.of(context).dividerColor.withOpacity(0.6),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 18,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 上段: 試合種別 / 日付（ピル）
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _MiniPill(
-                  icon: Icons.local_offer_outlined,
-                  label: (game['gameType'] ?? '（種類不明）').toString(),
-                ),
-                _MiniPill(
-                  icon: Icons.calendar_today_outlined,
-                  label: '${game['gameDate'].month}月${game['gameDate'].day}日',
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Material(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => GameDetailPage(
+                            gameData: game,
+                            isPitcher: userPositions.contains('投手'),
+                            isCatcher: userPositions.contains('捕手'),
+                          ),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color:
+                              Theme.of(context).dividerColor.withOpacity(0.6),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.06),
+                            blurRadius: 18,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 上段: 試合種別 / 日付（ピル）
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _MiniPill(
+                                icon: Icons.local_offer_outlined,
+                                label:
+                                    (game['gameType'] ?? '（種類不明）').toString(),
+                              ),
+                              _MiniPill(
+                                icon: Icons.calendar_today_outlined,
+                                label:
+                                    '${game['gameDate'].month}月${game['gameDate'].day}日',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
 
-            // 中段: VS相手
-            Row(
-              children: [
-                const Icon(Icons.sports_baseball, size: 16),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'VS ${game['opponent'] ?? '不明'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
+                          // 中段: VS相手
+                          Row(
+                            children: [
+                              const Icon(Icons.sports_baseball, size: 16),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'VS ${game['opponent'] ?? '不明'}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+
+                          // 球場
+                          Row(
+                            children: [
+                              const Icon(Icons.place_outlined,
+                                  size: 16, color: Colors.grey),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  (game['location'] ?? '場所不明').toString(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          // 打席結果（チップ化）
+                          if (game['atBats'] != null &&
+                              game['atBats'] is List) ...[
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children:
+                                  (game['atBats'] as List).map<Widget>((atBat) {
+                                final pos =
+                                    (atBat['position'] ?? '').toString();
+                                final res = (atBat['result'] ?? '').toString();
+                                final text = (pos.isNotEmpty && res.isNotEmpty)
+                                    ? '$posー$res'
+                                    : (res.isNotEmpty ? res : '');
+
+                                if (text.isEmpty)
+                                  return const SizedBox.shrink();
+                                return _SoftChip(label: text);
+                              }).toList(),
+                            ),
+                          ],
+
+                          // 投手なら投球回（行表示）
+                          if (userPositions.contains('投手') &&
+                              ((game['inningsThrow'] ?? 0) > 0 ||
+                                  (game['outFraction'] ?? '') != '')) ...[
+                            const SizedBox(height: 10),
+                            _SoftRow(
+                              icon: Icons.sports,
+                              text:
+                                  '投球回: ${game['inningsThrow']}${(game['outFraction'] != null && game['outFraction'] != '0' && game['outFraction'].toString().isNotEmpty) ? 'と${game['outFraction']}' : ''}',
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-
-            // 球場
-            Row(
-              children: [
-                const Icon(Icons.place_outlined, size: 16, color: Colors.grey),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    (game['location'] ?? '場所不明').toString(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            // 打席結果（チップ化）
-            if (game['atBats'] != null && game['atBats'] is List) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: (game['atBats'] as List).map<Widget>((atBat) {
-                  final pos = (atBat['position'] ?? '').toString();
-                  final res = (atBat['result'] ?? '').toString();
-                  final text = (pos.isNotEmpty && res.isNotEmpty)
-                      ? '$posー$res'
-                      : (res.isNotEmpty ? res : '');
-
-                  if (text.isEmpty) return const SizedBox.shrink();
-                  return _SoftChip(label: text);
-                }).toList(),
-              ),
-            ],
-
-            // 投手なら投球回（行表示）
-            if (userPositions.contains('投手') &&
-                ((game['inningsThrow'] ?? 0) > 0 ||
-                    (game['outFraction'] ?? '') != '')) ...[
-              const SizedBox(height: 10),
-              _SoftRow(
-                icon: Icons.sports,
-                text:
-                    '投球回: ${game['inningsThrow']}${(game['outFraction'] != null && game['outFraction'] != '0' && game['outFraction'].toString().isNotEmpty) ? 'と${game['outFraction']}' : ''}',
-              ),
-            ],
-          ],
-        ),
-      ),
-    ),
-  ),
-);
+              );
             },
           ),
         ),
@@ -538,6 +554,8 @@ class _PrivateGameDetailState extends State<PrivateGameDetail> {
         'earnedRuns': data['earnedRuns'] ?? 0,
         'hitsAllowed': data['hitsAllowed'] ?? 0,
         'strikeouts': data['strikeouts'] ?? 0,
+        'inputMode': data['inputMode'],
+        'recordedSections': data['recordedSections'],
       });
     }
 

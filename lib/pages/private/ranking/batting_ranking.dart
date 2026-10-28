@@ -1,5 +1,7 @@
 import 'package:b_net/common/profile_dialog.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
+import 'package:b_net/widgets/ranking_overview_card.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -113,14 +115,17 @@ class _BattingRankingState extends State<BattingRanking> {
   Future<void> _loadAvailableAgeGroups() async {
     String collectionPath;
     if (_isSeasonMode) {
-      collectionPath = 'battingAverageRanking/${_year}_total/${widget.prefecture}';
+      collectionPath =
+          'battingAverageRanking/${_year}_total/${widget.prefecture}';
     } else {
       final resolved = await _resolveMonthlyRankingPath();
       final basePath = resolved.basePath;
-      var snapshot = await FirebaseFirestore.instance.collection(basePath).get();
+      var snapshot =
+          await FirebaseFirestore.instance.collection(basePath).get();
       List<String> foundGroups = ['全年齢'];
       for (String group in ageGroupLabels.keys) {
-        final exists = snapshot.docs.any((doc) => doc.id.contains('_age_$group'));
+        final exists =
+            snapshot.docs.any((doc) => doc.id.contains('_age_$group'));
         if (exists) foundGroups.add(group);
       }
       if (!mounted) return;
@@ -134,9 +139,8 @@ class _BattingRankingState extends State<BattingRanking> {
     }
 
     // season path
-    final snapshot = await FirebaseFirestore.instance
-        .collection(collectionPath)
-        .get();
+    final snapshot =
+        await FirebaseFirestore.instance.collection(collectionPath).get();
     List<String> foundGroups = ['全年齢'];
     for (String group in ageGroupLabels.keys) {
       final exists = snapshot.docs.any((doc) => doc.id.contains('_age_$group'));
@@ -207,9 +211,10 @@ class _BattingRankingState extends State<BattingRanking> {
       _ctxAroundUser = [];
 
       if (_selectedRankingType == '打率ランキング') {
-        final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-            ? '_age_${_selectedAgeGroup}'
-            : '';
+        final ageSuffix =
+            _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+                ? '_age_${_selectedAgeGroup}'
+                : '';
         bool loadedAgeData = false;
         if (_selectedAgeGroup != null && _selectedAgeGroup != '全年齢') {
           final ageDoc = await FirebaseFirestore.instance
@@ -221,7 +226,8 @@ class _BattingRankingState extends State<BattingRanking> {
             );
           } else if (!_isSeasonMode) {
             // 非ゼロ埋めで無ければゼロ埋めを試す
-            final altBase = basePath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
+            final altBase =
+                basePath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
               final mm = m.group(1) ?? '';
               return '_${mm.padLeft(2, '0')}/';
             });
@@ -230,7 +236,8 @@ class _BattingRankingState extends State<BattingRanking> {
                 .get();
             if (ageDocPad.exists) {
               players = List<Map<String, dynamic>>.from(
-                ageDocPad.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ?? [],
+                ageDocPad.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ??
+                    [],
               );
               basePath = altBase; // 以降の個人Doc参照も整合
             }
@@ -238,8 +245,11 @@ class _BattingRankingState extends State<BattingRanking> {
           if (players.isNotEmpty) {
             // 🔧 年齢別: rank -> battingAverageRank_age_XX
             for (final player in players) {
-              if (player.containsKey('rank') && !player.containsKey('battingAverageRank_age_${_selectedAgeGroup}')) {
-                player['battingAverageRank_age_${_selectedAgeGroup}'] = player['rank'];
+              if (player.containsKey('rank') &&
+                  !player.containsKey(
+                      'battingAverageRank_age_${_selectedAgeGroup}')) {
+                player['battingAverageRank_age_${_selectedAgeGroup}'] =
+                    player['rank'];
               }
             }
             loadedAgeData = true;
@@ -259,7 +269,8 @@ class _BattingRankingState extends State<BattingRanking> {
             );
           } else if (!_isSeasonMode) {
             // 非ゼロ埋めが無ければゼロ埋めへ
-            final altBase = basePath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
+            final altBase =
+                basePath.replaceAllMapped(RegExp(r'_(\d{1,2})/'), (m) {
               final mm = m.group(1) ?? '';
               return '_${mm.padLeft(2, '0')}/';
             });
@@ -275,7 +286,8 @@ class _BattingRankingState extends State<BattingRanking> {
           }
           if (players.isNotEmpty) {
             for (final player in players) {
-              if (player.containsKey('rank') && !player.containsKey('battingAverageRank')) {
+              if (player.containsKey('rank') &&
+                  !player.containsKey('battingAverageRank')) {
                 player['battingAverageRank'] = player['rank'];
               }
             }
@@ -285,14 +297,18 @@ class _BattingRankingState extends State<BattingRanking> {
           }
         }
 
-        players.sort((a, b) => (a['rank'] ?? a['battingAverageRank'] ?? double.infinity)
-            .compareTo(b['rank'] ?? b['battingAverageRank'] ?? double.infinity));
+        players.sort((a, b) =>
+            (a['rank'] ?? a['battingAverageRank'] ?? double.infinity).compareTo(
+                b['rank'] ?? b['battingAverageRank'] ?? double.infinity));
 
         // ignore: unused_local_variable
-        final dynamicRankKey = players.firstWhere(
-          (p) => p.containsKey('battingAverageRank$ageSuffix'),
-          orElse: () => {'battingAverageRank$ageSuffix': 'battingAverageRank'},
-        ).containsKey('battingAverageRank$ageSuffix')
+        final dynamicRankKey = players
+                .firstWhere(
+                  (p) => p.containsKey('battingAverageRank$ageSuffix'),
+                  orElse: () =>
+                      {'battingAverageRank$ageSuffix': 'battingAverageRank'},
+                )
+                .containsKey('battingAverageRank$ageSuffix')
             ? 'battingAverageRank$ageSuffix'
             : 'rank';
 
@@ -301,71 +317,77 @@ class _BattingRankingState extends State<BattingRanking> {
           orElse: () => {},
         );
 
-          if (foundPlayer.isNotEmpty) {
-            userData = foundPlayer;
-          } else {
-            // ユーザーがTOP10に含まれていない場合は rankingContext から補助取得
-            if (_isSeasonMode) {
-              // シーズン：従来の rankingContext（年間）を利用（軽量：_playersへは入れない）
-              final contextDocSnapshot = await FirebaseFirestore.instance
-                  .doc('users/${widget.uid}/rankingContext/battingAverageRank$ageSuffix')
-                  .get();
-              if (contextDocSnapshot.exists) {
-                final contextData = contextDocSnapshot.data()?['context'] ?? [];
-                if (contextData is List) {
-                  final List<Map<String, dynamic>> contextPlayers =
-                      contextData.cast<Map<String, dynamic>>();
-                  // rank補完（UIでrankキーを使えるようにする）
-                  final String computedRankKey = 'battingAverageRank' + ageSuffix;
-                  for (final p in contextPlayers) {
-                    if (!p.containsKey('rank') && p.containsKey(computedRankKey)) {
-                      p['rank'] = p[computedRankKey];
-                    }
-                  }
-                  _ctxAroundUser = contextPlayers;
-                  final self = contextPlayers.firstWhere(
-                    (p) => p['id']?.toString() == widget.uid.toString(),
-                    orElse: () => <String, dynamic>{},
-                  );
-                  if (self.isNotEmpty) {
-                    userData = self;
+        if (foundPlayer.isNotEmpty) {
+          userData = foundPlayer;
+        } else {
+          // ユーザーがTOP10に含まれていない場合は rankingContext から補助取得
+          if (_isSeasonMode) {
+            // シーズン：従来の rankingContext（年間）を利用（軽量：_playersへは入れない）
+            final contextDocSnapshot = await FirebaseFirestore.instance
+                .doc(
+                    'users/${widget.uid}/rankingContext/battingAverageRank$ageSuffix')
+                .get();
+            if (contextDocSnapshot.exists) {
+              final contextData = contextDocSnapshot.data()?['context'] ?? [];
+              if (contextData is List) {
+                final List<Map<String, dynamic>> contextPlayers =
+                    contextData.cast<Map<String, dynamic>>();
+                // rank補完（UIでrankキーを使えるようにする）
+                final String computedRankKey = 'battingAverageRank' + ageSuffix;
+                for (final p in contextPlayers) {
+                  if (!p.containsKey('rank') &&
+                      p.containsKey(computedRankKey)) {
+                    p['rank'] = p[computedRankKey];
                   }
                 }
-              }
-            } else {
-              // 月次：月別 rankingContext のみを利用（年間コンテキストは使わない）
-              final String monthKey = resolvedMonthlyPath?.monthKeyPad ??
-                  DateTime.now().month.toString().padLeft(2, '0');
-              final int y = resolvedMonthlyPath?.year ?? DateTime.now().year;
-              final monthlyCtxPath = 'users/${widget.uid}/rankingContext/month/${y}_${monthKey}/battingAverageRank$ageSuffix';
-              final monthlyCtx = await FirebaseFirestore.instance.doc(monthlyCtxPath).get();
-              if (monthlyCtx.exists) {
-                final contextData = monthlyCtx.data()?['context'] ?? [];
-                if (contextData is List) {
-                  final List<Map<String, dynamic>> contextPlayers = contextData.cast<Map<String, dynamic>>();
-                  // rank補完＆月キー一致のみ採用
-                  final String computedRankKey = 'battingAverageRank' + ageSuffix;
-                  final String expectKey = '${y}_${monthKey}';
-                  final filtered = <Map<String, dynamic>>[];
-                  for (final p in contextPlayers) {
-                    if (p['_monthKey']?.toString() == expectKey) {
-                      if (!p.containsKey('rank') && p.containsKey(computedRankKey)) {
-                        p['rank'] = p[computedRankKey];
-                      }
-                      filtered.add(p);
-                    }
-                  }
-                  _ctxAroundUser = filtered;
-                  final self = filtered.firstWhere(
-                    (p) => p['id']?.toString() == widget.uid.toString(),
-                    orElse: () => <String, dynamic>{},
-                  );
-                  if (self.isNotEmpty) {
-                    userData = self;
-                  }
+                _ctxAroundUser = contextPlayers;
+                final self = contextPlayers.firstWhere(
+                  (p) => p['id']?.toString() == widget.uid.toString(),
+                  orElse: () => <String, dynamic>{},
+                );
+                if (self.isNotEmpty) {
+                  userData = self;
                 }
               }
             }
+          } else {
+            // 月次：月別 rankingContext のみを利用（年間コンテキストは使わない）
+            final String monthKey = resolvedMonthlyPath?.monthKeyPad ??
+                DateTime.now().month.toString().padLeft(2, '0');
+            final int y = resolvedMonthlyPath?.year ?? DateTime.now().year;
+            final monthlyCtxPath =
+                'users/${widget.uid}/rankingContext/month/${y}_${monthKey}/battingAverageRank$ageSuffix';
+            final monthlyCtx =
+                await FirebaseFirestore.instance.doc(monthlyCtxPath).get();
+            if (monthlyCtx.exists) {
+              final contextData = monthlyCtx.data()?['context'] ?? [];
+              if (contextData is List) {
+                final List<Map<String, dynamic>> contextPlayers =
+                    contextData.cast<Map<String, dynamic>>();
+                // rank補完＆月キー一致のみ採用
+                final String computedRankKey = 'battingAverageRank' + ageSuffix;
+                final String expectKey = '${y}_${monthKey}';
+                final filtered = <Map<String, dynamic>>[];
+                for (final p in contextPlayers) {
+                  if (p['_monthKey']?.toString() == expectKey) {
+                    if (!p.containsKey('rank') &&
+                        p.containsKey(computedRankKey)) {
+                      p['rank'] = p[computedRankKey];
+                    }
+                    filtered.add(p);
+                  }
+                }
+                _ctxAroundUser = filtered;
+                final self = filtered.firstWhere(
+                  (p) => p['id']?.toString() == widget.uid.toString(),
+                  orElse: () => <String, dynamic>{},
+                );
+                if (self.isNotEmpty) {
+                  userData = self;
+                }
+              }
+            }
+          }
 
           // 個人Doc（該当月/県パス）
           final userDocSnapshot = await FirebaseFirestore.instance
@@ -396,7 +418,8 @@ class _BattingRankingState extends State<BattingRanking> {
               .get();
           if (ageDoc.exists) {
             players = List<Map<String, dynamic>>.from(
-                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ?? []);
+                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ??
+                    []);
             loadedAgeData = true;
           }
         }
@@ -422,9 +445,10 @@ class _BattingRankingState extends State<BattingRanking> {
           userData = userInTop10;
         } else {
           // top10に含まれていない場合は rankingContext から取得
-          final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-              ? '_age_${_selectedAgeGroup}'
-              : '';
+          final ageSuffix =
+              _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+                  ? '_age_${_selectedAgeGroup}'
+                  : '';
           final contextDoc = await FirebaseFirestore.instance
               .doc('users/${widget.uid}/rankingContext/homeRunsRank$ageSuffix')
               .get();
@@ -465,13 +489,15 @@ class _BattingRankingState extends State<BattingRanking> {
               .get();
           if (ageDoc.exists) {
             players = List<Map<String, dynamic>>.from(
-                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ?? []);
+                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ??
+                    []);
             loadedAgeData = true;
           }
         }
         if (!loadedAgeData) {
-          final docSnapshot =
-              await FirebaseFirestore.instance.doc('$basePath/stealsRank').get();
+          final docSnapshot = await FirebaseFirestore.instance
+              .doc('$basePath/stealsRank')
+              .get();
           if (docSnapshot.exists) {
             players = List<Map<String, dynamic>>.from(
                 docSnapshot.data()?['PrefectureTop10'] ?? []);
@@ -490,9 +516,10 @@ class _BattingRankingState extends State<BattingRanking> {
           userData = userInTop10;
         } else {
           // top10に含まれていない場合は rankingContext から取得
-          final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-              ? '_age_${_selectedAgeGroup}'
-              : '';
+          final ageSuffix =
+              _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+                  ? '_age_${_selectedAgeGroup}'
+                  : '';
           final contextDoc = await FirebaseFirestore.instance
               .doc('users/${widget.uid}/rankingContext/stealsRank$ageSuffix')
               .get();
@@ -532,7 +559,8 @@ class _BattingRankingState extends State<BattingRanking> {
               .get();
           if (ageDoc.exists) {
             players = List<Map<String, dynamic>>.from(
-                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ?? []);
+                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ??
+                    []);
             loadedAgeData = true;
           }
         }
@@ -558,9 +586,10 @@ class _BattingRankingState extends State<BattingRanking> {
           userData = userInTop10;
         } else {
           // top10に含まれていない場合は rankingContext から取得
-          final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-              ? '_age_${_selectedAgeGroup}'
-              : '';
+          final ageSuffix =
+              _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+                  ? '_age_${_selectedAgeGroup}'
+                  : '';
           final contextDoc = await FirebaseFirestore.instance
               .doc('users/${widget.uid}/rankingContext/totalRbisRank$ageSuffix')
               .get();
@@ -600,7 +629,8 @@ class _BattingRankingState extends State<BattingRanking> {
               .get();
           if (ageDoc.exists) {
             players = List<Map<String, dynamic>>.from(
-                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ?? []);
+                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ??
+                    []);
             loadedAgeData = true;
           }
         }
@@ -626,9 +656,10 @@ class _BattingRankingState extends State<BattingRanking> {
           userData = userInTop10;
         } else {
           // top10に含まれていない場合は rankingContext から取得
-          final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-              ? '_age_${_selectedAgeGroup}'
-              : '';
+          final ageSuffix =
+              _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+                  ? '_age_${_selectedAgeGroup}'
+                  : '';
           final contextDoc = await FirebaseFirestore.instance
               .doc('users/${widget.uid}/rankingContext/sluggingRank$ageSuffix')
               .get();
@@ -668,13 +699,15 @@ class _BattingRankingState extends State<BattingRanking> {
               .get();
           if (ageDoc.exists) {
             players = List<Map<String, dynamic>>.from(
-                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ?? []);
+                ageDoc.data()?['PrefectureTop10_age_${_selectedAgeGroup}'] ??
+                    []);
             loadedAgeData = true;
           }
         }
         if (!loadedAgeData) {
-          final docSnapshot =
-              await FirebaseFirestore.instance.doc('$basePath/onBaseRank').get();
+          final docSnapshot = await FirebaseFirestore.instance
+              .doc('$basePath/onBaseRank')
+              .get();
           if (docSnapshot.exists) {
             players = List<Map<String, dynamic>>.from(
                 docSnapshot.data()?['PrefectureTop10'] ?? []);
@@ -693,9 +726,10 @@ class _BattingRankingState extends State<BattingRanking> {
           userData = userInTop10;
         } else {
           // top10に含まれていない場合は rankingContext から取得
-          final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-              ? '_age_${_selectedAgeGroup}'
-              : '';
+          final ageSuffix =
+              _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+                  ? '_age_${_selectedAgeGroup}'
+                  : '';
           final contextDoc = await FirebaseFirestore.instance
               .doc('users/${widget.uid}/rankingContext/onBaseRank$ageSuffix')
               .get();
@@ -750,7 +784,7 @@ class _BattingRankingState extends State<BattingRanking> {
     try {
       final now = DateTime.now();
       int year;
-     
+
       _ResolvedMonthlyRankingPath? resolvedMonthlyPath;
 
       String docPath;
@@ -771,8 +805,7 @@ class _BattingRankingState extends State<BattingRanking> {
       }
 
       // stats ドキュメント取得（先月モードはゼロ埋めフォールバックも試す）
-      var statsSnapshot =
-          await FirebaseFirestore.instance.doc(docPath).get();
+      var statsSnapshot = await FirebaseFirestore.instance.doc(docPath).get();
 
       if (!statsSnapshot.exists && !_isSeasonMode) {
         final altDocPath =
@@ -780,8 +813,7 @@ class _BattingRankingState extends State<BattingRanking> {
           final mm = m.group(1) ?? '';
           return '_${mm.padLeft(2, '0')}/';
         });
-        statsSnapshot =
-            await FirebaseFirestore.instance.doc(altDocPath).get();
+        statsSnapshot = await FirebaseFirestore.instance.doc(altDocPath).get();
       }
 
       int count = 0;
@@ -839,25 +871,25 @@ class _BattingRankingState extends State<BattingRanking> {
       // TOP10を表示（圏外を除外し、rankが10以下の選手を表示）
       for (var player in _players) {
         // rankが10以下で、かつ圏外でないことを確認
-        final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-            ? '_age_${_selectedAgeGroup}'
-            : '';
+        final ageSuffix =
+            _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+                ? '_age_${_selectedAgeGroup}'
+                : '';
         final rankKey = 'battingAverageRank$ageSuffix';
         int playerRank = int.tryParse(player[rankKey]?.toString() ?? '') ?? -1;
         if (playerRank != -1 && playerRank <= 10) {
           final isUser = player['id'] == widget.uid;
-          result.add(
-          DataRow(
+          result.add(DataRow(
             color: MaterialStateProperty.resolveWith<Color?>(
               (states) {
                 if (isUser) {
                   return const Color(0xFF1565C0).withOpacity(0.08);
                 }
-              return null;
-            },
-          ),
-          cells: _buildDataCells(player, isUser: isUser),
-        )); // ユーザー自身のデータを太字で表示
+                return null;
+              },
+            ),
+            cells: _buildDataCells(player, isUser: isUser),
+          )); // ユーザー自身のデータを太字で表示
         }
       }
     } else if (_selectedRankingType == '本塁打ランキング' ||
@@ -870,20 +902,20 @@ class _BattingRankingState extends State<BattingRanking> {
         if (player['rank'] != null &&
             player['rank'] != '' &&
             (int.tryParse(player['rank'].toString()) ?? 0) <= 10) {
-              final isUser = player['id'] == widget.uid;
-              result.add(
-                DataRow(
-                  color: MaterialStateProperty.resolveWith<Color?>(
-                    (states) {
-                      if (isUser) {
-                        return const Color(0xFF1565C0).withOpacity(0.08);
-                      }
-                      return null;
-                    },
-                  ),
-                  cells: _buildDataCells(player, isUser: isUser),
-                ),
-              );
+          final isUser = player['id'] == widget.uid;
+          result.add(
+            DataRow(
+              color: MaterialStateProperty.resolveWith<Color?>(
+                (states) {
+                  if (isUser) {
+                    return const Color(0xFF1565C0).withOpacity(0.08);
+                  }
+                  return null;
+                },
+              ),
+              cells: _buildDataCells(player, isUser: isUser),
+            ),
+          );
         }
       }
     }
@@ -902,8 +934,7 @@ class _BattingRankingState extends State<BattingRanking> {
     if (_selectedRankingType == '打率ランキング' &&
         _userData != null &&
         _userData![rankKey] != '圏外') {
-      userRank =
-          int.tryParse(_userData![rankKey].toString()) ?? -1;
+      userRank = int.tryParse(_userData![rankKey].toString()) ?? -1;
     }
     final bool _userInAge = _isUserInSelectedAgeGroup();
 
@@ -919,152 +950,53 @@ class _BattingRankingState extends State<BattingRanking> {
 
     return Scaffold(
       body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
         child: Column(
           children: [
-            const SizedBox(height: 8),
-            Text(
-              '${widget.prefecture} 打撃ランキング',
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _isSeasonMode
+            RankingOverviewCard(
+              title: '${widget.prefecture} 打撃ランキング',
+              periodLabel: _isSeasonMode
                   ? '$_year年シーズン'
                   : '${_monthlyRankingYear}年${_monthlyRankingMonth}月',
-              style: const TextStyle(
-                fontSize: 13,
-                color: Colors.black54,
-                fontWeight: FontWeight.w600,
-              ),
+              isSeasonMode: _isSeasonMode,
+              modeLabel: _isSeasonMode ? 'シーズン' : '月',
+              ageLabel: _selectedAgeGroup == '全年齢'
+                  ? '全年齢'
+                  : ageGroupLabels[_selectedAgeGroup!] ?? _selectedAgeGroup!,
+              metricLabel: _selectedRankingType,
+              participantsCount: _playersCount,
+              onModeTap: () => _showModePicker(context),
+              onAgeTap: () => _showAgePicker(context),
+              onMetricTap: () => _showCupertinoPicker(context),
+              onPreviousMetric: () {
+                final currentIndex = rankingTypes.indexOf(_selectedRankingType);
+                final previousIndex = (currentIndex - 1 + rankingTypes.length) %
+                    rankingTypes.length;
+                setState(() {
+                  _selectedRankingType = rankingTypes[previousIndex];
+                  _fetchPlayersData();
+                });
+              },
+              onNextMetric: () {
+                final currentIndex = rankingTypes.indexOf(_selectedRankingType);
+                final nextIndex = (currentIndex + 1) % rankingTypes.length;
+                setState(() {
+                  _selectedRankingType = rankingTypes[nextIndex];
+                  _fetchPlayersData();
+                });
+              },
             ),
-            const SizedBox(height: 10),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  GestureDetector(
-                    onTap: () => _showModePicker(context),
-                    child: _FilterChipButton(
-                      label: _isSeasonMode ? 'シーズン' : '月',
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: () => _showAgePicker(context),
-                    child: _FilterChipButton(
-                      label: _selectedAgeGroup == '全年齢'
-                          ? '全年齢'
-                          : ageGroupLabels[_selectedAgeGroup!] ?? _selectedAgeGroup!,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            if (_isSeasonMode)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.navigate_before, size: 24.0),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () {
-                          final currentIndex = rankingTypes.indexOf(_selectedRankingType);
-                          final previousIndex = (currentIndex - 1 + rankingTypes.length) % rankingTypes.length;
-                          setState(() {
-                            _selectedRankingType = rankingTypes[previousIndex];
-                            _fetchPlayersData();
-                          });
-                        },
-                      ),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () => _showCupertinoPicker(context),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                          child: Row(
-                            children: [
-                              Text(
-                                _selectedRankingType,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              const Icon(
-                                Icons.arrow_drop_down,
-                                size: 20,
-                                color: Colors.black54,
-                              )
-                            ],
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.navigate_next, size: 24.0),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () {
-                          final currentIndex = rankingTypes.indexOf(_selectedRankingType);
-                          final nextIndex = (currentIndex + 1) % rankingTypes.length;
-                          setState(() {
-                            _selectedRankingType = rankingTypes[nextIndex];
-                            _fetchPlayersData();
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
+            if (_players
+                .any((player) => player['isBattingAdvancedComplete'] == false))
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: Text(
-                  _selectedRankingType,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  '「—」は簡単入力などで記録されていない項目です',
+                  style: TextStyle(fontSize: 11, color: Colors.black54),
                 ),
               ),
-            const SizedBox(height: 10),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7F7F7),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.black12),
-              ),
-              child: Center(
-                child: Text(
-                  '$_playersCount人がランキングに参加中',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
             // データがない場合の表示（全てのランキングに適用）
             if (_players.isEmpty) ...[
               Container(
@@ -1430,53 +1362,52 @@ class _BattingRankingState extends State<BattingRanking> {
     }
   }
 
-
   // ==== 共通ヘルパー（前後±2表示用）====
-String _ageSuffixStr() {
-  return _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
-      ? '_age_${_selectedAgeGroup}'
-      : '';
-}
-
-String _metricRankKeyBase() {
-  switch (_selectedRankingType) {
-    case '本塁打ランキング':
-      return 'homeRunsRank';
-    case '盗塁ランキング':
-      return 'stealsRank';
-    case '打点ランキング':
-      return 'totalRbisRank';
-    case '長打率ランキング':
-      return 'sluggingRank';
-    case '出塁率ランキング':
-      return 'onBaseRank';
-    default:
-      return 'battingAverageRank';
+  String _ageSuffixStr() {
+    return _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
+        ? '_age_${_selectedAgeGroup}'
+        : '';
   }
-}
 
-String _resolveRankKeyForCurrentMetric(Map<String, dynamic> player) {
-  // playerに'rank'があればそれを優先。無ければ各指標のrankKey + ageSuffix
-  if (player.containsKey('rank')) return 'rank';
-  return _metricRankKeyBase() + _ageSuffixStr();
-}
+  String _metricRankKeyBase() {
+    switch (_selectedRankingType) {
+      case '本塁打ランキング':
+        return 'homeRunsRank';
+      case '盗塁ランキング':
+        return 'stealsRank';
+      case '打点ランキング':
+        return 'totalRbisRank';
+      case '長打率ランキング':
+        return 'sluggingRank';
+      case '出塁率ランキング':
+        return 'onBaseRank';
+      default:
+        return 'battingAverageRank';
+    }
+  }
 
-int _extractRankForCurrentMetric(Map<String, dynamic> player) {
-  final key = _resolveRankKeyForCurrentMetric(player);
-  final v = player[key]?.toString() ?? '';
-  return int.tryParse(v) ?? -1;
-}
+  String _resolveRankKeyForCurrentMetric(Map<String, dynamic> player) {
+    // playerに'rank'があればそれを優先。無ければ各指標のrankKey + ageSuffix
+    if (player.containsKey('rank')) return 'rank';
+    return _metricRankKeyBase() + _ageSuffixStr();
+  }
 
-bool _isUserInSelectedAgeGroup() {
-  if (_selectedAgeGroup == null || _selectedAgeGroup == '全年齢') return true;
-  final userAge = _userData != null ? _userData!['age'] : null;
-  if (userAge is! int) return false; // 年齢不明なら対象外として扱う
-  final parts = _selectedAgeGroup!.split('_');
-  if (parts.length != 2) return true; // 想定外表記なら弾かない（安全側）
-  final minAge = int.tryParse(parts[0]) ?? 0;
-  final maxAge = int.tryParse(parts[1]) ?? 200;
-  return userAge >= minAge && userAge <= maxAge;
-}
+  int _extractRankForCurrentMetric(Map<String, dynamic> player) {
+    final key = _resolveRankKeyForCurrentMetric(player);
+    final v = player[key]?.toString() ?? '';
+    return int.tryParse(v) ?? -1;
+  }
+
+  bool _isUserInSelectedAgeGroup() {
+    if (_selectedAgeGroup == null || _selectedAgeGroup == '全年齢') return true;
+    final userAge = _userData != null ? _userData!['age'] : null;
+    if (userAge is! int) return false; // 年齢不明なら対象外として扱う
+    final parts = _selectedAgeGroup!.split('_');
+    if (parts.length != 2) return true; // 想定外表記なら弾かない（安全側）
+    final minAge = int.tryParse(parts[0]) ?? 0;
+    final maxAge = int.tryParse(parts[1]) ?? 200;
+    return userAge >= minAge && userAge <= maxAge;
+  }
 
   List<DataRow> _buildUserAndPreviousRows(int userRank) {
     // 打率含む全指標で使える汎用版（centerは引数 or _userData）
@@ -1505,12 +1436,10 @@ bool _isUserInSelectedAgeGroup() {
     final List<DataRow> result = [];
 
     // 上位（自分より良い）: 降順→最後に追加されるよう reverse で2件
-    final upper = sourceList
-        .where((p) {
-          final r = _extractRankForCurrentMetric(p);
-          return r > 0 && r < centerRank;
-        })
-        .toList()
+    final upper = sourceList.where((p) {
+      final r = _extractRankForCurrentMetric(p);
+      return r > 0 && r < centerRank;
+    }).toList()
       ..sort((a, b) => _extractRankForCurrentMetric(b)
           .compareTo(_extractRankForCurrentMetric(a)));
 
@@ -1544,12 +1473,10 @@ bool _isUserInSelectedAgeGroup() {
     );
 
     // 下位（自分より悪い）: 昇順で2件
-    final lower = sourceList
-        .where((p) {
-          final r = _extractRankForCurrentMetric(p);
-          return r > centerRank;
-        })
-        .toList()
+    final lower = sourceList.where((p) {
+      final r = _extractRankForCurrentMetric(p);
+      return r > centerRank;
+    }).toList()
       ..sort((a, b) => _extractRankForCurrentMetric(a)
           .compareTo(_extractRankForCurrentMetric(b)));
 
@@ -1575,6 +1502,8 @@ bool _isUserInSelectedAgeGroup() {
 
   List<DataCell> _buildDataCells(Map<String, dynamic> player,
       {bool isUser = false}) {
+    final advancedBattingAvailable =
+        player['isBattingAdvancedComplete'] != false;
     final ageSuffix = _selectedAgeGroup != null && _selectedAgeGroup != '全年齢'
         ? '_age_${_selectedAgeGroup}'
         : '';
@@ -1584,11 +1513,17 @@ bool _isUserInSelectedAgeGroup() {
         : _selectedRankingType == '盗塁ランキング'
             ? (player.containsKey('rank') ? 'rank' : 'stealsRank$ageSuffix')
             : _selectedRankingType == '打点ランキング'
-                ? (player.containsKey('rank') ? 'rank' : 'totalRbisRank$ageSuffix')
+                ? (player.containsKey('rank')
+                    ? 'rank'
+                    : 'totalRbisRank$ageSuffix')
                 : _selectedRankingType == '長打率ランキング'
-                    ? (player.containsKey('rank') ? 'rank' : 'sluggingRank$ageSuffix')
+                    ? (player.containsKey('rank')
+                        ? 'rank'
+                        : 'sluggingRank$ageSuffix')
                     : _selectedRankingType == '出塁率ランキング'
-                        ? (player.containsKey('rank') ? 'rank' : 'onBaseRank$ageSuffix')
+                        ? (player.containsKey('rank')
+                            ? 'rank'
+                            : 'onBaseRank$ageSuffix')
                         : 'battingAverageRank$ageSuffix';
 
     String valueKey = 'value';
@@ -1628,6 +1563,7 @@ bool _isUserInSelectedAgeGroup() {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -1681,8 +1617,12 @@ bool _isUserInSelectedAgeGroup() {
         ),
         DataCell(Center(
           child: Text(
-            formatPercentage(
-                num.tryParse((_isSeasonMode ? player[valueKey] : player['battingAverage'])?.toString() ?? '0.0') ?? 0.0),
+            formatPercentage(num.tryParse((_isSeasonMode
+                            ? player[valueKey]
+                            : player['battingAverage'])
+                        ?.toString() ??
+                    '0.0') ??
+                0.0),
             style: TextStyle(
               fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
               color: isUser ? Colors.blue : Colors.black,
@@ -1790,7 +1730,9 @@ bool _isUserInSelectedAgeGroup() {
         )),
         DataCell(Center(
           child: Text(
-            player['sacrificeBunts']?.toString() ?? '0',
+            advancedBattingAvailable
+                ? player['sacrificeBunts']?.toString() ?? '0'
+                : '—',
             style: TextStyle(
               fontWeight: isUser ? FontWeight.bold : FontWeight.normal,
               color: isUser ? Colors.blue : Colors.black,
@@ -1910,6 +1852,7 @@ bool _isUserInSelectedAgeGroup() {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -1933,7 +1876,7 @@ bool _isUserInSelectedAgeGroup() {
               if (teamIDs.isNotEmpty) {
                 final user = FirebaseAuth.instance.currentUser;
                 showProfileDialog(
-                  context, 
+                  context,
                   teamIDs.first.toString(),
                   true,
                   currentUserUid: user?.uid,
@@ -2011,6 +1954,7 @@ bool _isUserInSelectedAgeGroup() {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -2103,6 +2047,7 @@ bool _isUserInSelectedAgeGroup() {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -2204,6 +2149,7 @@ bool _isUserInSelectedAgeGroup() {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -2337,11 +2283,12 @@ bool _isUserInSelectedAgeGroup() {
               if (player['id'] != null) {
                 final user = FirebaseAuth.instance.currentUser;
                 showProfileDialog(
-                  context, 
-                  player['id'].toString(), 
+                  context,
+                  player['id'].toString(),
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -2412,7 +2359,7 @@ bool _isUserInSelectedAgeGroup() {
             ),
           ),
         )),
-         DataCell(Center(
+        DataCell(Center(
           child: Text(
             player['age']?.toString() ?? '0',
             style: TextStyle(
@@ -2477,11 +2424,9 @@ bool _isUserInSelectedAgeGroup() {
     );
   }
 
-
   // 年齢別CupertinoPicker
   void _showAgePicker(BuildContext context) {
-    int selectedIndex =
-        _availableAgeGroups.indexOf(_selectedAgeGroup ?? '全年齢');
+    int selectedIndex = _availableAgeGroups.indexOf(_selectedAgeGroup ?? '全年齢');
 
     showModalBottomSheet(
       context: context,
@@ -2492,7 +2437,8 @@ bool _isUserInSelectedAgeGroup() {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -2501,13 +2447,14 @@ bool _isUserInSelectedAgeGroup() {
                       child: const Text('キャンセル'),
                     ),
                     const Text('年齢を選択',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
                     TextButton(
                       onPressed: () {
                         setState(() {
                           _selectedAgeGroup = _availableAgeGroups[tempIndex];
                           _fetchPlayersData();
-                          _fetchPlayersCount(); 
+                          _fetchPlayersCount();
                         });
                         Navigator.pop(context);
                       },
@@ -2520,8 +2467,8 @@ bool _isUserInSelectedAgeGroup() {
               const Divider(height: 1),
               Expanded(
                 child: CupertinoPicker(
-                  scrollController: FixedExtentScrollController(
-                      initialItem: selectedIndex),
+                  scrollController:
+                      FixedExtentScrollController(initialItem: selectedIndex),
                   itemExtent: 40.0,
                   onSelectedItemChanged: (index) {
                     tempIndex = index;
@@ -2538,42 +2485,6 @@ bool _isUserInSelectedAgeGroup() {
           ),
         );
       },
-    );
-  }
-}
-// UI filter chip button widget
-class _FilterChipButton extends StatelessWidget {
-  final String label;
-
-  const _FilterChipButton({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(width: 4),
-          const Icon(
-            Icons.arrow_drop_down,
-            size: 20,
-            color: Colors.black54,
-          ),
-        ],
-      ),
     );
   }
 }

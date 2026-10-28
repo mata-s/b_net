@@ -78,7 +78,6 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
     return value.toString();
   }
 
-
   Widget _buildStatColumn(String label, dynamic value,
       [double underlineWidth = 40]) {
     return Column(
@@ -144,6 +143,18 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
           final totalInningsPitched = stats['totalInningsPitched'] ?? 0;
           final totalAppearances = stats['totalAppearances'] ?? 0;
           final totalPitchCount = stats['totalPitchCount'] ?? 0;
+          final pitchingAppearances =
+              (stats['pitchingRecordedAppearances'] as num?)?.toInt() ?? 0;
+          final advancedAppearances =
+              (stats['pitchingAdvancedRecordedAppearances'] as num?)?.toInt();
+          final advancedComplete = advancedAppearances == null ||
+              (pitchingAppearances > 0 &&
+                  advancedAppearances == pitchingAppearances);
+          String advancedNumber(String key, int digits) {
+            final value = adv[key];
+            if (!advancedComplete || value is! num) return '—';
+            return value.toStringAsFixed(digits);
+          }
 
           return Stack(
             children: [
@@ -170,15 +181,15 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
                                     MainAxisAlignment.spaceAround,
                                 children: [
                                   _buildStatColumn(
-                                      'WHIP',
-                                      (adv['whip'] ?? 0).toStringAsFixed(2),
-                                      80),
+                                      'WHIP', advancedNumber('whip', 2), 80),
                                   _buildStatColumn(
-                                      'QS',
-                                      (adv['qsRate'] ?? 0).toStringAsFixed(1),
+                                      'QS', advancedNumber('qsRate', 1), 80),
+                                  _buildStatColumn(
+                                      'LOB%',
+                                      advancedComplete
+                                          ? formatPercentage(adv['lobRate'])
+                                          : '—',
                                       80),
-                                  _buildStatColumn('LOB%',
-                                      formatPercentage(adv['lobRate']), 80),
                                 ],
                               ),
                               SizedBox(height: 20),
@@ -188,8 +199,8 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
                                 children: [
                                   _buildStatColumn(
                                       '1試合あたりの平均打者数',
-                                      (adv['avgBattersFacedPerGame'] ?? 0)
-                                          .toStringAsFixed(1),
+                                      advancedNumber(
+                                          'avgBattersFacedPerGame', 1),
                                       80),
                                 ],
                               ),
@@ -200,8 +211,8 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
                                 children: [
                                   _buildStatColumn(
                                       '1試合あたりの平均失点',
-                                      (adv['avgRunsAllowedPerGame'] ?? 0)
-                                          .toStringAsFixed(1),
+                                      advancedNumber(
+                                          'avgRunsAllowedPerGame', 1),
                                       80),
                                 ],
                               ),
@@ -271,7 +282,9 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
                                   children: [
                                     _buildStatColumn(
                                         '球数',
-                                        totalPitchCount?.toString() ?? '0',
+                                        advancedComplete
+                                            ? totalPitchCount.toString()
+                                            : '—',
                                         100),
                                   ],
                                 ),
@@ -283,13 +296,11 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
                                 children: [
                                   _buildStatColumn(
                                       '平均球数(試合)',
-                                      (adv['avgPitchesPerGame'] ?? 0)
-                                          .toStringAsFixed(1),
+                                      advancedNumber('avgPitchesPerGame', 1),
                                       80),
                                   _buildStatColumn(
                                       '平均球数(1人あたり)',
-                                      (adv['avgPitchesPerBatter'] ?? 0)
-                                          .toStringAsFixed(1),
+                                      advancedNumber('avgPitchesPerBatter', 1),
                                       80),
                                 ],
                               ),
@@ -319,16 +330,22 @@ class _PitchingDetailPageState extends State<PitchingDetailPage> {
                                 children: [
                                   _buildStatColumn(
                                     '平均四球(１試合)',
-                                    ((adv['avgWalksPerGame'] ?? 0) as num)
-                                        .floor()
-                                        .toString(),
+                                    advancedComplete &&
+                                            adv['avgWalksPerGame'] is num
+                                        ? (adv['avgWalksPerGame'] as num)
+                                            .floor()
+                                            .toString()
+                                        : '—',
                                     80,
                                   ),
                                   _buildStatColumn(
                                     '平均死球(１試合)',
-                                    ((adv['avgHitByPitchPerGame'] ?? 0) as num)
-                                        .floor()
-                                        .toString(),
+                                    advancedComplete &&
+                                            adv['avgHitByPitchPerGame'] is num
+                                        ? (adv['avgHitByPitchPerGame'] as num)
+                                            .floor()
+                                            .toString()
+                                        : '—',
                                     80,
                                   ),
                                 ],

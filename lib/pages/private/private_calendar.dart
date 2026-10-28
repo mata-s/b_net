@@ -1,9 +1,11 @@
 import 'package:b_net/pages/private/game_input_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'dart:collection';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class Event {
@@ -27,6 +29,76 @@ final Map<DateTime, List<Event>> _kEventSource = {};
 
 int getHashCode(DateTime key) {
   return key.day * 1000000 + key.month * 10000 + key.year;
+}
+
+Future<bool> _confirmAndDeleteGame(
+  BuildContext context, {
+  required String gameId,
+  required Map<String, dynamic> gameData,
+}) async {
+  final rawDate = gameData['gameDate'];
+  final gameDate = rawDate is Timestamp ? rawDate.toDate() : null;
+  final dateLabel = gameDate == null
+      ? ''
+      : '${gameDate.year}年${gameDate.month}月${gameDate.day}日\n';
+  final opponent = (gameData['opponent'] ?? '不明').toString();
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('この試合記録を削除しますか？'),
+      content: Text(
+        '$dateLabel対戦相手: $opponent\n\n'
+        '累計成績からもこの試合分が取り除かれます。'
+        'この操作は元に戻せません。',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('削除する'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return false;
+
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const PopScope(
+      canPop: false,
+      child: Center(child: CircularProgressIndicator()),
+    ),
+  );
+
+  try {
+    await FirebaseFunctions.instance
+        .httpsCallable('deleteGameData')
+        .call<void>({'gameId': gameId});
+    if (!context.mounted) return true;
+    Navigator.of(context, rootNavigator: true).pop();
+    return true;
+  } on FirebaseFunctionsException catch (error) {
+    if (!context.mounted) return false;
+    Navigator.of(context, rootNavigator: true).pop();
+    final message =
+        error.code == 'not-found' ? 'この試合はすでに削除されています。' : '試合記録を削除できませんでした。';
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+    return false;
+  } catch (_) {
+    if (!context.mounted) return false;
+    Navigator.of(context, rootNavigator: true).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('試合記録を削除できませんでした。')),
+    );
+    return false;
+  }
 }
 
 /// 指定された期間内の日付のリストを返す関数
@@ -156,29 +228,33 @@ class _PrivateCalendarState extends State<PrivateCalendar> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          if (_selectedDay == null) return;
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => GameInputPage(
-                selectedDate: _selectedDay!,
-                positions: widget.positions,
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
+        child: FloatingActionButton(
+          onPressed: () {
+            if (_selectedDay == null) return;
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => GameInputPage(
+                  selectedDate: _selectedDay!,
+                  positions: widget.positions,
+                ),
               ),
-            ),
-          ).then((result) {
-            if (result == true) {
-              print('▶ GameInputPage から戻り → データ再読み込み');
-              _loadUserData(); // 🔄 試合データ再取得
-            }
-          });
-        },
-        child: const Icon(Icons.add),
+            ).then((result) {
+              if (result == true) {
+                print('▶ GameInputPage から戻り → データ再読み込み');
+                _loadUserData(); // 🔄 試合データ再取得
+              }
+            });
+          },
+          child: const Icon(Icons.add),
+        ),
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -228,6 +304,9 @@ class _PrivateCalendarState extends State<PrivateCalendar> {
                         );
                       }
                       return ListView.builder(
+                        padding: EdgeInsets.only(
+                          bottom: BNetFloatingTabBar.bodyClearance(context),
+                        ),
                         itemCount: value.length,
                         itemBuilder: (context, index) {
                           final event = value[index];
@@ -243,7 +322,12 @@ class _PrivateCalendarState extends State<PrivateCalendar> {
                             child: ListTile(
                               title: Text(event.toString()),
                               onTap: () {
-                                _showEventDetailsBottomSheet(context, event.id);
+                                _showEventDetailsBottomSheet(
+                                  context,
+                                  event.id,
+                                  widget.positions,
+                                  _loadUserData,
+                                );
                               },
                             ),
                           );
@@ -269,7 +353,12 @@ class _PrivateCalendarState extends State<PrivateCalendar> {
   }
 }
 
-void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
+void _showEventDetailsBottomSheet(
+  BuildContext context,
+  String eventId,
+  List<String> positions,
+  Future<void> Function() onUpdated,
+) async {
   final user = FirebaseAuth.instance.currentUser;
 
   if (user == null) return;
@@ -287,13 +376,23 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
   if (!eventSnapshot.exists) return;
 
   final eventData = eventSnapshot.data() as Map<String, dynamic>;
+  final recordedSections = eventData['recordedSections'];
+  final isLegacy = recordedSections is! Map;
+  final pitchingAdvancedRecorded =
+      isLegacy || recordedSections['pitchingAdvanced'] == true;
+  final battingAdvancedRecorded =
+      isLegacy || recordedSections['battingAdvanced'] == true;
+  final fieldingRecorded = isLegacy || recordedSections['fielding'] == true;
+  final catchingRecorded = isLegacy || recordedSections['catching'] == true;
+  String advancedPitchingValue(String key) =>
+      pitchingAdvancedRecorded ? (eventData[key]?.toString() ?? '0') : '—';
 
   // ユーザー情報を取得してポジションを確認
   final DocumentSnapshot userDoc =
       await FirebaseFirestore.instance.collection('users').doc(uid).get();
 
-  final List<dynamic> userPositions = (userDoc.data() as Map<String, dynamic>?)
-          ?['positions'] as List<dynamic>? ??
+  final List<dynamic> userPositions = (userDoc.data()
+          as Map<String, dynamic>?)?['positions'] as List<dynamic>? ??
       [];
 
   final bool isTablet = MediaQuery.of(context).size.width >= 600;
@@ -402,11 +501,11 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
                     const SizedBox(
                       width: 45,
                     ),
-                    Text('対戦打者: ${eventData['battersFaced'] ?? 0}人'),
+                    Text('対戦打者: ${advancedPitchingValue('battersFaced')}人'),
                     const SizedBox(
                       width: 45,
                     ),
-                    Text('球数: ${eventData['pitchCount'] ?? 0}球'),
+                    Text('球数: ${advancedPitchingValue('pitchCount')}球'),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -414,13 +513,15 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(
-                      child: Text('与四球: ${eventData['walks'] ?? 0}'),
+                      child: Text('与四球: ${advancedPitchingValue('walks')}'),
                     ),
                     Expanded(
-                      child: Text('与死球: ${eventData['hitByPitch'] ?? 0}'),
+                      child:
+                          Text('与死球: ${advancedPitchingValue('hitByPitch')}'),
                     ),
                     Expanded(
-                      child: Text('失点: ${eventData['runsAllowed'] ?? 0}'),
+                      child:
+                          Text('失点: ${advancedPitchingValue('runsAllowed')}'),
                     ),
                   ],
                 ),
@@ -432,7 +533,8 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
                       child: Text('自責点: ${eventData['earnedRuns'] ?? 0}'),
                     ),
                     Expanded(
-                      child: Text('被安打: ${eventData['hitsAllowed'] ?? 0}'),
+                      child:
+                          Text('被安打: ${advancedPitchingValue('hitsAllowed')}'),
                     ),
                     Expanded(
                       child: Text('奪三振: ${eventData['strikeouts'] ?? 0}'),
@@ -453,10 +555,10 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
                   final batterPitchCount = atBat['batterPitchCount'];
 
                   String extraInfo = '';
-                  if (swingCount != null) {
+                  if (battingAdvancedRecorded && swingCount != null) {
                     extraInfo += 'スイング数: $swingCount';
                   }
-                  if (batterPitchCount != null) {
+                  if (battingAdvancedRecorded && batterPitchCount != null) {
                     if (extraInfo.isNotEmpty) extraInfo += ' / ';
                     extraInfo += '球数: $batterPitchCount';
                   }
@@ -492,16 +594,20 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('刺殺: ${eventData['putouts'] ?? 0}'),
-                  Text('捕殺: ${eventData['assists'] ?? 0}'),
-                  Text('失策: ${eventData['errors'] ?? 0}'),
+                  Text(
+                      '刺殺: ${fieldingRecorded ? eventData['putouts'] ?? 0 : '—'}'),
+                  Text(
+                      '捕殺: ${fieldingRecorded ? eventData['assists'] ?? 0 : '—'}'),
+                  Text(
+                      '失策: ${fieldingRecorded ? eventData['errors'] ?? 0 : '—'}'),
                 ],
               ),
               if (userPositions.contains('捕手')) ...[
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    Text('盗塁刺し: ${eventData['caughtStealing'] ?? 0}'),
+                    Text(
+                        '盗塁刺し: ${catchingRecorded ? eventData['caughtStealing'] ?? 0 : '—'}'),
                   ],
                 ),
               ],
@@ -516,6 +622,58 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
               Text(eventData['memo'] ?? 'メモなし'),
               const SizedBox(height: 20),
 
+              OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  final gameDate = eventData['gameDate'] is Timestamp
+                      ? (eventData['gameDate'] as Timestamp).toDate()
+                      : DateTime.now();
+                  if (!context.mounted) return;
+                  final result = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                      builder: (_) => GameInputPage(
+                        selectedDate: gameDate,
+                        positions: positions,
+                        gameId: eventId,
+                        initialGameData: eventData,
+                      ),
+                    ),
+                  );
+                  if (result == true) {
+                    await onUpdated();
+                  }
+                },
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                ),
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('この試合を修正する'),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final deleted = await _confirmAndDeleteGame(
+                    ctx,
+                    gameId: eventId,
+                    gameData: eventData,
+                  );
+                  if (!deleted || !ctx.mounted) return;
+                  Navigator.of(ctx).pop();
+                  await onUpdated();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('試合記録を削除しました。')),
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                ),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('この試合を削除する'),
+              ),
+              const SizedBox(height: 10),
               ElevatedButton(
                 onPressed: () {
                   Navigator.of(ctx).pop();
@@ -539,7 +697,8 @@ void _showEventDetailsBottomSheet(BuildContext context, String eventId) async {
       barrierDismissible: true,
       builder: (dialogContext) {
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),

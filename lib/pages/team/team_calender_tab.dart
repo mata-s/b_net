@@ -13,6 +13,7 @@ class TeamCalenderTab extends StatelessWidget {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
+          primary: false,
           toolbarHeight: 0,
           bottom: const TabBar(
             tabs: [

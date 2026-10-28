@@ -3,6 +3,8 @@ dotenv.config();
 
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore, Timestamp, FieldValue} from "firebase-admin/firestore";
+import {getAuth} from "firebase-admin/auth";
+import {getStorage} from "firebase-admin/storage";
 import {getMessaging} from "firebase-admin/messaging";
 import * as functions from "firebase-functions";
 import {onRequest} from "firebase-functions/v2/https";
@@ -12,11 +14,59 @@ import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 import {CloudTasksClient} from "@google-cloud/tasks";
 import {defineSecret} from "firebase-functions/params";
+import {createHash, randomBytes} from "node:crypto";
 
 initializeApp();
 const db = getFirestore();
 const client = new CloudTasksClient();
 const messaging = getMessaging();
+
+/**
+ * 再認証直後のユーザー自身からの要求に限り、アカウントを削除する。
+ * users/{uid} 配下はサブコレクションを含めて再帰削除する。
+ */
+export const deleteOwnAccount = onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "ログインが必要です。",
+    );
+  }
+
+  const uid = request.auth.uid;
+  const authTime = Number(request.auth.token.auth_time || 0);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (authTime <= 0 || nowSeconds - authTime > 5 * 60) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "再認証してからもう一度お試しください。",
+    );
+  }
+
+  try {
+    // プロフィール画像は存在する場合だけ削除する。
+    try {
+      await getStorage().bucket().file(`profile_images/${uid}_profile.jpg`)
+          .delete({ignoreNotFound: true});
+    } catch (storageError) {
+      console.warn("Failed to delete profile image", {uid, storageError});
+    }
+
+    // 親ドキュメントだけでなく games / stats / goals 等も削除する。
+    await db.recursiveDelete(db.collection("users").doc(uid));
+
+    // データ削除完了後に Authentication のアカウントを削除する。
+    await getAuth().deleteUser(uid);
+
+    return {success: true};
+  } catch (error) {
+    console.error("deleteOwnAccount failed", {uid, error});
+    throw new functions.https.HttpsError(
+        "internal",
+        "アカウントの削除に失敗しました。",
+    );
+  }
+});
 
 const project =
   process.env.GCLOUD_PROJECT ||
@@ -67,6 +117,8 @@ export const addGameData = onCall(async (request) => {
     stealsAttempts,
     homeRunsAllowed,
     pitchCount,
+    inputMode,
+    recordedSections,
   } = data;
 
   if (!uid || typeof uid !== "string") {
@@ -108,6 +160,17 @@ export const addGameData = onCall(async (request) => {
     atBats: atBats || [],
     caughtStealingByRunner: caughtStealingByRunner || 0,
     stealsAttempts: stealsAttempts || 0,
+    inputMode: inputMode === "simple" ? "simple" : "detailed",
+    recordedSections: recordedSections && typeof recordedSections === "object" ?
+      recordedSections : {
+        battingCore: true,
+        battingAdvanced: true,
+        pitchingCore: true,
+        pitchingAdvanced: true,
+        runningAdvanced: true,
+        fielding: true,
+        catching: true,
+      },
   };
 
 
@@ -147,6 +210,806 @@ export const addGameData = onCall(async (request) => {
   }
 });
 
+const editableGameFields = [
+  "matchIndex", "gameDate", "gameType", "location", "opponent", "steals",
+  "rbis", "runs", "memo", "inningsThrow", "strikeouts", "walks",
+  "hitByPitch", "earnedRuns", "runsAllowed", "hitsAllowed", "resultGame",
+  "outFraction", "putouts", "assists", "errors", "atBats",
+  "isCompleteGame", "isShutoutGame", "isSave", "isHold", "appearanceType",
+  "battersFaced", "caughtStealingByRunner", "caughtStealing",
+  "stolenBaseAttempts", "stealsAttempts", "homeRunsAllowed", "pitchCount",
+  "inputMode", "recordedSections",
+];
+
+/**
+ * 指定コレクションを、計算済みMapの内容で置き換える。
+ * @param {FirebaseFirestore.CollectionReference} collectionRef 対象コレクション
+ * @param {Map<string, Object>} rebuiltDocs 再構築後のドキュメント
+ * @param {function(FirebaseFirestore.QueryDocumentSnapshot): boolean}
+ * shouldDelete 削除対象判定
+ */
+async function replaceDerivedDocuments(
+    collectionRef, rebuiltDocs, shouldDelete = () => true,
+) {
+  const existingSnapshot = await collectionRef.get();
+  const operations = [];
+
+  for (const doc of existingSnapshot.docs) {
+    if (shouldDelete(doc) && !rebuiltDocs.has(doc.id)) {
+      operations.push({type: "delete", ref: doc.ref});
+    }
+  }
+  for (const [id, value] of rebuiltDocs.entries()) {
+    operations.push({type: "set", ref: collectionRef.doc(id), value});
+  }
+
+  for (let start = 0; start < operations.length; start += 450) {
+    const batch = db.batch();
+    for (const operation of operations.slice(start, start + 450)) {
+      if (operation.type === "delete") {
+        batch.delete(operation.ref);
+      } else {
+        batch.set(operation.ref, operation.value, {merge: false});
+      }
+    }
+    await batch.commit();
+  }
+}
+
+/**
+ * users/{uid}/games を唯一の正として、個人集計を最初から作り直す。
+ * 編集前の値を差し引く方式にしないことで、日付・試合種別・対戦相手の
+ * 変更にも安全に対応する。
+ * @param {string} uid ユーザーID
+ * @return {Promise<{gameCount: number, representativeGameIds: string[]}>}
+ */
+async function rebuildUserGameAggregates(uid) {
+  const [userSnapshot, gamesSnapshot] = await Promise.all([
+    db.collection("users").doc(uid).get(),
+    db.collection("users").doc(uid).collection("games")
+        .orderBy("gameDate", "asc").get(),
+  ]);
+  const userData = userSnapshot.data() || {};
+  const positions = Array.isArray(userData.positions) ? userData.positions : [];
+  const isPitcher = positions.includes("投手");
+  const statsById = new Map();
+  const teamLocationStatsById = new Map();
+  const representativeByYear = new Map();
+  let currentHitStreak = 0;
+  let bestHitStreak = 0;
+  let bestHitStreakYear = null;
+  let currentOnBaseStreak = 0;
+  let bestOnBaseStreak = 0;
+  let bestOnBaseStreakYear = null;
+  let currentNoStrikeoutStreak = 0;
+  let bestNoStrikeoutStreak = 0;
+  let bestNoStrikeoutStreakYear = null;
+  let consecutiveHitCount = 0;
+  let bestConsecutiveHitCount = 0;
+  let bestConsecutiveHitCountYear = null;
+  let consecutiveOnBaseCount = 0;
+  let bestConsecutiveOnBaseCount = 0;
+  let bestConsecutiveOnBaseCountYear = null;
+  let consecutiveNoStrikeoutCount = 0;
+  let bestConsecutiveNoStrikeoutCount = 0;
+  let bestConsecutiveNoStrikeoutCountYear = null;
+  const multiHitAwardDates = new Set();
+  const cycleHitAwardDates = new Set();
+
+  for (const gameDoc of gamesSnapshot.docs) {
+    const gameData = gameDoc.data() || {};
+    const rawDate = gameData.gameDate;
+    const gameDate = rawDate && typeof rawDate.toDate === "function" ?
+      rawDate.toDate() : new Date(rawDate);
+    if (!(gameDate instanceof Date) || Number.isNaN(gameDate.getTime())) {
+      console.warn(`Skip game with invalid date: ${uid}/${gameDoc.id}`);
+      continue;
+    }
+
+    const year = gameDate.getFullYear();
+    const month = gameDate.getMonth() + 1;
+    const gameType = gameData.gameType || "unknown";
+    const categoryIds = [
+      "results_stats_all",
+      `results_stats_${year}_${month}`,
+      `results_stats_${year}_all`,
+      `results_stats_${year}_${month}_${gameType}`,
+      `results_stats_${year}_${gameType}_all`,
+      `results_stats_${gameType}_all`,
+    ];
+    const pitchingDocs = isPitcher ? [gameData] : [];
+    const fieldingDocs = [gameData];
+
+    for (const categoryId of categoryIds) {
+      const current = statsById.get(categoryId) || {};
+      const updated = calculateUpdatedStatistics(
+          current, gameData, pitchingDocs, fieldingDocs,
+      );
+      updated.includedGameIds = [
+        ...(current.includedGameIds || []),
+        gameDoc.id,
+      ];
+      updated.gameDate = rawDate;
+      statsById.set(categoryId, updated);
+    }
+
+    for (const [prefix, rawValue] of [
+      ["team", gameData.opponent],
+      ["location", gameData.location],
+    ]) {
+      const value = String(rawValue || "unknown");
+      const documentId = `${prefix}_${value}`;
+      const current = teamLocationStatsById.get(documentId) || {};
+      teamLocationStatsById.set(
+          documentId,
+          calculateUpdatedStatistics(
+              current, gameData, [gameData], fieldingDocs,
+          ),
+      );
+    }
+
+    if (!representativeByYear.has(year)) {
+      representativeByYear.set(year, gameDoc.id);
+    }
+
+    const plateResults = Array.isArray(gameData.atBats) ? gameData.atBats : [];
+    const streaks = calculateStreaks(plateResults);
+    currentHitStreak = streaks.hitStreakContinues ? currentHitStreak + 1 : 0;
+    currentOnBaseStreak = streaks.onBaseStreakContinues ?
+      currentOnBaseStreak + 1 : 0;
+    currentNoStrikeoutStreak = streaks.noStrikeoutStreakContinues ?
+      currentNoStrikeoutStreak + 1 : 0;
+    if (currentHitStreak > bestHitStreak) {
+      bestHitStreak = currentHitStreak;
+      bestHitStreakYear = year;
+    }
+    if (currentOnBaseStreak > bestOnBaseStreak) {
+      bestOnBaseStreak = currentOnBaseStreak;
+      bestOnBaseStreakYear = year;
+    }
+    if (currentNoStrikeoutStreak > bestNoStrikeoutStreak) {
+      bestNoStrikeoutStreak = currentNoStrikeoutStreak;
+      bestNoStrikeoutStreakYear = year;
+    }
+
+    const results = plateResults.map((ab) => ab.result || "");
+    const hitResults = ["内野安打", "単打", "二塁打", "三塁打", "本塁打"];
+    const onBaseResults = [...hitResults, "四球", "死球"];
+    const strikeoutResults = [
+      "空振り三振", "見逃し三振", "振り逃げ", "スリーバント失敗",
+    ];
+    const hitsThisGame = results.filter((result) =>
+      hitResults.includes(result)).length;
+    const gameDateKey = gameDate.toISOString().split("T")[0];
+    if (hitsThisGame >= 3) multiHitAwardDates.add(gameDateKey);
+    if (
+      results.some((result) => ["内野安打", "単打"].includes(result)) &&
+      results.includes("二塁打") && results.includes("三塁打") &&
+      results.includes("本塁打")
+    ) {
+      cycleHitAwardDates.add(gameDateKey);
+    }
+
+    for (const atBat of plateResults) {
+      const result = atBat.result || "";
+      consecutiveHitCount = hitResults.includes(result) ?
+        consecutiveHitCount + 1 : 0;
+      consecutiveOnBaseCount = onBaseResults.includes(result) ?
+        consecutiveOnBaseCount + 1 : 0;
+      const isStrikeout = strikeoutResults.includes(result) ||
+        atBat.buntDetail === "スリーバント失敗";
+      consecutiveNoStrikeoutCount = isStrikeout ?
+        0 : consecutiveNoStrikeoutCount + 1;
+      if (consecutiveHitCount > bestConsecutiveHitCount) {
+        bestConsecutiveHitCount = consecutiveHitCount;
+        bestConsecutiveHitCountYear = year;
+      }
+      if (consecutiveOnBaseCount > bestConsecutiveOnBaseCount) {
+        bestConsecutiveOnBaseCount = consecutiveOnBaseCount;
+        bestConsecutiveOnBaseCountYear = year;
+      }
+      if (consecutiveNoStrikeoutCount > bestConsecutiveNoStrikeoutCount) {
+        bestConsecutiveNoStrikeoutCount = consecutiveNoStrikeoutCount;
+        bestConsecutiveNoStrikeoutCountYear = year;
+      }
+    }
+  }
+
+  await replaceDerivedDocuments(
+      db.collection("users").doc(uid).collection("stats"),
+      statsById,
+      (doc) => doc.id.startsWith("results_stats_"),
+  );
+  await replaceDerivedDocuments(
+      db.collection("users").doc(uid).collection("teamLocationStats"),
+      teamLocationStatsById,
+  );
+  await db.collection("users").doc(uid).set({
+    currentHitStreak,
+    bestHitStreak,
+    bestHitStreakYear,
+    currentOnBaseStreak,
+    bestOnBaseStreak,
+    bestOnBaseStreakYear,
+    currentNoStrikeoutStreak,
+    bestNoStrikeoutStreak,
+    bestNoStrikeoutStreakYear,
+    consecutiveHitCount,
+    bestConsecutiveHitCount,
+    bestConsecutiveHitCountYear,
+    consecutiveOnBaseCount,
+    bestConsecutiveOnBaseCount,
+    bestConsecutiveOnBaseCountYear,
+    consecutiveNoStrikeoutCount,
+    bestConsecutiveNoStrikeoutCount,
+    bestConsecutiveNoStrikeoutCountYear,
+    multiHitAwardDates: Array.from(multiHitAwardDates),
+    cycleHitAwardDates: Array.from(cycleHitAwardDates),
+  }, {merge: true});
+
+  return {
+    gameCount: gamesSnapshot.size,
+    representativeGameIds: Array.from(representativeByYear.values()),
+  };
+}
+
+// 差分更新に異常があった場合の復旧用。通常の試合修正では呼び出さない。
+export const rebuildMyGameStatistics = onCall(
+    {timeoutSeconds: 540},
+    async (request) => {
+      if (!request.auth) {
+        throw new functions.https.HttpsError(
+            "unauthenticated", "Authentication is required.",
+        );
+      }
+      const result = await rebuildUserGameAggregates(request.auth.uid);
+      await db.collection("users").doc(request.auth.uid).set({
+        statsRebuildPending: false,
+        streaksRebuildPending: false,
+        statsRebuiltAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return {success: true, rebuiltGames: result.gameCount};
+    },
+);
+
+// 順序依存の連続記録と差分集計を、編集ユーザーだけ夜間に検算・修復する。
+export const repairEditedGameStatisticsDaily = onSchedule(
+    {
+      // 他の深夜バッチと重ならず、月曜1:30の個人ランキング生成より前に検算を完了させる。
+      schedule: "30 23 * * *",
+      timeZone: "Asia/Tokyo",
+      timeoutSeconds: 1800,
+    },
+    async () => {
+      const pendingUsers = await db.collection("users")
+          .where("streaksRebuildPending", "==", true)
+          .limit(100)
+          .get();
+      for (const userDoc of pendingUsers.docs) {
+        try {
+          await rebuildUserGameAggregates(userDoc.id);
+          await userDoc.ref.set({
+            streaksRebuildPending: false,
+            statsRebuildPending: false,
+            statsRebuiltAt: FieldValue.serverTimestamp(),
+          }, {merge: true});
+        } catch (error) {
+          console.error(`Nightly stats repair failed: ${userDoc.id}`, error);
+        }
+      }
+      console.log(`Nightly stats repair completed: ${pendingUsers.size}`);
+    },
+);
+
+const derivedStatFields = new Set([
+  "battingAverage", "onBasePercentage", "sluggingPercentage", "ops", "rc",
+  "fieldingPercentage", "catcherStealingRate", "winRate", "era",
+  "totalHoldPoints", "advancedStats",
+]);
+
+/**
+ * 加算可能な数値・数値Mapだけを対象へ反映する。
+ * @param {Object} target 現在の集計
+ * @param {Object} contribution 1試合分の集計
+ * @param {number} sign 追加は1、減算は-1
+ */
+function applyStatContribution(target, contribution, sign) {
+  for (const [key, value] of Object.entries(contribution)) {
+    if (derivedStatFields.has(key) || key === "gameDate" ||
+        key === "includedGameIds" || key === "isPitcher") continue;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      const next = (Number(target[key]) || 0) + (value * sign);
+      target[key] = Math.abs(next) < 1e-10 ? 0 : Math.max(0, next);
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      const child = target[key] && typeof target[key] === "object" ?
+        {...target[key]} : {};
+      applyStatContribution(child, value, sign);
+      target[key] = child;
+    }
+  }
+}
+
+/**
+ * 簡単入力導入前の累計へ、従来データを詳細入力済みとして補完する。
+ * @param {Object} stats 累計データ
+ */
+function ensureLegacyCoverageCounters(stats) {
+  if (stats.battingRecordedBats === undefined) {
+    stats.battingRecordedBats = stats.totalBats || 0;
+  }
+  if (stats.battingAdvancedRecordedBats === undefined) {
+    stats.battingAdvancedRecordedBats = stats.totalBats || 0;
+  }
+  if (stats.pitchingRecordedAppearances === undefined) {
+    stats.pitchingRecordedAppearances = stats.totalAppearances || 0;
+  }
+  if (stats.pitchingAdvancedRecordedAppearances === undefined) {
+    stats.pitchingAdvancedRecordedAppearances = stats.totalAppearances || 0;
+  }
+  if (stats.runningAdvancedRecordedGames === undefined) {
+    stats.runningAdvancedRecordedGames = stats.totalGames || 0;
+  }
+  if (stats.fieldingRecordedGames === undefined) {
+    stats.fieldingRecordedGames = stats.totalGames || 0;
+  }
+  if (stats.catchingRecordedGames === undefined) {
+    stats.catchingRecordedGames = stats.totalGames || 0;
+  }
+}
+
+/**
+ * 加算項目から割合・率を再計算する。
+ * @param {Object} stats 集計
+ */
+function recalculateDerivedStatFields(stats) {
+  const atBats = stats.atBats || 0;
+  const hits = stats.hits || 0;
+  const walks = stats.totalFourBalls || 0;
+  const hitByPitch = stats.totalHitByAPitch || 0;
+  const sacrificeFlies = stats.totalSacrificeFly || 0;
+  const totalBases = stats.totalBases || 0;
+  stats.battingAverage = atBats > 0 ? hits / atBats : 0;
+  const onBaseDenominator = atBats + walks + hitByPitch + sacrificeFlies;
+  stats.onBasePercentage = onBaseDenominator > 0 ?
+    (hits + walks + hitByPitch) / onBaseDenominator : 0;
+  stats.sluggingPercentage = atBats > 0 ? totalBases / atBats : 0;
+  stats.ops = stats.onBasePercentage + stats.sluggingPercentage;
+  const rcDenominator = (stats.totalBats || 0) + walks;
+  stats.rc = rcDenominator > 0 ?
+    ((hits + walks) * totalBases) / rcDenominator : 0;
+
+  const fieldingChances = (stats.totalPutouts || 0) +
+    (stats.totalAssists || 0) + (stats.totalErrors || 0);
+  stats.fieldingPercentage = fieldingChances > 0 ?
+    ((stats.totalPutouts || 0) + (stats.totalAssists || 0)) /
+      fieldingChances : 0;
+  stats.catcherStealingRate = (stats.totalStolenBaseAttempts || 0) > 0 ?
+    (stats.totalCaughtStealing || 0) / stats.totalStolenBaseAttempts : 0;
+  const decisions = (stats.totalWins || 0) + (stats.totalLosses || 0);
+  stats.winRate = decisions > 0 ? (stats.totalWins || 0) / decisions : 0;
+  stats.totalHoldPoints =
+    (stats.totalReliefWins || 0) + (stats.totalHolds || 0);
+  stats.era = calculateERA(
+      stats.totalEarnedRuns || 0,
+      stats.totalInningsPitched || 0,
+  );
+  stats.isPitcher = (stats.totalAppearances || 0) > 0 ||
+    (stats.totalInningsPitched || 0) > 0;
+}
+
+/**
+ * 試合が属する個人集計カテゴリを返す。
+ * @param {Object} gameData 試合
+ * @return {string[]} ドキュメントID
+ */
+function getGameStatCategoryIds(gameData) {
+  const rawDate = gameData.gameDate;
+  const date = rawDate && typeof rawDate.toDate === "function" ?
+    rawDate.toDate() : new Date(rawDate);
+  if (Number.isNaN(date.getTime())) return [];
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const gameType = gameData.gameType || "unknown";
+  return [
+    "results_stats_all",
+    `results_stats_${year}_${month}`,
+    `results_stats_${year}_all`,
+    `results_stats_${year}_${month}_${gameType}`,
+    `results_stats_${year}_${gameType}_all`,
+    `results_stats_${gameType}_all`,
+  ];
+}
+
+/**
+ * 編集前後の1試合の差分だけを集計へ反映する。
+ * @param {string} uid ユーザーID
+ * @param {string} gameId 試合ID
+ * @param {Object} oldGame 編集前
+ * @param {Object} newGame 編集後
+ * @param {boolean} isPitcher 投手か
+ * @param {FirebaseFirestore.DocumentReference} gameRef 試合参照
+ * @param {Object} gameUpdates 更新内容
+ */
+async function applyGameStatisticsDelta(
+    uid, gameId, oldGame, newGame, isPitcher, gameRef, gameUpdates,
+) {
+  const oldCategoryIds = new Set(getGameStatCategoryIds(oldGame));
+  const newCategoryIds = new Set(getGameStatCategoryIds(newGame));
+  const oldContribution = calculateUpdatedStatistics(
+      {}, oldGame, isPitcher ? [oldGame] : [], [oldGame],
+  );
+  const newContribution = calculateUpdatedStatistics(
+      {}, newGame, isPitcher ? [newGame] : [], [newGame],
+  );
+  const locationOldContribution = calculateUpdatedStatistics(
+      {}, oldGame, [oldGame], [oldGame],
+  );
+  const locationNewContribution = calculateUpdatedStatistics(
+      {}, newGame, [newGame], [newGame],
+  );
+  const statsCollection = db.collection("users").doc(uid).collection("stats");
+  const teamLocationCollection = db.collection("users").doc(uid)
+      .collection("teamLocationStats");
+  const plans = [];
+
+  for (const id of new Set([...oldCategoryIds, ...newCategoryIds])) {
+    plans.push({
+      ref: statsCollection.doc(id),
+      remove: oldCategoryIds.has(id) ? oldContribution : null,
+      add: newCategoryIds.has(id) ? newContribution : null,
+      isCategory: true,
+    });
+  }
+
+  const oldLocationIds = new Set([
+    `team_${String(oldGame.opponent || "unknown")}`,
+    `location_${String(oldGame.location || "unknown")}`,
+  ]);
+  const newLocationIds = new Set([
+    `team_${String(newGame.opponent || "unknown")}`,
+    `location_${String(newGame.location || "unknown")}`,
+  ]);
+  for (const id of new Set([...oldLocationIds, ...newLocationIds])) {
+    plans.push({
+      ref: teamLocationCollection.doc(id),
+      remove: oldLocationIds.has(id) ? locationOldContribution : null,
+      add: newLocationIds.has(id) ? locationNewContribution : null,
+      isCategory: false,
+    });
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const snapshots = [];
+    for (const plan of plans) {
+      snapshots.push(await transaction.get(plan.ref));
+    }
+    for (let i = 0; i < plans.length; i++) {
+      const plan = plans[i];
+      const snapshot = snapshots[i];
+      const stats = snapshot.exists ? {...snapshot.data()} : {};
+      ensureLegacyCoverageCounters(stats);
+      if (plan.remove) applyStatContribution(stats, plan.remove, -1);
+      if (plan.add) applyStatContribution(stats, plan.add, 1);
+      recalculateDerivedStatFields(stats);
+      delete stats.advancedStats;
+
+      if (plan.isCategory) {
+        const includedIds = new Set(stats.includedGameIds || []);
+        if (plan.remove) includedIds.delete(gameId);
+        if (plan.add) includedIds.add(gameId);
+        stats.includedGameIds = Array.from(includedIds);
+        if (plan.add) stats.gameDate = newGame.gameDate;
+      }
+
+      if ((stats.totalGames || 0) <= 0) {
+        transaction.delete(plan.ref);
+      } else {
+        transaction.set(plan.ref, stats, {merge: false});
+      }
+    }
+    transaction.update(gameRef, gameUpdates);
+  });
+  return plans.length;
+}
+
+/**
+ * 削除する1試合の寄与だけを関連する累計から差し引き、試合を削除する。
+ * @param {string} uid ユーザーID
+ * @param {string} gameId 試合ID
+ * @param {Object} oldGame 削除前の試合
+ * @param {boolean} isPitcher 投手か
+ * @param {FirebaseFirestore.DocumentReference} gameRef 試合参照
+ * @return {Promise<number>} 更新対象数
+ */
+async function applyGameDeletionDelta(
+    uid, gameId, oldGame, isPitcher, gameRef,
+) {
+  const contribution = calculateUpdatedStatistics(
+      {}, oldGame, isPitcher ? [oldGame] : [], [oldGame],
+  );
+  const locationContribution = calculateUpdatedStatistics(
+      {}, oldGame, [oldGame], [oldGame],
+  );
+  const statsCollection = db.collection("users").doc(uid).collection("stats");
+  const teamLocationCollection = db.collection("users").doc(uid)
+      .collection("teamLocationStats");
+  const plans = getGameStatCategoryIds(oldGame).map((id) => ({
+    ref: statsCollection.doc(id),
+    remove: contribution,
+    isCategory: true,
+  }));
+
+  for (const id of new Set([
+    `team_${String(oldGame.opponent || "unknown")}`,
+    `location_${String(oldGame.location || "unknown")}`,
+  ])) {
+    plans.push({
+      ref: teamLocationCollection.doc(id),
+      remove: locationContribution,
+      isCategory: false,
+    });
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const snapshots = [];
+    for (const plan of plans) {
+      snapshots.push(await transaction.get(plan.ref));
+    }
+    for (let i = 0; i < plans.length; i++) {
+      const plan = plans[i];
+      const snapshot = snapshots[i];
+      if (!snapshot.exists) continue;
+
+      const stats = {...snapshot.data()};
+      ensureLegacyCoverageCounters(stats);
+      applyStatContribution(stats, plan.remove, -1);
+      recalculateDerivedStatFields(stats);
+      delete stats.advancedStats;
+
+      if (plan.isCategory) {
+        const includedIds = new Set(stats.includedGameIds || []);
+        includedIds.delete(gameId);
+        stats.includedGameIds = Array.from(includedIds);
+      }
+
+      if ((stats.totalGames || 0) <= 0) {
+        transaction.delete(plan.ref);
+      } else {
+        transaction.set(plan.ref, stats, {merge: false});
+      }
+    }
+    transaction.delete(gameRef);
+  });
+  return plans.length;
+}
+
+/**
+ * 試合を更新し、編集前後の差分だけを関連する累計へ反映する。
+ */
+export const updateGameData = onCall({timeoutSeconds: 300}, async (request) => {
+  const {uid, gameId, gameData} = request.data || {};
+  if (!request.auth || request.auth.uid !== uid) {
+    throw new functions.https.HttpsError(
+        "permission-denied", "You can only edit your own games.",
+    );
+  }
+  if (!gameId || typeof gameId !== "string" || !gameData) {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "gameId and gameData are required.",
+    );
+  }
+
+  const gameRef = db.collection("users").doc(uid)
+      .collection("games").doc(gameId);
+  const existingSnapshot = await gameRef.get();
+  if (!existingSnapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "Game not found.");
+  }
+
+  const updates = {};
+  for (const field of editableGameFields) {
+    if (Object.prototype.hasOwnProperty.call(gameData, field)) {
+      updates[field] = gameData[field];
+    }
+  }
+  if (updates.gameDate) {
+    const parsedDate = new Date(updates.gameDate);
+    if (Number.isNaN(parsedDate.getTime())) {
+      throw new functions.https.HttpsError(
+          "invalid-argument", "Invalid game date.",
+      );
+    }
+    updates.gameDate = Timestamp.fromDate(new Date(Date.UTC(
+        parsedDate.getUTCFullYear(),
+        parsedDate.getUTCMonth(),
+        parsedDate.getUTCDate(),
+    )));
+  }
+  const userRef = db.collection("users").doc(uid);
+  const userSnapshot = await userRef.get();
+  const updatedUserData = userSnapshot.data() || {};
+  const positions = Array.isArray(updatedUserData.positions) ?
+    updatedUserData.positions : [];
+  const oldGame = existingSnapshot.data() || {};
+  const newGame = {...oldGame, ...updates};
+  updates.editedAt = FieldValue.serverTimestamp();
+
+  let updatedDocumentCount = 0;
+  try {
+    updatedDocumentCount = await applyGameStatisticsDelta(
+        uid,
+        gameId,
+        oldGame,
+        newGame,
+        positions.includes("投手"),
+        gameRef,
+        updates,
+    );
+    await userRef.set({
+      statsRebuildPending: false,
+      statsUpdatedAt: FieldValue.serverTimestamp(),
+      streaksRebuildPending: true,
+    }, {merge: true});
+  } catch (error) {
+    console.error(`Failed to update game stats for ${uid}/${gameId}`, error);
+    throw new functions.https.HttpsError(
+        "internal",
+        "The game and statistics could not be updated.",
+    );
+  }
+
+  try {
+    const teamIds = Array.isArray(updatedUserData.teams) ?
+      updatedUserData.teams : [];
+    await Promise.all(teamIds.map((teamId) =>
+      enqueueTeamStatsRefreshTask(teamId)));
+    await Promise.all(teamIds.map((teamId) =>
+      enqueueTeamRankingRefresh(teamId)));
+
+    const derivedStatsQueue = client.queuePath(
+        project, location, "team-location-stats-queue",
+    );
+    await client.createTask({
+      parent: derivedStatsQueue,
+      task: {
+        httpRequest: {
+          httpMethod: "POST",
+          url: "https://calculateadvancedstats-etndg3x4ra-uc.a.run.app",
+          headers: {"Content-Type": "application/json"},
+          body: Buffer.from(JSON.stringify({
+            uid,
+            gameId,
+          })).toString("base64"),
+        },
+      },
+    });
+    await client.createTask({
+      parent: derivedStatsQueue,
+      task: {
+        httpRequest: {
+          httpMethod: "POST",
+          url: "https://usergoalprogresshandler-etndg3x4ra-uc.a.run.app",
+          headers: {"Content-Type": "application/json"},
+          body: Buffer.from(JSON.stringify({uid})).toString("base64"),
+        },
+      },
+    });
+    await userRef.set({derivedStatsRefreshPending: false}, {merge: true});
+  } catch (error) {
+    // 試合と主要集計は既に原子的に保存済み。派生更新失敗は再試行可能。
+    console.error(`Failed to enqueue derived refresh for ${uid}`, error);
+    await userRef.set({derivedStatsRefreshPending: true}, {merge: true});
+  }
+
+  return {
+    success: true,
+    gameId,
+    updatedDocuments: updatedDocumentCount,
+  };
+});
+
+/**
+ * 自分の試合を削除し、その試合分を個人・相手別・球場別集計から減算する。
+ */
+export const deleteGameData = onCall({timeoutSeconds: 300}, async (request) => {
+  const {gameId} = request.data || {};
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated", "Authentication is required.",
+    );
+  }
+  if (!gameId || typeof gameId !== "string") {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "gameId is required.",
+    );
+  }
+
+  const uid = request.auth.uid;
+  const userRef = db.collection("users").doc(uid);
+  const gameRef = userRef.collection("games").doc(gameId);
+  const [userSnapshot, gameSnapshot] = await Promise.all([
+    userRef.get(),
+    gameRef.get(),
+  ]);
+  if (!gameSnapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "Game not found.");
+  }
+
+  const userData = userSnapshot.data() || {};
+  const positions = Array.isArray(userData.positions) ?
+    userData.positions : [];
+  const oldGame = gameSnapshot.data() || {};
+  const rawDate = oldGame.gameDate;
+  const gameDate = rawDate && typeof rawDate.toDate === "function" ?
+    rawDate.toDate() : new Date(rawDate);
+  const gameYear = Number.isNaN(gameDate.getTime()) ? null :
+    gameDate.getFullYear();
+
+  let updatedDocumentCount = 0;
+  try {
+    updatedDocumentCount = await applyGameDeletionDelta(
+        uid, gameId, oldGame, positions.includes("投手"), gameRef,
+    );
+    await userRef.set({
+      statsRebuildPending: false,
+      statsUpdatedAt: FieldValue.serverTimestamp(),
+      streaksRebuildPending: true,
+    }, {merge: true});
+  } catch (error) {
+    console.error(`Failed to delete game stats for ${uid}/${gameId}`, error);
+    throw new functions.https.HttpsError(
+        "internal", "The game and statistics could not be deleted.",
+    );
+  }
+
+  try {
+    const teamIds = Array.isArray(userData.teams) ? userData.teams : [];
+    await Promise.all(teamIds.map((teamId) =>
+      enqueueTeamStatsRefreshTask(teamId)));
+    await Promise.all(teamIds.map((teamId) =>
+      enqueueTeamRankingRefresh(teamId)));
+
+    const derivedStatsQueue = client.queuePath(
+        project, location, "team-location-stats-queue",
+    );
+    if (gameYear !== null) {
+      await client.createTask({
+        parent: derivedStatsQueue,
+        task: {
+          httpRequest: {
+            httpMethod: "POST",
+            url: "https://calculateadvancedstats-etndg3x4ra-uc.a.run.app",
+            headers: {"Content-Type": "application/json"},
+            body: Buffer.from(JSON.stringify({uid, year: gameYear}))
+                .toString("base64"),
+          },
+        },
+      });
+    }
+    await client.createTask({
+      parent: derivedStatsQueue,
+      task: {
+        httpRequest: {
+          httpMethod: "POST",
+          url: "https://usergoalprogresshandler-etndg3x4ra-uc.a.run.app",
+          headers: {"Content-Type": "application/json"},
+          body: Buffer.from(JSON.stringify({uid})).toString("base64"),
+        },
+      },
+    });
+    await userRef.set({derivedStatsRefreshPending: false}, {merge: true});
+  } catch (error) {
+    console.error(`Failed to enqueue derived refresh for ${uid}`, error);
+    await userRef.set({derivedStatsRefreshPending: true}, {merge: true});
+  }
+
+  return {
+    success: true,
+    gameId,
+    updatedDocuments: updatedDocumentCount,
+  };
+});
+
 /**
  * Firestoreに新しいゲームデータが追加されたときに実行されるトリガー（v2）
  */
@@ -156,6 +1019,13 @@ export const onGameDataAdded = onDocumentCreated(
       const gameData = event.data.data();
       const uid = event.params.uid;
       const gameId = event.params.gameId;
+
+      if (gameData.skipStatisticsTrigger === true) {
+        console.log(
+            `Skip incremental stats for migrated game: ${uid}/${gameId}`,
+        );
+        return;
+      }
 
       // 統計を更新
       try {
@@ -1014,6 +1884,46 @@ function convertOutsToInnings(outs) {
 }
 
 /**
+ * 簡単入力導入前の試合は全区分を記録済みとして扱う。
+ * @param {Object} gameData 試合データ
+ * @return {Object} 区分ごとの記録有無
+ */
+function getRecordedSections(gameData) {
+  const sections = gameData && gameData.recordedSections;
+  if (!sections || typeof sections !== "object") {
+    return {
+      battingCore: true,
+      battingAdvanced: true,
+      pitchingCore: true,
+      pitchingAdvanced: true,
+      runningAdvanced: true,
+      fielding: true,
+      catching: true,
+    };
+  }
+  return {
+    battingCore: sections.battingCore === true,
+    battingAdvanced: sections.battingAdvanced === true,
+    pitchingCore: sections.pitchingCore === true,
+    pitchingAdvanced: sections.pitchingAdvanced === true,
+    runningAdvanced: sections.runningAdvanced === true,
+    fielding: sections.fielding === true,
+    catching: sections.catching === true,
+  };
+}
+
+/**
+ * 新しい入力範囲カウンターがない累計では、従来値を記録済みとして使う。
+ * @param {Object} stats 累計
+ * @param {string} key カウンター名
+ * @param {string} fallbackKey 従来の基準値
+ * @return {number} 現在値
+ */
+function getCoverageCounter(stats, key, fallbackKey) {
+  return stats[key] === undefined ? (stats[fallbackKey] || 0) : stats[key];
+}
+
+/**
  * 統計を更新するための関数
  * @param {Object} currentStats - 現在の統計データ
  * @param {Object} gameData - 新しいゲームデータ
@@ -1028,6 +1938,11 @@ function calculateUpdatedStatistics(
 
   const newStats =
   Array.isArray(gameData.atBats) ? calculateStats(gameData.atBats) : {};
+  const recordedSections = getRecordedSections(gameData);
+  const plateAppearanceCount = Array.isArray(gameData.atBats) ?
+    gameData.atBats.length : 0;
+  const isPitchingAppearance = ["先発", "中継ぎ", "抑え"]
+      .includes(gameData.appearanceType || "");
 
   updatedStats.hits =
    (currentStats.hits || 0) + newStats.hits;
@@ -1219,6 +2134,36 @@ function calculateUpdatedStatistics(
 
   // 試合数の統計を追加
   updatedStats.totalGames = (currentStats.totalGames || 0) + 1;
+  updatedStats.battingRecordedBats =
+    getCoverageCounter(currentStats, "battingRecordedBats", "totalBats") +
+    plateAppearanceCount;
+  updatedStats.battingAdvancedRecordedBats =
+    getCoverageCounter(
+        currentStats, "battingAdvancedRecordedBats", "totalBats",
+    ) +
+    (recordedSections.battingAdvanced ? plateAppearanceCount : 0);
+  updatedStats.pitchingRecordedAppearances =
+    getCoverageCounter(
+        currentStats, "pitchingRecordedAppearances", "totalAppearances",
+    ) +
+    (isPitchingAppearance ? 1 : 0);
+  updatedStats.pitchingAdvancedRecordedAppearances =
+    getCoverageCounter(
+        currentStats, "pitchingAdvancedRecordedAppearances",
+        "totalAppearances",
+    ) +
+    (isPitchingAppearance && recordedSections.pitchingAdvanced ? 1 : 0);
+  updatedStats.runningAdvancedRecordedGames =
+    getCoverageCounter(
+        currentStats, "runningAdvancedRecordedGames", "totalGames",
+    ) +
+    (recordedSections.runningAdvanced ? 1 : 0);
+  updatedStats.fieldingRecordedGames =
+    getCoverageCounter(currentStats, "fieldingRecordedGames", "totalGames") +
+    (recordedSections.fielding ? 1 : 0);
+  updatedStats.catchingRecordedGames =
+    getCoverageCounter(currentStats, "catchingRecordedGames", "totalGames") +
+    (recordedSections.catching ? 1 : 0);
 
   updatedStats.onBasePercentage =
   (updatedStats.hits + updatedStats.totalFourBalls +
@@ -1577,6 +2522,11 @@ export const onGameDataCreated =
 onDocumentCreated("users/{uid}/games/{gameId}", async (event) => {
   const uid = event.params.uid;
   const gameId = event.params.gameId;
+  const gameData = event.data.data();
+  if (gameData.skipStatisticsTrigger === true) {
+    console.log(`Skip derived tasks for migrated game: ${uid}/${gameId}`);
+    return;
+  }
 
   // Cloud Tasks のキューとリージョンを設定
   const teamLocationQueue = "team-location-stats-queue";
@@ -1710,26 +2660,29 @@ export const calculateAdvancedStats = onRequest(async (req, res) => {
     if (typeof body === "string") {
       body = JSON.parse(Buffer.from(body, "base64").toString());
     }
-    const {uid, gameId} = body;
+    const {uid, gameId, year: requestedYear} = body;
     if (!uid) return res.status(400).send("Missing uid");
 
     // どの年のデータか取得
-    let year = null;
-    try {
-      const gameSnap =
-      await db.collection("users").doc(uid)
-          .collection("games").doc(gameId).get();
-      if (!gameSnap.exists) return res.status(404).send("Game not found");
-      const gameData = gameSnap.data();
-      let gameDate;
-      if (gameData.gameDate instanceof Timestamp) {
-        gameDate = gameData.gameDate.toDate();
-      } else {
-        gameDate = new Date(gameData.gameDate);
+    let year = Number.isInteger(requestedYear) ? requestedYear : null;
+    if (year === null) {
+      if (!gameId) return res.status(400).send("Missing gameId or year");
+      try {
+        const gameSnap =
+        await db.collection("users").doc(uid)
+            .collection("games").doc(gameId).get();
+        if (!gameSnap.exists) return res.status(404).send("Game not found");
+        const gameData = gameSnap.data();
+        let gameDate;
+        if (gameData.gameDate instanceof Timestamp) {
+          gameDate = gameData.gameDate.toDate();
+        } else {
+          gameDate = new Date(gameData.gameDate);
+        }
+        year = gameDate.getFullYear();
+      } catch (e) {
+        return res.status(400).send("Failed to get game year");
       }
-      year = gameDate.getFullYear();
-    } catch (e) {
-      return res.status(400).send("Failed to get game year");
     }
 
     // 対象statsドキュメントID
@@ -1939,6 +2892,38 @@ export const calculateAdvancedStats = onRequest(async (req, res) => {
         buntOutsRate: stats.totalOuts > 0 ?
         stats.totalBuntOuts / stats.totalOuts : 0,
       };
+
+      const battingAdvancedComplete =
+        (stats.battingRecordedBats || 0) > 0 &&
+        stats.battingAdvancedRecordedBats === stats.battingRecordedBats;
+      if (!battingAdvancedComplete) {
+        adv.firstPitchSwingRate = null;
+        adv.firstPitchSwingSuccessRate = null;
+        adv.firstPitchHitRate = null;
+        adv.buntSuccessRate = null;
+        adv.swingRate = null;
+        adv.missSwingRate = null;
+        adv.avgPitchesPerAtBat = null;
+      }
+
+      const runningAdvancedComplete = totalGames > 0 &&
+        stats.runningAdvancedRecordedGames === totalGames;
+      if (!runningAdvancedComplete) adv.stealSuccessRate = null;
+
+      const pitchingAdvancedComplete =
+        (stats.pitchingRecordedAppearances || 0) > 0 &&
+        stats.pitchingAdvancedRecordedAppearances ===
+          stats.pitchingRecordedAppearances;
+      if (stats.isPitcher && !pitchingAdvancedComplete) {
+        for (const key of [
+          "battingAverageAllowed", "whip", "qsRate", "homeRunRate",
+          "avgPitchesPerBatter", "avgPitchesPerGame",
+          "avgHitByPitchPerGame", "avgWalksPerGame",
+          "avgBattersFacedPerGame", "avgRunsAllowedPerGame", "lobRate",
+        ]) {
+          adv[key] = null;
+        }
+      }
 
       // advancedStatsとして保存
       await db
@@ -4570,9 +5555,14 @@ export const createPrayerRanking = onSchedule(
         userData.positions && userData.positions.includes("投手");
         const teamIds = userData.teams || [];
         const playerName = userData.name || "不明";
+        const showTeamNameInRanking =
+          userData.showTeamNameInRanking === true;
 
-        const teamNames =
-    teamIds.map((teamId) => teamIdToNameMap[teamId] || "名前不明");
+        // 個人ランキング用の公開データ。未設定はプライバシー優先で非公開。
+        // チーム名だけでなくIDも除外し、プロフィール遷移から所属を辿れなくする。
+        const publicTeamIds = showTeamNameInRanking ? teamIds : [];
+        const teamNames = showTeamNameInRanking ?
+          teamIds.map((teamId) => teamIdToNameMap[teamId] || "名前不明") : [];
 
         // **📌 Cloud Tasks に月次ランキングのタスクを追加**
         const taskPayload = {
@@ -4581,7 +5571,7 @@ export const createPrayerRanking = onSchedule(
           month,
           userPrefecture,
           teamNames,
-          teamIds,
+          teamIds: publicTeamIds,
           playerName,
           isPitcher,
           age,
@@ -4717,6 +5707,10 @@ export const processMonthlyRanking = onRequest(async (req, res) => {
     onBasePercentage: monthlyData.onBasePercentage,
     ops: monthlyData.ops,
     rc: monthlyData.rc,
+    isBattingAdvancedComplete:
+      (monthlyData.battingRecordedBats || 0) > 0 &&
+      monthlyData.battingAdvancedRecordedBats ===
+        monthlyData.battingRecordedBats,
     age,
     isEligible: monthlyData.totalBats >= requiredBats, // 月次の規定打席
   };
@@ -4759,6 +5753,10 @@ export const processMonthlyRanking = onRequest(async (req, res) => {
       winRate: monthlyData.winRate,
       totalHoldPoints: monthlyData.totalHoldPoints,
       totalAppearances: monthlyData.totalAppearances,
+      isPitchingAdvancedComplete:
+        (monthlyData.pitchingRecordedAppearances || 0) > 0 &&
+        monthlyData.pitchingAdvancedRecordedAppearances ===
+          monthlyData.pitchingRecordedAppearances,
       age,
       isEligible: monthlyData.totalInningsPitched >= requiredInnings,
     };
@@ -4836,6 +5834,9 @@ export const processYearlyRanking = onRequest(async (req, res) => {
     ops: totalData.ops,
     age,
     rc: totalData.rc,
+    isBattingAdvancedComplete:
+      (totalData.battingRecordedBats || 0) > 0 &&
+      totalData.battingAdvancedRecordedBats === totalData.battingRecordedBats,
     isEligibleAll: totalData.totalBats >= requiredBatsTotal, // 年間の規定打席
   };
 
@@ -4874,6 +5875,10 @@ export const processYearlyRanking = onRequest(async (req, res) => {
       age,
       totalHoldPoints: totalData.totalHoldPoints,
       totalAppearances: totalData.totalAppearances,
+      isPitchingAdvancedComplete:
+        (totalData.pitchingRecordedAppearances || 0) > 0 &&
+        totalData.pitchingAdvancedRecordedAppearances ===
+          totalData.pitchingRecordedAppearances,
       isEligibleAll: totalData.totalInningsPitched >= requiredInningsTotal,
     };
 
@@ -5766,6 +6771,7 @@ async function saveMonthlyTop10RanksByPrefecture(
           onBasePercentage: p.onBasePercentage || 0,
           ops: p.ops || 0,
           rc: p.rc || 0,
+          isBattingAdvancedComplete: p.isBattingAdvancedComplete === true,
         }));
 
     if (top10.length > 0) {
@@ -5808,6 +6814,7 @@ async function saveMonthlyTop10RanksByPrefecture(
             onBasePercentage: p.onBasePercentage || 0,
             ops: p.ops || 0,
             rc: p.rc || 0,
+            isBattingAdvancedComplete: p.isBattingAdvancedComplete === true,
           }));
 
       if (top10Age.length > 0) {
@@ -5881,6 +6888,7 @@ async function saveMonthlyTop10RanksByPrefecturePitcher(
           winRate: p.winRate || 0,
           totalHoldPoints: p.totalHoldPoints || 0,
           totalAppearances: p.totalAppearances || 0,
+          isPitchingAdvancedComplete: p.isPitchingAdvancedComplete === true,
         }));
 
     if (top10.length > 0) {
@@ -5919,6 +6927,7 @@ async function saveMonthlyTop10RanksByPrefecturePitcher(
             winRate: p.winRate || 0,
             totalHoldPoints: p.totalHoldPoints || 0,
             totalAppearances: p.totalAppearances || 0,
+            isPitchingAdvancedComplete: p.isPitchingAdvancedComplete === true,
           }));
 
       if (top10Age.length > 0) {
@@ -6437,6 +7446,8 @@ async function saveTop10RanksByPrefecture(totalPlayersByPrefecture, year) {
               entry.onBasePercentage = player.onBasePercentage || 0;
               entry.ops = player.ops || 0;
               entry.rc = player.rc || 0;
+              entry.isBattingAdvancedComplete =
+                player.isBattingAdvancedComplete === true;
             }
 
             return entry;
@@ -6502,6 +7513,8 @@ async function saveTop10RanksByPrefecture(totalPlayersByPrefecture, year) {
                 entry.onBasePercentage = player.onBasePercentage || 0;
                 entry.ops = player.ops || 0;
                 entry.rc = player.rc || 0;
+                entry.isBattingAdvancedComplete =
+                  player.isBattingAdvancedComplete === true;
               }
 
               return entry;
@@ -6959,6 +7972,8 @@ async function saveTop10RanksByPrefecturePitcher(
                 winRate: p.winRate,
                 age: p.age,
                 totalHoldPoints: p.totalHoldPoints,
+                isPitchingAdvancedComplete:
+                  p.isPitchingAdvancedComplete === true,
               });
             }
 
@@ -7002,6 +8017,8 @@ async function saveTop10RanksByPrefecturePitcher(
                   totalLosses: p.totalLosses,
                   winRate: p.winRate,
                   totalHoldPoints: p.totalHoldPoints,
+                  isPitchingAdvancedComplete:
+                    p.isPitchingAdvancedComplete === true,
                 });
               }
 
@@ -10742,6 +11759,52 @@ export const onTeamGoalCreated = onDocumentCreated(
     },
 );
 
+// ================= チーム参加申請通知 =================
+export const onTeamJoinRequestCreated = onDocumentWritten(
+    "teams/{teamId}/joinRequests/{userId}",
+    async (event) => {
+      const beforeData = event.data && event.data.before.exists ?
+        event.data.before.data() || {} : {};
+      const afterData = event.data && event.data.after.exists ?
+        event.data.after.data() || {} : {};
+      if (beforeData.status === "pending" || afterData.status !== "pending") {
+        return;
+      }
+      const requestData = afterData;
+
+      const {teamId, userId} = event.params;
+      const teamSnapshot = await db.collection("teams").doc(teamId).get();
+      if (!teamSnapshot.exists) return;
+      const teamData = teamSnapshot.data() || {};
+      const ownerUid = teamData.createdBy;
+      if (!ownerUid) return;
+
+      const tokens = await getFcmTokensForUsers([ownerUid]);
+      if (!tokens.length) return;
+      await messaging.sendEachForMulticast({
+        notification: {
+          title: "チームへの参加申請",
+          body: `${requestData.userName || "ユーザー"} さんから申請が届きました`,
+        },
+        tokens,
+        data: {
+          type: "team_join_request",
+          teamId: String(teamId),
+          applicantUid: String(userId),
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+        },
+        android: {
+          priority: "high",
+          notification: {
+            sound: "default",
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          },
+        },
+        apns: {payload: {aps: {sound: "default"}}},
+      });
+    },
+);
+
 // ================= チーム招待通知 =================
 export const onTeamInviteCreated = onDocumentCreated(
     "users/{userId}/teamInvites/{inviteId}",
@@ -10773,6 +11836,17 @@ export const onTeamInviteCreated = onDocumentCreated(
 
       const teamData = teamSnap.data() || {};
       const teamName = teamData.teamName || "チーム";
+      const source = inviteData.source || "";
+      const notificationTitle = source === "join_request" ?
+        `${teamName} への参加申請が承認されました` :
+        source === "invite_link" ?
+          `${teamName} への参加手続きを続けてください` :
+          `${teamName} から招待が届きました`;
+      const notificationBody = source === "join_request" ?
+        "選手情報を確認して、チーム参加を完了してください。" :
+        source === "invite_link" ?
+          "登録済みの選手情報を確認してください。" :
+          "チームに参加しますか？";
 
       // 招待された本人の通知トークン取得
       const tokens = await getFcmTokensForUsers([userId]);
@@ -10783,8 +11857,8 @@ export const onTeamInviteCreated = onDocumentCreated(
 
       const message = {
         notification: {
-          title: `${teamName} から招待が届きました`,
-          body: "チームに参加しますか？",
+          title: notificationTitle,
+          body: notificationBody,
         },
         tokens,
         data: {
@@ -12095,12 +13169,591 @@ export const onAnnouncementCreated =
 
 
 /**
+ * 仮選手の試合を本人へ移し、本人の成績を再集計する。
+ * stats 自体はコピーせず、games を唯一の正とする。
+ * @param {string} tentativeUid 仮選手UID
+ * @param {string} realUid 実ユーザーUID
+ * @return {Promise<number>} 移行元試合数
+ */
+async function migrateTentativeGamesAndRebuild(tentativeUid, realUid) {
+  const sourceGamesRef = db.collection("users").doc(tentativeUid)
+      .collection("games");
+  const targetGamesRef = db.collection("users").doc(realUid)
+      .collection("games");
+  const [sourceSnapshot, targetSnapshot] = await Promise.all([
+    sourceGamesRef.get(),
+    targetGamesRef.get(),
+  ]);
+
+  const toMillis = (value) => {
+    if (!value) return null;
+    if (typeof value.toMillis === "function") return value.toMillis();
+    if (typeof value.toDate === "function") return value.toDate().getTime();
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  };
+  const normalize = (value) => String(value || "").trim();
+  const isSameGame = (a, b) =>
+    toMillis(a.gameDate) === toMillis(b.gameDate) &&
+    normalize(a.gameType) === normalize(b.gameType) &&
+    normalize(a.location) === normalize(b.location) &&
+    normalize(a.opponent) === normalize(b.opponent);
+
+  const targetGames = targetSnapshot.docs.map((doc) => doc.data() || {});
+  const writes = [];
+  for (const sourceDoc of sourceSnapshot.docs) {
+    const sourceGame = sourceDoc.data() || {};
+    if (targetGames.some((targetGame) => isSameGame(sourceGame, targetGame))) {
+      continue;
+    }
+    writes.push({
+      ref: targetGamesRef.doc(`migrated_${tentativeUid}_${sourceDoc.id}`),
+      data: {
+        ...sourceGame,
+        uid: realUid,
+        migratedFromUid: tentativeUid,
+        migratedAt: FieldValue.serverTimestamp(),
+        skipStatisticsTrigger: true,
+      },
+    });
+  }
+
+  for (let start = 0; start < writes.length; start += 450) {
+    const batch = db.batch();
+    for (const write of writes.slice(start, start + 450)) {
+      batch.set(write.ref, write.data, {merge: false});
+    }
+    await batch.commit();
+  }
+
+  const rebuildResult = await rebuildUserGameAggregates(realUid);
+  return {
+    count: sourceSnapshot.size,
+    representativeGameIds: rebuildResult.representativeGameIds,
+  };
+}
+
+const teamInviteTokenHash = (token) =>
+  createHash("sha256").update(token).digest("hex");
+
+/** チーム代表者が、7日間有効な共有用招待リンクを発行する。 */
+export const createTeamInviteLink = onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated", "Authentication is required.",
+    );
+  }
+  const {teamId} = request.data || {};
+  if (!teamId || typeof teamId !== "string") {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "teamId is required.",
+    );
+  }
+
+  const teamSnapshot = await db.collection("teams").doc(teamId).get();
+  if (!teamSnapshot.exists ||
+      teamSnapshot.data().createdBy !== request.auth.uid) {
+    throw new functions.https.HttpsError(
+        "permission-denied", "Only the team owner can create invite links.",
+    );
+  }
+
+  const token = randomBytes(24).toString("base64url");
+  const tokenHash = teamInviteTokenHash(token);
+  const expiresAtMillis = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  await db.collection("teamInviteLinks").doc(tokenHash).set({
+    teamId,
+    teamName: teamSnapshot.data().teamName || "チーム",
+    createdBy: request.auth.uid,
+    createdAt: FieldValue.serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(expiresAtMillis),
+    status: "active",
+    useCount: 0,
+  });
+
+  return {
+    success: true,
+    token,
+    inviteUrl: "https://b-net-9bdc2.web.app/team-invite?token=" +
+      encodeURIComponent(token),
+    expiresAtMillis,
+  };
+});
+
+/** 招待トークンから、公開してよい範囲のチーム情報だけを返す。 */
+export const getTeamInviteLink = onCall(async (request) => {
+  const {token} = request.data || {};
+  if (!token || typeof token !== "string" || token.length > 200) {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "A valid token is required.",
+    );
+  }
+  const linkSnapshot = await db.collection("teamInviteLinks")
+      .doc(teamInviteTokenHash(token)).get();
+  const linkData = linkSnapshot.data() || {};
+  const expiresAt = linkData.expiresAt;
+  if (!linkSnapshot.exists || linkData.status !== "active" ||
+      !(expiresAt instanceof Timestamp) ||
+      expiresAt.toMillis() <= Date.now()) {
+    throw new functions.https.HttpsError(
+        "not-found", "This invitation is invalid or expired.",
+    );
+  }
+  return {
+    success: true,
+    teamId: linkData.teamId,
+    teamName: linkData.teamName || "チーム",
+    expiresAtMillis: expiresAt.toMillis(),
+  };
+});
+
+/** 共有リンクを、ログインユーザー本人向けの通常招待へ交換する。 */
+export const redeemTeamInviteLink = onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated", "Authentication is required.",
+    );
+  }
+  const {token} = request.data || {};
+  if (!token || typeof token !== "string" || token.length > 200) {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "A valid token is required.",
+    );
+  }
+
+  const uid = request.auth.uid;
+  const linkRef = db.collection("teamInviteLinks")
+      .doc(teamInviteTokenHash(token));
+  const userRef = db.collection("users").doc(uid);
+
+  return db.runTransaction(async (transaction) => {
+    const linkSnapshot = await transaction.get(linkRef);
+    const linkData = linkSnapshot.data() || {};
+    const expiresAt = linkData.expiresAt;
+    if (!linkSnapshot.exists || linkData.status !== "active" ||
+        !(expiresAt instanceof Timestamp) ||
+        expiresAt.toMillis() <= Date.now()) {
+      throw new functions.https.HttpsError(
+          "failed-precondition", "This invitation is invalid or expired.",
+      );
+    }
+
+    const teamId = linkData.teamId;
+    const teamRef = db.collection("teams").doc(teamId);
+    const teamSnapshot = await transaction.get(teamRef);
+    if (!teamSnapshot.exists) {
+      throw new functions.https.HttpsError("not-found", "Team not found.");
+    }
+    const teamData = teamSnapshot.data() || {};
+    const members = Array.isArray(teamData.members) ? teamData.members : [];
+    if (members.includes(uid)) {
+      return {success: true, teamId, alreadyMember: true};
+    }
+
+    const inviteData = {
+      teamId,
+      teamName: teamData.teamName || linkData.teamName || "チーム",
+      inviteeUid: uid,
+      invitedByUid: linkData.createdBy,
+      source: "invite_link",
+      inviteLinkId: linkSnapshot.id,
+      status: "pending",
+      createdAt: FieldValue.serverTimestamp(),
+    };
+    transaction.set(
+        userRef.collection("teamInvites").doc(teamId),
+        inviteData,
+        {merge: false},
+    );
+    transaction.set(
+        teamRef.collection("invites").doc(uid),
+        inviteData,
+        {merge: false},
+    );
+    transaction.update(linkRef, {
+      useCount: FieldValue.increment(1),
+      lastUsedAt: FieldValue.serverTimestamp(),
+    });
+    return {success: true, teamId, alreadyMember: false};
+  });
+});
+
+/** ユーザー自身がチームへ参加申請する。 */
+export const requestTeamJoin = onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated", "Authentication is required.",
+    );
+  }
+  const {teamId, message} = request.data || {};
+  if (!teamId || typeof teamId !== "string") {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "teamId is required.",
+    );
+  }
+
+  const uid = request.auth.uid;
+  const teamRef = db.collection("teams").doc(teamId);
+  const userRef = db.collection("users").doc(uid);
+  const [teamSnapshot, userSnapshot] = await Promise.all([
+    teamRef.get(),
+    userRef.get(),
+  ]);
+  if (!teamSnapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "Team not found.");
+  }
+  const teamData = teamSnapshot.data() || {};
+  const members = Array.isArray(teamData.members) ? teamData.members : [];
+  if (members.includes(uid)) {
+    throw new functions.https.HttpsError(
+        "already-exists", "You are already a team member.",
+    );
+  }
+  const userData = userSnapshot.data() || {};
+  const requestRef = teamRef.collection("joinRequests").doc(uid);
+  const userRequestRef = userRef.collection("teamJoinRequests").doc(teamId);
+  const existingRequest = await requestRef.get();
+  if (existingRequest.exists && existingRequest.data().status === "pending") {
+    return {success: true, status: "pending", alreadyPending: true};
+  }
+
+  const requestData = {
+    teamId,
+    teamName: teamData.teamName || "チーム",
+    userId: uid,
+    userName: userData.name || userData.username || "名前未設定",
+    positions: Array.isArray(userData.positions) ? userData.positions : [],
+    message: typeof message === "string" ? message.trim().slice(0, 300) : "",
+    status: "pending",
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  const batch = db.batch();
+  batch.set(requestRef, requestData, {merge: false});
+  batch.set(userRequestRef, requestData, {merge: false});
+  await batch.commit();
+  return {success: true, status: "pending"};
+});
+
+/** チーム代表者が参加申請を承認または拒否する。 */
+export const respondToTeamJoinRequest = onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated", "Authentication is required.",
+    );
+  }
+  const {teamId, applicantUid, action} = request.data || {};
+  if (!teamId || !applicantUid ||
+      !["approve", "decline"].includes(action)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "teamId, applicantUid and action are required.",
+    );
+  }
+
+  const teamRef = db.collection("teams").doc(teamId);
+  const requestRef = teamRef.collection("joinRequests").doc(applicantUid);
+  const applicantRef = db.collection("users").doc(applicantUid);
+  const userRequestRef = applicantRef.collection("teamJoinRequests")
+      .doc(teamId);
+  const userInviteRef = applicantRef.collection("teamInvites").doc(teamId);
+  const teamInviteRef = teamRef.collection("invites").doc(applicantUid);
+
+  await db.runTransaction(async (transaction) => {
+    const teamSnapshot = await transaction.get(teamRef);
+    const requestSnapshot = await transaction.get(requestRef);
+    if (!teamSnapshot.exists ||
+        teamSnapshot.data().createdBy !== request.auth.uid) {
+      throw new functions.https.HttpsError(
+          "permission-denied", "Only the team owner can respond.",
+      );
+    }
+    if (!requestSnapshot.exists ||
+        requestSnapshot.data().status !== "pending") {
+      throw new functions.https.HttpsError(
+          "failed-precondition", "The request is no longer pending.",
+      );
+    }
+
+    const responseData = {
+      status: action === "approve" ? "approved" : "declined",
+      respondedAt: FieldValue.serverTimestamp(),
+      respondedBy: request.auth.uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    transaction.set(requestRef, responseData, {merge: true});
+    transaction.set(userRequestRef, responseData, {merge: true});
+
+    if (action === "approve") {
+      const teamData = teamSnapshot.data() || {};
+      const inviteData = {
+        teamId,
+        teamName: teamData.teamName || "チーム",
+        inviteeUid: applicantUid,
+        invitedByUid: request.auth.uid,
+        source: "join_request",
+        status: "pending",
+        createdAt: FieldValue.serverTimestamp(),
+      };
+      transaction.set(userInviteRef, inviteData, {merge: false});
+      transaction.set(teamInviteRef, inviteData, {merge: false});
+    }
+  });
+
+  return {
+    success: true,
+    status: action === "approve" ? "approved" : "declined",
+  };
+});
+
+/** 本人がチーム招待を辞退し、関連状態を同期する。 */
+export const declineTeamInvite = onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated", "Authentication is required.",
+    );
+  }
+  const {teamId, inviteId} = request.data || {};
+  if (!teamId || !inviteId) {
+    throw new functions.https.HttpsError(
+        "invalid-argument", "teamId and inviteId are required.",
+    );
+  }
+
+  const uid = request.auth.uid;
+  const userRef = db.collection("users").doc(uid);
+  const teamRef = db.collection("teams").doc(teamId);
+  const inviteRef = userRef.collection("teamInvites").doc(inviteId);
+  const teamInviteRef = teamRef.collection("invites").doc(uid);
+  const joinRequestRef = teamRef.collection("joinRequests").doc(uid);
+  const userRequestRef = userRef.collection("teamJoinRequests").doc(teamId);
+
+  await db.runTransaction(async (transaction) => {
+    const inviteSnapshot = await transaction.get(inviteRef);
+    if (!inviteSnapshot.exists ||
+        inviteSnapshot.data().teamId !== teamId ||
+        inviteSnapshot.data().status !== "pending") {
+      throw new functions.https.HttpsError(
+          "failed-precondition", "The invitation is no longer pending.",
+      );
+    }
+    const inviteData = inviteSnapshot.data() || {};
+    const declinedData = {
+      status: "declined",
+      respondedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    transaction.set(inviteRef, declinedData, {merge: true});
+    transaction.set(teamInviteRef, declinedData, {merge: true});
+    if (inviteData.source === "join_request") {
+      transaction.set(joinRequestRef, {
+        status: "invite_declined",
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+      transaction.set(userRequestRef, {
+        status: "invite_declined",
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
+  });
+  return {success: true};
+});
+
+/**
+ * 招待の確認、仮選手の照合、チーム参加を一つの入口で完了する。
+ */
+export const completeTeamJoin = onCall(
+    {timeoutSeconds: 540},
+    async (request) => {
+      if (!request.auth) {
+        throw new functions.https.HttpsError(
+            "unauthenticated", "Authentication is required.",
+        );
+      }
+
+      const realUid = request.auth.uid;
+      const {teamId, inviteId, tentativeUid, mergeTentative} =
+        request.data || {};
+      if (!teamId || !inviteId) {
+        throw new functions.https.HttpsError(
+            "invalid-argument", "teamId and inviteId are required.",
+        );
+      }
+
+      const teamRef = db.collection("teams").doc(teamId);
+      const userRef = db.collection("users").doc(realUid);
+      const inviteRef = userRef.collection("teamInvites").doc(inviteId);
+      const teamInviteRef = teamRef.collection("invites").doc(realUid);
+      const [teamSnapshot, inviteSnapshot, teamInviteSnapshot] =
+        await Promise.all([
+          teamRef.get(),
+          inviteRef.get(),
+          teamInviteRef.get(),
+        ]);
+
+      if (!teamSnapshot.exists) {
+        throw new functions.https.HttpsError("not-found", "Team not found.");
+      }
+      const inviteData = inviteSnapshot.data() || {};
+      const teamInviteData = teamInviteSnapshot.data() || {};
+      if (!inviteSnapshot.exists || inviteData.status !== "pending" ||
+          inviteData.teamId !== teamId ||
+          !teamInviteSnapshot.exists ||
+          teamInviteData.status !== "pending" ||
+          teamInviteData.teamId !== teamId) {
+        throw new functions.https.HttpsError(
+            "failed-precondition", "The invitation is not valid.",
+        );
+      }
+
+      const shouldMerge = mergeTentative === true &&
+        typeof tentativeUid === "string" && tentativeUid.length > 0;
+      if (tentativeUid) {
+        const tentativeSnapshot = await db.collection("users")
+            .doc(tentativeUid).get();
+        const tentativeData = tentativeSnapshot.data() || {};
+        const tentativeTeams = Array.isArray(tentativeData.teams) ?
+          tentativeData.teams : [];
+        const members = Array.isArray(teamSnapshot.data().members) ?
+          teamSnapshot.data().members : [];
+        if (!tentativeSnapshot.exists ||
+            tentativeData.isTeamMemberOnly !== true ||
+            !tentativeTeams.includes(teamId) ||
+            !members.includes(tentativeUid)) {
+          throw new functions.https.HttpsError(
+              "failed-precondition", "The tentative member is not valid.",
+          );
+        }
+      }
+
+      let migratedGames = 0;
+      let representativeGameIds = [];
+      if (shouldMerge) {
+        const migrationResult = await migrateTentativeGamesAndRebuild(
+            tentativeUid, realUid,
+        );
+        migratedGames = migrationResult.count;
+        representativeGameIds = migrationResult.representativeGameIds;
+      }
+
+      await db.runTransaction(async (transaction) => {
+        const latestTeam = await transaction.get(teamRef);
+        const latestInvite = await transaction.get(inviteRef);
+        const latestTeamInvite = await transaction.get(teamInviteRef);
+        const latestInviteData = latestInvite.data() || {};
+        const latestTeamInviteData = latestTeamInvite.data() || {};
+        if (!latestTeam.exists || !latestInvite.exists ||
+            latestInviteData.status !== "pending" ||
+            latestInviteData.teamId !== teamId ||
+            !latestTeamInvite.exists ||
+            latestTeamInviteData.status !== "pending") {
+          throw new functions.https.HttpsError(
+              "failed-precondition", "The invitation is no longer valid.",
+          );
+        }
+
+        const latestTeamData = latestTeam.data() || {};
+        const currentMembers = Array.isArray(latestTeamData.members) ?
+          latestTeamData.members.filter((id) => typeof id === "string") : [];
+        const nextMembers = shouldMerge ?
+          currentMembers.filter((id) => id !== tentativeUid) :
+          [...currentMembers];
+        if (!nextMembers.includes(realUid)) nextMembers.push(realUid);
+
+        transaction.update(teamRef, {
+          members: Array.from(new Set(nextMembers)),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.set(userRef, {
+          teams: FieldValue.arrayUnion(teamId),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true});
+        const acceptedData = {
+          status: "accepted",
+          respondedAt: FieldValue.serverTimestamp(),
+          acceptedAt: FieldValue.serverTimestamp(),
+          acceptedByUid: realUid,
+          identifiedMemberUid: tentativeUid || null,
+          mergedTentative: shouldMerge,
+          teamId,
+        };
+        transaction.set(inviteRef, acceptedData, {merge: true});
+        transaction.set(teamInviteRef, {
+          ...acceptedData,
+          inviteeUid: realUid,
+        }, {merge: true});
+      });
+
+      if (shouldMerge) {
+        await db.recursiveDelete(db.collection("users").doc(tentativeUid));
+      }
+
+      try {
+        const joinedUserSnapshot = await userRef.get();
+        const joinedUserData = joinedUserSnapshot.data() || {};
+        const teamIds = Array.isArray(joinedUserData.teams) ?
+          joinedUserData.teams : [teamId];
+        await Promise.all(
+            teamIds.map((id) => enqueueTeamStatsRefreshTask(id)),
+        );
+        await Promise.all(
+            teamIds.map((id) => enqueueTeamRankingRefresh(id)),
+        );
+
+        if (shouldMerge) {
+          const derivedStatsQueue = client.queuePath(
+              project, location, "team-location-stats-queue",
+          );
+          await Promise.all(representativeGameIds.map((gameId) =>
+            client.createTask({
+              parent: derivedStatsQueue,
+              task: {
+                httpRequest: {
+                  httpMethod: "POST",
+                  url: "https://calculateadvancedstats-etndg3x4ra-uc.a.run.app",
+                  headers: {"Content-Type": "application/json"},
+                  body: Buffer.from(JSON.stringify({uid: realUid, gameId}))
+                      .toString("base64"),
+                },
+              },
+            }),
+          ));
+          await client.createTask({
+            parent: derivedStatsQueue,
+            task: {
+              httpRequest: {
+                httpMethod: "POST",
+                url: "https://usergoalprogresshandler-etndg3x4ra-uc.a.run.app",
+                headers: {"Content-Type": "application/json"},
+                body: Buffer.from(JSON.stringify({uid: realUid}))
+                    .toString("base64"),
+              },
+            },
+          });
+        }
+      } catch (refreshError) {
+        console.error("Failed to enqueue team refresh after join", {
+          realUid,
+          teamId,
+          refreshError,
+        });
+      }
+
+      return {success: true, teamId, migratedGames};
+    },
+);
+
+/**
  * 仮ユーザーを完全削除し、teams/{teamId}.members からも削除する
  * 実ユーザーを選択したときに使用
  */
 export const removeTentativeUserFromTeam = onCall(async (request) => {
   const {tentativeUid, teamId} = request.data;
 
+  if (!request.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated", "Authentication is required.",
+    );
+  }
   if (!tentativeUid || !teamId) {
     throw new functions.https.HttpsError(
         "invalid-argument",
@@ -12110,6 +13763,28 @@ export const removeTentativeUserFromTeam = onCall(async (request) => {
 
   const teamRef = db.collection("teams").doc(teamId);
   const userRef = db.collection("users").doc(tentativeUid);
+  const [teamSnapshot, tentativeSnapshot, inviteSnapshot,
+    teamInviteSnapshot] = await Promise.all([
+    teamRef.get(),
+    userRef.get(),
+    db.collection("users").doc(request.auth.uid)
+        .collection("teamInvites").doc(teamId).get(),
+    teamRef.collection("invites").doc(request.auth.uid).get(),
+  ]);
+  const members = teamSnapshot.exists &&
+    Array.isArray(teamSnapshot.data().members) ?
+    teamSnapshot.data().members : [];
+  const tentativeData = tentativeSnapshot.data() || {};
+  if (!teamSnapshot.exists || !tentativeSnapshot.exists ||
+      tentativeData.isTeamMemberOnly !== true ||
+      !members.includes(tentativeUid) ||
+      !inviteSnapshot.exists || inviteSnapshot.data().status !== "pending" ||
+      !teamInviteSnapshot.exists ||
+      teamInviteSnapshot.data().status !== "pending") {
+    throw new functions.https.HttpsError(
+        "permission-denied", "A valid team invitation is required.",
+    );
+  }
   const subcollections = [
     "games",
     "stats",
@@ -12172,6 +13847,11 @@ export const removeTentativeUserFromTeam = onCall(async (request) => {
 export const mergeTentativeUserDataToRealUser = onCall(async (request) => {
   const {tentativeUid, realUid} = request.data;
 
+  if (!request.auth || request.auth.uid !== realUid) {
+    throw new functions.https.HttpsError(
+        "permission-denied", "You can only merge data into your account.",
+    );
+  }
   if (!tentativeUid || !realUid) {
     throw new functions.https.HttpsError(
         "invalid-argument",
@@ -12181,10 +13861,38 @@ export const mergeTentativeUserDataToRealUser = onCall(async (request) => {
 
   const sourceUserRef = db.collection("users").doc(tentativeUid);
   const targetUserRef = db.collection("users").doc(realUid);
+  const sourceUserSnapshot = await sourceUserRef.get();
+  const sourceUserData = sourceUserSnapshot.data() || {};
+  const sourceTeams = Array.isArray(sourceUserData.teams) ?
+    sourceUserData.teams : [];
+  let hasValidInvite = false;
+  for (const sourceTeamId of sourceTeams) {
+    const [inviteSnapshot, teamInviteSnapshot, teamSnapshot] =
+      await Promise.all([
+        targetUserRef.collection("teamInvites").doc(sourceTeamId).get(),
+        db.collection("teams").doc(sourceTeamId)
+            .collection("invites").doc(realUid).get(),
+        db.collection("teams").doc(sourceTeamId).get(),
+      ]);
+    const members = teamSnapshot.exists &&
+      Array.isArray(teamSnapshot.data().members) ?
+      teamSnapshot.data().members : [];
+    if (inviteSnapshot.exists && inviteSnapshot.data().status === "pending" &&
+        teamInviteSnapshot.exists &&
+        teamInviteSnapshot.data().status === "pending" &&
+        members.includes(tentativeUid)) {
+      hasValidInvite = true;
+      break;
+    }
+  }
+  if (!sourceUserSnapshot.exists ||
+      sourceUserData.isTeamMemberOnly !== true || !hasValidInvite) {
+    throw new functions.https.HttpsError(
+        "permission-denied", "A valid team invitation is required.",
+    );
+  }
   const subcollections = [
     "games",
-    "stats",
-    "teamLocationStats",
   ];
   const deleteSubcollections = [
     "games",
@@ -12250,6 +13958,7 @@ export const mergeTentativeUserDataToRealUser = onCall(async (request) => {
           ...data,
           migratedFromUid: tentativeUid,
           migratedAt: FieldValue.serverTimestamp(),
+          skipStatisticsTrigger: true,
         };
 
         if (sub === "games") {
@@ -12270,6 +13979,9 @@ export const mergeTentativeUserDataToRealUser = onCall(async (request) => {
         await batch.commit();
       }
     }
+
+    // 累計は仮選手のドキュメントで上書きせず、全試合から作り直す。
+    await rebuildUserGameAggregates(realUid);
 
     // 移行後、仮ユーザー側の主要サブコレクションを削除
     for (const sub of deleteSubcollections) {
@@ -13132,6 +14844,7 @@ function buildMonthlyGrowthCandidates(previousStats, targetStats) {
  * @return {?number} 数値またはnull
  */
 function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
 }

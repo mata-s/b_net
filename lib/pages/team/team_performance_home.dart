@@ -240,367 +240,359 @@ class _TeamPerformanceHomeState extends State<TeamPerformanceHome>
     return Scaffold(
       body: Column(
         children: [
-          SafeArea(
-            child: Column(
-              children: [
-                // 今年の目標
-                FutureBuilder<QuerySnapshot>(
-                  future: FirebaseFirestore.instance
-                      .collection('teams')
-                      .doc(widget.teamId)
-                      .collection('goals')
-                      .where('period', isEqualTo: 'year')
-                      .where('year', isEqualTo: DateTime.now().year)
-                      .get(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const SizedBox(height: 0);
+          Column(
+            children: [
+              // 今年の目標
+              FutureBuilder<QuerySnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('teams')
+                    .doc(widget.teamId)
+                    .collection('goals')
+                    .where('period', isEqualTo: 'year')
+                    .where('year', isEqualTo: DateTime.now().year)
+                    .get(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const SizedBox(height: 0);
+                  }
+                  final goalData =
+                      snapshot.data!.docs.first.data() as Map<String, dynamic>;
+                  final title = goalData['title'] ?? '';
+                  final target = goalData['target'];
+                  final statField = goalData['statField'];
+                  final isAchieved = goalData['isAchieved'] ?? false;
+                  final actual = goalData['actualValue'] ?? 0;
+                  final isRatio = goalData['isRatio'] ?? false;
+                  final compareType = goalData['compareType'] ?? '';
+                  String isAchievedText = '';
+                  if (isAchieved == true) {
+                    if (isRatio == true ||
+                        compareType.toString().trim() == 'less') {
+                      isAchievedText = '達成中！';
+                    } else {
+                      isAchievedText = '達成！';
                     }
-                    final goalData = snapshot.data!.docs.first.data()
-                        as Map<String, dynamic>;
-                    final title = goalData['title'] ?? '';
-                    final target = goalData['target'];
-                    final statField = goalData['statField'];
-                    final isAchieved = goalData['isAchieved'] ?? false;
-                    final actual = goalData['actualValue'] ?? 0;
-                    final isRatio = goalData['isRatio'] ?? false;
-                    final compareType = goalData['compareType'] ?? '';
-                    String isAchievedText = '';
-                    if (isAchieved == true) {
-                      if (isRatio == true ||
-                          compareType.toString().trim() == 'less') {
-                        isAchievedText = '達成中！';
-                      } else {
-                        isAchievedText = '達成！';
-                      }
-                    }
+                  }
 
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0, vertical: 2),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Text(
-                                          '今年の目標',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.grey,
-                                          ),
-                                        ),
-                                        if (isAchievedText.isNotEmpty) ...[
-                                          const SizedBox(width: 8),
-                                          const Icon(Icons.auto_awesome,
-                                              color: Colors.orange, size: 18),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            isAchievedText,
-                                            style: const TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.green,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                    Text(
-                                      statField == 'custom'
-                                          ? '$title'
-                                          : ([
-                                              'battingAverage',
-                                              'onBasePercentage',
-                                              'sluggingPercentage',
-                                              'winRate',
-                                              'era'
-                                            ].contains(statField))
-                                              ? '$title （${actual is num ? formatStatValue(statField, actual) : actual}）'
-                                              : '$title（$actual / $target）',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 16),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-                // 今月の目標
-                FutureBuilder<QuerySnapshot>(
-                  future: FirebaseFirestore.instance
-                      .collection('teams')
-                      .doc(widget.teamId)
-                      .collection('goals')
-                      .where('period', isEqualTo: 'month')
-                      .where('month',
-                          isEqualTo:
-                              "${DateTime.now().year}-${DateTime.now().month}")
-                      .get(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const SizedBox();
-                    }
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const SizedBox(height: 0);
-                    }
-                    final goalData = snapshot.data!.docs.first.data()
-                        as Map<String, dynamic>;
-                    final title = goalData['title'] ?? '';
-                    final target = goalData['target'];
-                    final statField = goalData['statField'];
-                    final isAchieved = goalData['isAchieved'] ?? false;
-                    final actual = goalData['actualValue'] ?? 0;
-                    final isRatio = goalData['isRatio'] ?? false;
-                    final compareType = goalData['compareType'] ?? '';
-                    String isAchievedText = '';
-                    if (isAchieved == true) {
-                      if (isRatio == true ||
-                          compareType.toString().trim() == 'less') {
-                        isAchievedText = '達成中！';
-                      } else {
-                        isAchievedText = '達成！';
-                      }
-                    }
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0, vertical: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Text(
-                                          '今月の目標',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.grey,
-                                          ),
-                                        ),
-                                        if (isAchievedText.isNotEmpty) ...[
-                                          const SizedBox(width: 8),
-                                          Icon(Icons.auto_awesome,
-                                              color: Colors.orange, size: 18),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            isAchievedText,
-                                            style: const TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.green,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                    Text(
-                                      statField == 'custom'
-                                          ? '$title'
-                                          : ([
-                                              'battingAverage',
-                                              'onBasePercentage',
-                                              'sluggingPercentage',
-                                              'winRate',
-                                              'era'
-                                            ].contains(statField))
-                                              ? '$title （${actual is num ? formatStatValue(statField, actual) : actual}）'
-                                              : '$title（$actual / $target）',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 16),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-          PreferredSize(
-            preferredSize: const Size.fromHeight(80),
-            child: SafeArea(
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0, vertical: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
-                            // 期間フィルタ
-                            GestureDetector(
-                              onTap: () => _showCupertinoPicker(
-                                context,
-                                _periodOptions,
-                                selectedPeriodFilter,
-                                (newValue) {
-                                  setState(() {
-                                    selectedPeriodFilter = newValue;
-                                    _setFilterDates();
-                                  });
-                                },
-                              ),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Text(selectedPeriodFilter,
-                                        style: const TextStyle(fontSize: 16)),
-                                    const Icon(Icons.arrow_drop_down),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            // 試合タイプフィルタ
-                            GestureDetector(
-                              onTap: () => _showCupertinoPicker(
-                                context,
-                                _gameTypeOptions,
-                                selectedGameTypeFilter,
-                                (newValue) {
-                                  setState(() {
-                                    selectedGameTypeFilter = newValue;
-                                    _setFilterDates();
-                                  });
-                                },
-                              ),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Text(selectedGameTypeFilter,
-                                        style: const TextStyle(fontSize: 16)),
-                                    const Icon(Icons.arrow_drop_down),
-                                  ],
-                                ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(
+                                        '今年の目標',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                      if (isAchievedText.isNotEmpty) ...[
+                                        const SizedBox(width: 8),
+                                        const Icon(Icons.auto_awesome,
+                                            color: Colors.orange, size: 18),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          isAchievedText,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  Text(
+                                    statField == 'custom'
+                                        ? '$title'
+                                        : ([
+                                            'battingAverage',
+                                            'onBasePercentage',
+                                            'sluggingPercentage',
+                                            'winRate',
+                                            'era'
+                                          ].contains(statField))
+                                            ? '$title （${actual is num ? formatStatValue(statField, actual) : actual}）'
+                                            : '$title（$actual / $target）',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 16),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              // 今月の目標
+              FutureBuilder<QuerySnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('teams')
+                    .doc(widget.teamId)
+                    .collection('goals')
+                    .where('period', isEqualTo: 'month')
+                    .where('month',
+                        isEqualTo:
+                            "${DateTime.now().year}-${DateTime.now().month}")
+                    .get(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox();
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const SizedBox(height: 0);
+                  }
+                  final goalData =
+                      snapshot.data!.docs.first.data() as Map<String, dynamic>;
+                  final title = goalData['title'] ?? '';
+                  final target = goalData['target'];
+                  final statField = goalData['statField'];
+                  final isAchieved = goalData['isAchieved'] ?? false;
+                  final actual = goalData['actualValue'] ?? 0;
+                  final isRatio = goalData['isRatio'] ?? false;
+                  final compareType = goalData['compareType'] ?? '';
+                  String isAchievedText = '';
+                  if (isAchieved == true) {
+                    if (isRatio == true ||
+                        compareType.toString().trim() == 'less') {
+                      isAchievedText = '達成中！';
+                    } else {
+                      isAchievedText = '達成！';
+                    }
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0, vertical: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(
+                                        '今月の目標',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                      if (isAchievedText.isNotEmpty) ...[
+                                        const SizedBox(width: 8),
+                                        Icon(Icons.auto_awesome,
+                                            color: Colors.orange, size: 18),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          isAchievedText,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  Text(
+                                    statField == 'custom'
+                                        ? '$title'
+                                        : ([
+                                            'battingAverage',
+                                            'onBasePercentage',
+                                            'sluggingPercentage',
+                                            'winRate',
+                                            'era'
+                                          ].contains(statField))
+                                            ? '$title （${actual is num ? formatStatValue(statField, actual) : actual}）'
+                                            : '$title（$actual / $target）',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 16),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        // 期間フィルタ
                         GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => TeamGradeDetailHome(
-                                  teamId: widget.teamId,
-                                  hasActiveTeamSubscription: widget.hasActiveTeamSubscription,
-                                ),
-                              ),
-                            );
-                          },
-                          child: Row(
-                            children: const [
-                              Icon(
-                                Icons.swap_horiz,
-                                color: Colors.orange,
-                                size: 30,
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                '詳細へ',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
+                          onTap: () => _showCupertinoPicker(
+                            context,
+                            _periodOptions,
+                            selectedPeriodFilter,
+                            (newValue) {
+                              setState(() {
+                                selectedPeriodFilter = newValue;
+                                _setFilterDates();
+                              });
+                            },
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Text(selectedPeriodFilter,
+                                    style: const TextStyle(fontSize: 16)),
+                                const Icon(Icons.arrow_drop_down),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // 試合タイプフィルタ
+                        GestureDetector(
+                          onTap: () => _showCupertinoPicker(
+                            context,
+                            _gameTypeOptions,
+                            selectedGameTypeFilter,
+                            (newValue) {
+                              setState(() {
+                                selectedGameTypeFilter = newValue;
+                                _setFilterDates();
+                              });
+                            },
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Text(selectedGameTypeFilter,
+                                    style: const TextStyle(fontSize: 16)),
+                                const Icon(Icons.arrow_drop_down),
+                              ],
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    if (selectedPeriodFilter == '年を選択' &&
-                        _availableYears.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: SizedBox(
-                          height: 40,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _availableYears.length,
-                            itemBuilder: (context, index) {
-                              final int year = _availableYears[index];
-                              return GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    selectedPeriodFilter = '年を選択';
-                                    _selectedYearForCustom = year;
-                                    _setFilterDates();
-                                  });
-                                },
-                                child: Container(
-                                  margin:
-                                      const EdgeInsets.symmetric(horizontal: 6),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: _selectedYearForCustom == year
-                                        ? Colors.blue
-                                        : Colors.grey[200],
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '$year年',
-                                      style: TextStyle(
-                                        color: _selectedYearForCustom == year
-                                            ? Colors.white
-                                            : Colors.black,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => TeamGradeDetailHome(
+                              teamId: widget.teamId,
+                              hasActiveTeamSubscription:
+                                  widget.hasActiveTeamSubscription,
+                            ),
                           ),
-                        ),
+                        );
+                      },
+                      child: Row(
+                        children: const [
+                          Icon(
+                            Icons.swap_horiz,
+                            color: Colors.orange,
+                            size: 30,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            '詳細へ',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
-              ),
+                if (selectedPeriodFilter == '年を選択' &&
+                    _availableYears.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: SizedBox(
+                      height: 40,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _availableYears.length,
+                        itemBuilder: (context, index) {
+                          final int year = _availableYears[index];
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                selectedPeriodFilter = '年を選択';
+                                _selectedYearForCustom = year;
+                                _setFilterDates();
+                              });
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _selectedYearForCustom == year
+                                    ? Colors.blue
+                                    : Colors.grey[200],
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$year年',
+                                  style: TextStyle(
+                                    color: _selectedYearForCustom == year
+                                        ? Colors.white
+                                        : Colors.black,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           TabBar(

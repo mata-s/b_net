@@ -1,5 +1,6 @@
 import 'package:b_net/common/profile_dialog.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,9 +8,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 class NationalPitching extends StatefulWidget {
   final String uid;
   final String prefecture;
+  final Widget header;
 
   const NationalPitching(
-      {Key? key, required this.uid, required this.prefecture})
+      {Key? key,
+      required this.uid,
+      required this.prefecture,
+      required this.header})
       : super(key: key);
 
   @override
@@ -149,9 +154,12 @@ class _NationalPitchingState extends State<NationalPitching> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
         child: Column(
           children: [
-            const SizedBox(height: 8),
+            widget.header,
             const Text(
               '全国トップ投手',
               style: TextStyle(
@@ -350,7 +358,8 @@ class _NationalPitchingState extends State<NationalPitching> {
       final isUser = player['id'] == widget.uid;
       final String playerPref = (player['prefecture']?.toString() ?? '').trim();
       final String userPref = widget.prefecture.trim();
-      final bool isSamePrefecture = !isUser && userPref.isNotEmpty && playerPref == userPref;
+      final bool isSamePrefecture =
+          !isUser && userPref.isNotEmpty && playerPref == userPref;
 
       return DataRow(
         color: MaterialStateProperty.resolveWith<Color?>((states) {
@@ -420,6 +429,7 @@ class _NationalPitchingState extends State<NationalPitching> {
                 false,
                 currentUserUid: user?.uid,
                 currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
               );
             }
           },

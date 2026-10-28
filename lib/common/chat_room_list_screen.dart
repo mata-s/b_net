@@ -2,6 +2,7 @@ import 'package:b_net/common/chat_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 
 class ChatRoomListScreen extends StatefulWidget {
   final VoidCallback? onUnreadCountChanged;
@@ -202,7 +203,8 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          List<QueryDocumentSnapshot> chatRooms = snapshot.data!.docs.where((doc) {
+          List<QueryDocumentSnapshot> chatRooms =
+              snapshot.data!.docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final participants = (data['participants'] as List<dynamic>?) ?? [];
             if (_user == null || participants.isEmpty) return false;
@@ -242,6 +244,9 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
           });
 
           return ListView.builder(
+            padding: EdgeInsets.only(
+              bottom: BNetFloatingTabBar.bodyClearance(context),
+            ),
             itemCount: chatRooms.length,
             itemBuilder: (context, index) {
               var room = chatRooms[index].data() as Map<String, dynamic>;
@@ -266,7 +271,8 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
 
                   final otherUserData = userSnapshot.data!;
                   String displayName = otherUserData['name'] ?? '匿名ユーザー';
-                  String displayProfileImageUrl = otherUserData['profileImage'] ?? '';
+                  String displayProfileImageUrl =
+                      otherUserData['profileImage'] ?? '';
                   // 以下は元の処理をそのまま残す
                   // 自分の未読メッセージ数を取得
                   String userId = _user!.uid;

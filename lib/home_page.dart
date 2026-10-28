@@ -17,11 +17,13 @@ import 'package:b_net/pages/team/create_team.dart';
 import 'package:b_net/pages/team/member_parts/team_invite_identify_member_page.dart';
 import 'package:b_net/pages/team/team_account.dart';
 import 'package:b_net/services/subscription_screen.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:flutter/material.dart';
 import 'pages/private/player_page.dart';
 import 'pages/private/profile_page.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
 
@@ -62,7 +64,8 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<QuerySnapshot>? _announcementsSubscription;
   StreamSubscription<QuerySnapshot>? _goalsSubscription;
   // --- team invites
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _teamInvitesSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+      _teamInvitesSubscription;
   QueryDocumentSnapshot<Map<String, dynamic>>? _pendingInviteDoc;
   QueryDocumentSnapshot<Map<String, dynamic>>? _pendingTentativeDoc;
 
@@ -78,6 +81,7 @@ class _HomePageState extends State<HomePage> {
       _initializePages();
     });
   }
+
   /// 目標（month / year）が「進行中」かどうかをリアルタイムで監視
   void _listenOngoingGoals() {
     final uid = widget.userUid;
@@ -94,7 +98,8 @@ class _HomePageState extends State<HomePage> {
         .listen(
       (snapshot) {
         final now = DateTime.now();
-        final monthKey = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
+        final monthKey =
+            '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
         final yearKey = now.year;
 
         bool hasOngoing = false;
@@ -113,7 +118,8 @@ class _HomePageState extends State<HomePage> {
                 final y = int.tryParse(parts[0]);
                 final m = int.tryParse(parts[1]);
                 if (y != null && m != null && m >= 1 && m <= 12) {
-                  month = '${y.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}';
+                  month =
+                      '${y.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}';
                 } else {
                   // 想定外フォーマットはそのまま（比較には使わない）
                   month = raw;
@@ -203,7 +209,8 @@ class _HomePageState extends State<HomePage> {
         final latest = docs.first;
         final latestData = latest.data();
         final rootData = latestData['data'];
-        final games = rootData is Map<String, dynamic> ? rootData['games'] : null;
+        final games =
+            rootData is Map<String, dynamic> ? rootData['games'] : null;
 
         if (games is! List || games.isEmpty) {
           setState(() {
@@ -254,7 +261,8 @@ class _HomePageState extends State<HomePage> {
         }
 
         // createdAt があれば最新を選ぶ（無い場合は先頭）
-        QueryDocumentSnapshot<Map<String, dynamic>> latest = snapshot.docs.first;
+        QueryDocumentSnapshot<Map<String, dynamic>> latest =
+            snapshot.docs.first;
         for (final d in snapshot.docs) {
           final a = latest.data()['createdAt'];
           final b = d.data()['createdAt'];
@@ -291,6 +299,7 @@ class _HomePageState extends State<HomePage> {
     // ✅ 参加する場合は「あなたはいますか？」画面へ進める（ここではまだ teams/members は更新しない）
     if (accept) {
       final String teamName = (data['teamName'] as String?)?.trim() ?? '';
+      final String inviteSource = (data['source'] as String?)?.trim() ?? '';
 
       if (!mounted) return;
       final selectedMemberUid = await Navigator.of(context).push<String?>(
@@ -300,6 +309,7 @@ class _HomePageState extends State<HomePage> {
             teamId: teamId,
             inviteDocId: inviteDoc.id,
             teamName: teamName,
+            inviteSource: inviteSource,
           ),
         ),
       );
@@ -335,23 +345,23 @@ class _HomePageState extends State<HomePage> {
 
     // ✅ 参加しない（辞退）は従来どおり status 更新
     try {
-      final inviteRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('teamInvites')
-          .doc(inviteDoc.id);
-
-      await inviteRef.set(
-        {
-          'status': 'declined',
-          'respondedAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+      await FirebaseFunctions.instance
+          .httpsCallable('declineTeamInvite')
+          .call<void>({
+        'teamId': teamId,
+        'inviteId': inviteDoc.id,
+      });
 
       if (!mounted) return;
+      final source = (data['source'] as String?)?.trim() ?? '';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('招待を辞退しました')),
+        SnackBar(
+          content: Text(
+            source == 'join_request' || source == 'invite_link'
+                ? 'チーム参加を辞退しました'
+                : '招待を辞退しました',
+          ),
+        ),
       );
     } catch (e) {
       debugPrint('team invite decline error: $e');
@@ -368,6 +378,22 @@ class _HomePageState extends State<HomePage> {
   }) async {
     if (!mounted) return;
 
+    final source = (inviteDoc.data()['source'] as String?)?.trim() ?? '';
+    final isJoinRequest = source == 'join_request';
+    final isInviteLink = source == 'invite_link';
+    final dialogTitle = isJoinRequest
+        ? '参加申請が承認されました'
+        : isInviteLink
+            ? 'チーム参加の確認'
+            : 'チーム招待';
+    final dialogMessage = isJoinRequest
+        ? '$teamName への参加申請が承認されました。\n選手情報を確認して、参加を完了してください。'
+        : isInviteLink
+            ? '$teamName への参加手続きを続けます。\n登録済みの選手情報を確認してください。'
+            : '$teamName から招待が届いています。\n参加しますか？';
+    final declineLabel = isJoinRequest || isInviteLink ? '辞退する' : '参加しない';
+    final proceedLabel = isJoinRequest || isInviteLink ? '選手情報を確認' : '参加する';
+
     await showDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -378,10 +404,10 @@ class _HomePageState extends State<HomePage> {
           actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
           title: Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'チーム招待',
-                  style: TextStyle(fontWeight: FontWeight.w800),
+                  dialogTitle,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
               IconButton(
@@ -393,21 +419,21 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-          content: Text('$teamName から招待が届いています。\n参加しますか？'),
+          content: Text(dialogMessage),
           actions: [
             TextButton(
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
                 await _respondToTeamInvite(inviteDoc: inviteDoc, accept: false);
               },
-              child: const Text('参加しない'),
+              child: Text(declineLabel),
             ),
             ElevatedButton(
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
                 await _respondToTeamInvite(inviteDoc: inviteDoc, accept: true);
               },
-              child: const Text('参加する'),
+              child: Text(proceedLabel),
             ),
           ],
         );
@@ -420,10 +446,8 @@ class _HomePageState extends State<HomePage> {
     final uid = widget.userUid;
     if (uid.isEmpty) return;
 
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
+    final userDoc =
+        await FirebaseFirestore.instance.collection('users').doc(uid).get();
 
     final userData = userDoc.data();
 
@@ -431,6 +455,15 @@ class _HomePageState extends State<HomePage> {
 
     setState(() {
       _hasActiveSubscription = userData?['isPremium'] == true;
+    });
+  }
+
+  Future<void> _refreshSubscriptionAfterReturn() async {
+    await _checkSubscriptionStatus();
+    if (!mounted) return;
+
+    setState(() {
+      _initializePages();
     });
   }
 
@@ -529,10 +562,12 @@ class _HomePageState extends State<HomePage> {
               userUid: widget.userUid,
               userPosition: widget.userPosition,
             )
-      : PlayerPage(
+          : PlayerPage(
               userUid: widget.userUid,
               userPosition: widget.userPosition,
               hasActiveSubscription: _hasActiveSubscription,
+              hasTeam: widget.userTeamId?.trim().isNotEmpty == true,
+              onTeamValueTap: _showTeamValuePreview,
             ),
       widget.userPosition.contains('マネージャー')
           ? ManagerGemePage(
@@ -540,8 +575,15 @@ class _HomePageState extends State<HomePage> {
           : widget.userPosition.contains('監督')
               ? DirectoCalendar(
                   userUid: widget.userUid, teamId: widget.userTeamId ?? '')
-              : PrivateCalendarTab(userUid: widget.userUid, positions: widget.userPosition, hasActiveSubscription: _hasActiveSubscription,),
-      PostListPage(userUid: widget.userUid, userName: widget.accountName, teamId: widget.userTeamId ?? ''),
+              : PrivateCalendarTab(
+                  userUid: widget.userUid,
+                  positions: widget.userPosition,
+                  hasActiveSubscription: _hasActiveSubscription,
+                ),
+      PostListPage(
+          userUid: widget.userUid,
+          userName: widget.accountName,
+          teamId: widget.userTeamId ?? ''),
       RankingPage(
         uid: widget.userUid,
         prefecture: widget.userPrefecture,
@@ -604,6 +646,58 @@ class _HomePageState extends State<HomePage> {
     return '仮保存があります：${opponent}との試合';
   }
 
+  void _openTeamSearch() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SearchPage(
+          userPosition: widget.userPosition,
+          userTeamId: widget.userTeamId,
+          userPrefecture: widget.userPrefecture,
+        ),
+      ),
+    );
+  }
+
+  void _openTeamCreation() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CreateTeamAccountPage(
+          userUid: widget.userUid,
+          accountName: widget.accountName,
+          userPrefecture: widget.userPrefecture,
+          userPosition: widget.userPosition,
+          userTeamId: widget.userTeamId,
+        ),
+      ),
+    );
+  }
+
+  void _showTeamValuePreview() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          child: _TeamValuePreviewCard(
+            isManager: widget.userPosition.contains('監督') ||
+                widget.userPosition.contains('マネージャー'),
+            onFindTeam: () {
+              Navigator.of(sheetContext).pop();
+              _openTeamSearch();
+            },
+            onCreateTeam: () {
+              Navigator.of(sheetContext).pop();
+              _openTeamCreation();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _chatRoomsSubscription?.cancel();
@@ -615,8 +709,10 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final hasTeam = (widget.userTeamId != null && widget.userTeamId!.trim().isNotEmpty);
+    final hasTeam =
+        (widget.userTeamId != null && widget.userTeamId!.trim().isNotEmpty);
     return Scaffold(
+      extendBody: true,
       appBar: AppBar(
         title: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: FirebaseFirestore.instance
@@ -651,8 +747,7 @@ class _HomePageState extends State<HomePage> {
               onTap: () {
                 final description =
                     (data?['description'] as String?)?.trim() ?? '';
-                final encourage =
-                    (data?['encourage'] as String?)?.trim() ?? '';
+                final encourage = (data?['encourage'] as String?)?.trim() ?? '';
                 final rawGrowthPoints = data?['growthPoints'];
                 final growthPoints = rawGrowthPoints is List
                     ? rawGrowthPoints.whereType<Map>().map((item) {
@@ -701,7 +796,8 @@ class _HomePageState extends State<HomePage> {
                       ),
                       content: ConstrainedBox(
                         constraints: BoxConstraints(
-                          maxHeight: MediaQuery.of(dialogContext).size.height * 0.62,
+                          maxHeight:
+                              MediaQuery.of(dialogContext).size.height * 0.62,
                         ),
                         child: SingleChildScrollView(
                           child: Column(
@@ -742,9 +838,11 @@ class _HomePageState extends State<HomePage> {
                                   final label =
                                       (point['label'] as String?)?.trim() ?? '';
                                   final detail =
-                                      (point['detail'] as String?)?.trim() ?? '';
+                                      (point['detail'] as String?)?.trim() ??
+                                          '';
                                   final valueText =
-                                      (point['valueText'] as String?)?.trim() ?? '';
+                                      (point['valueText'] as String?)?.trim() ??
+                                          '';
 
                                   if (label.isEmpty) {
                                     return const SizedBox.shrink();
@@ -753,7 +851,8 @@ class _HomePageState extends State<HomePage> {
                                   return Padding(
                                     padding: const EdgeInsets.only(bottom: 12),
                                     child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Container(
                                           width: 24,
@@ -793,9 +892,11 @@ class _HomePageState extends State<HomePage> {
                                                     const SizedBox(width: 8),
                                                     Text(
                                                       valueText,
-                                                      textAlign: TextAlign.right,
+                                                      textAlign:
+                                                          TextAlign.right,
                                                       style: const TextStyle(
-                                                        color: Color(0xFFD84315),
+                                                        color:
+                                                            Color(0xFFD84315),
                                                         fontSize: 13,
                                                         fontWeight:
                                                             FontWeight.w900,
@@ -837,7 +938,8 @@ class _HomePageState extends State<HomePage> {
                                     ),
                                   ),
                                   child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       const Icon(
                                         Icons.lightbulb_outline,
@@ -871,7 +973,8 @@ class _HomePageState extends State<HomePage> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => MonthlyAwardsHistoryPage(userUid: widget.userUid),
+                                builder: (_) => MonthlyAwardsHistoryPage(
+                                    userUid: widget.userUid),
                               ),
                             );
                           },
@@ -994,16 +1097,16 @@ class _HomePageState extends State<HomePage> {
                 builder: (context, snap) {
                   final data = snap.data?.data();
 
-                  final name = (data?['name'] as String?)?.trim().isNotEmpty == true
-                      ? (data!['name'] as String)
-                      : widget.accountName;
+                  final name =
+                      (data?['name'] as String?)?.trim().isNotEmpty == true
+                          ? (data!['name'] as String)
+                          : widget.accountName;
 
-                  final prefecture = (data?['prefecture'] as String?)
-                          ?.trim()
-                          .isNotEmpty ==
-                      true
-                      ? (data!['prefecture'] as String)
-                      : widget.userPrefecture;
+                  final prefecture =
+                      (data?['prefecture'] as String?)?.trim().isNotEmpty ==
+                              true
+                          ? (data!['prefecture'] as String)
+                          : widget.userPrefecture;
 
                   final positionsRaw = data?['position'];
                   final List<String> positions = (positionsRaw is List)
@@ -1095,7 +1198,9 @@ class _HomePageState extends State<HomePage> {
                                       ),
                                     ),
                                     child: Text(
-                                      _hasActiveSubscription ? 'プレミアム' : 'ベーシック',
+                                      _hasActiveSubscription
+                                          ? 'プレミアム'
+                                          : 'ベーシック',
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontWeight: FontWeight.w700,
@@ -1129,7 +1234,8 @@ class _HomePageState extends State<HomePage> {
                                         ),
                                         decoration: BoxDecoration(
                                           color: Colors.white.withOpacity(0.18),
-                                          borderRadius: BorderRadius.circular(999),
+                                          borderRadius:
+                                              BorderRadius.circular(999),
                                         ),
                                         child: Text(
                                           p,
@@ -1186,8 +1292,7 @@ class _HomePageState extends State<HomePage> {
                     _RichDrawerTile(
                       icon: Icons.flag,
                       title: '目標',
-                      leadingIconColor:
-                          _hasOngoingGoal ? Colors.orange : null,
+                      leadingIconColor: _hasOngoingGoal ? Colors.orange : null,
                       badgeText: _hasOngoingGoal ? '進行中' : null,
                       onTap: () {
                         Navigator.pop(context);
@@ -1231,24 +1336,24 @@ class _HomePageState extends State<HomePage> {
                         );
                       },
                     ),
-                   if (!(widget.userPosition.contains('監督') ||
-                         widget.userPosition.contains('マネージャー')))
-                     _RichDrawerTile(
-                       icon: Icons.insights,
-                       title: '予測・分析',
-                       onTap: () {
-                         Navigator.pop(context);
-                         Navigator.push(
-                           context,
-                           MaterialPageRoute(
-                             builder: (context) => PredictAnalysisPage(
-                               userUid: widget.userUid,
-                               userPosition: widget.userPosition,
-                             ),
-                           ),
-                         );
-                       },
-                     ),
+                    if (!(widget.userPosition.contains('監督') ||
+                        widget.userPosition.contains('マネージャー')))
+                      _RichDrawerTile(
+                        icon: Icons.insights,
+                        title: '予測・分析',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => PredictAnalysisPage(
+                                userUid: widget.userUid,
+                                userPosition: widget.userPosition,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
 
                     const SizedBox(height: 6),
                     const Divider(height: 1),
@@ -1263,17 +1368,27 @@ class _HomePageState extends State<HomePage> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => ProfilePage(userUid: widget.userUid),
+                            builder: (context) =>
+                                ProfilePage(userUid: widget.userUid),
                           ),
                         );
                       },
                     ),
                     _RichDrawerTile(
-                      icon: Icons.swap_horiz,
-                      title: 'チームに切り替える',
-                      leadingIconColor: hasTeam ? const Color(0xFF2E7D32) : null,
-                      onTap: () {
-                        if (!hasTeam) return;
+                      icon: hasTeam ? Icons.swap_horiz : Icons.groups_rounded,
+                      title: hasTeam ? 'チームに切り替える' : 'チームに参加・作成',
+                      leadingIconColor:
+                          hasTeam ? const Color(0xFF2E7D32) : null,
+                      badgeText: hasTeam ? null : 'おすすめ',
+                      onTap: () async {
+                        if (!hasTeam) {
+                          Navigator.pop(context);
+                          await Future<void>.delayed(
+                            const Duration(milliseconds: 220),
+                          );
+                          if (mounted) _showTeamValuePreview();
+                          return;
+                        }
                         Navigator.pop(context);
                         Navigator.push(
                           context,
@@ -1289,25 +1404,15 @@ class _HomePageState extends State<HomePage> {
                         );
                       },
                     ),
-                    _RichDrawerTile(
-                      icon: Icons.group_add,
-                      title: 'チームを作る',
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => CreateTeamAccountPage(
-                              userUid: widget.userUid,
-                              accountName: widget.accountName,
-                              userPrefecture: widget.userPrefecture,
-                              userPosition: widget.userPosition,
-                              userTeamId: widget.userTeamId,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                    if (hasTeam)
+                      _RichDrawerTile(
+                        icon: Icons.group_add,
+                        title: 'チームを作る',
+                        onTap: () {
+                          Navigator.pop(context);
+                          _openTeamCreation();
+                        },
+                      ),
 
                     const SizedBox(height: 6),
                     const Divider(height: 1),
@@ -1317,13 +1422,17 @@ class _HomePageState extends State<HomePage> {
                     _RichDrawerTile(
                       icon: Icons.workspace_premium,
                       title: 'プレミアムプラン',
-                      leadingIconColor: _hasActiveSubscription ? const Color(0xFFFFB300) : null,
-                      onTap: () {
+                      leadingIconColor: _hasActiveSubscription
+                          ? const Color(0xFFFFB300)
+                          : null,
+                      onTap: () async {
                         Navigator.pop(context);
-                        Navigator.push(
+                        await Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (context) => SubscriptionScreen()),
+                          MaterialPageRoute(
+                              builder: (context) => SubscriptionScreen()),
                         );
+                        await _refreshSubscriptionAfterReturn();
                       },
                     ),
                     _RichDrawerTile(
@@ -1336,7 +1445,8 @@ class _HomePageState extends State<HomePage> {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (context) => NoticesPage()),
+                          MaterialPageRoute(
+                              builder: (context) => NoticesPage()),
                         ).then((_) => _checkUnreadNotices());
                       },
                     ),
@@ -1347,7 +1457,8 @@ class _HomePageState extends State<HomePage> {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (context) => SettingsPage()),
+                          MaterialPageRoute(
+                              builder: (context) => SettingsPage()),
                         );
                       },
                     ),
@@ -1361,97 +1472,47 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         children: [
-          if ((widget.userPosition.contains('監督') ||
-                  widget.userPosition.contains('マネージャー')) &&
-              !(widget.userTeamId != null &&
-                  widget.userTeamId!.trim().isNotEmpty))
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => CreateTeamAccountPage(
-                      userUid: widget.userUid,
-                      accountName: widget.accountName,
-                      userPrefecture: widget.userPrefecture,
-                      userPosition: widget.userPosition,
-                      userTeamId: widget.userTeamId,
-                    ),
-                  ),
-                );
-              },
-              child: Container(
-                width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE3F2FD),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF90CAF9)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: const [
-                        Icon(Icons.groups, color: Color(0xFF1565C0)),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'まずはチームを作成しましょう',
-                            style: TextStyle(
-                              color: Color(0xFF0D47A1),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                        Icon(Icons.chevron_right, color: Color(0xFF1565C0)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      '🏟 チームを作成すると出来ること',
-                      style: TextStyle(
-                        color: Color(0xFF0D47A1),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '・試合スコア管理\n・チーム成績\n・個人成績',
-                      style: TextStyle(
-                        color: const Color(0xFF0D47A1).withOpacity(0.9),
-                        height: 1.35,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
           // 招待が届いていれば案内を表示（全ユーザー対象・チーム所属中でも表示）
           if (_pendingInviteDoc != null)
             Builder(
               builder: (context) {
                 final invite = _pendingInviteDoc!.data();
-                final String teamId = (invite['teamId'] as String?)?.trim() ?? '';
+                final String teamId =
+                    (invite['teamId'] as String?)?.trim() ?? '';
                 final String teamNameFromInvite =
                     (invite['teamName'] as String?)?.trim() ?? '';
+                final String inviteSource =
+                    (invite['source'] as String?)?.trim() ?? '';
 
                 return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                   stream: teamId.isNotEmpty
-                      ? FirebaseFirestore.instance.collection('teams').doc(teamId).snapshots()
+                      ? FirebaseFirestore.instance
+                          .collection('teams')
+                          .doc(teamId)
+                          .snapshots()
                       : const Stream.empty(),
                   builder: (context, teamSnap) {
-                    final teamNameFromTeamDoc =
-                        (teamSnap.data?.data()?['teamName'] as String?)?.trim() ??
+                    final teamNameFromTeamDoc = (teamSnap.data
+                                ?.data()?['teamName'] as String?)
+                            ?.trim() ??
                         (teamSnap.data?.data()?['name'] as String?)?.trim() ??
                         '';
 
                     final String teamName = teamNameFromInvite.isNotEmpty
                         ? teamNameFromInvite
-                        : (teamNameFromTeamDoc.isNotEmpty ? teamNameFromTeamDoc : 'チーム');
+                        : (teamNameFromTeamDoc.isNotEmpty
+                            ? teamNameFromTeamDoc
+                            : 'チーム');
+                    final String bannerText = inviteSource == 'join_request'
+                        ? '$teamName への参加申請が承認されました'
+                        : inviteSource == 'invite_link'
+                            ? '$teamName への参加手続きを完了してください'
+                            : '$teamName から招待が届いています';
+                    final IconData bannerIcon = inviteSource == 'join_request'
+                        ? Icons.verified_outlined
+                        : inviteSource == 'invite_link'
+                            ? Icons.how_to_reg_outlined
+                            : Icons.mail;
 
                     return GestureDetector(
                       onTap: () {
@@ -1463,7 +1524,8 @@ class _HomePageState extends State<HomePage> {
                       child: Container(
                         width: double.infinity,
                         margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 14),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFFF8E1),
                           borderRadius: BorderRadius.circular(10),
@@ -1471,11 +1533,11 @@ class _HomePageState extends State<HomePage> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.mail, color: Color(0xFFF57F17)),
+                            Icon(bannerIcon, color: const Color(0xFFF57F17)),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '$teamName から招待が届いています',
+                                bannerText,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -1485,7 +1547,8 @@ class _HomePageState extends State<HomePage> {
                                 ),
                               ),
                             ),
-                            const Icon(Icons.chevron_right, color: Color(0xFFF57F17)),
+                            const Icon(Icons.chevron_right,
+                                color: Color(0xFFF57F17)),
                           ],
                         ),
                       ),
@@ -1496,7 +1559,7 @@ class _HomePageState extends State<HomePage> {
             ),
           if (_pendingTentativeDoc != null &&
               !(widget.userPosition.contains('監督') ||
-                widget.userPosition.contains('マネージャー')))
+                  widget.userPosition.contains('マネージャー')))
             GestureDetector(
               onTap: () {
                 _onTabTapped(1);
@@ -1504,7 +1567,8 @@ class _HomePageState extends State<HomePage> {
               child: Container(
                 width: double.infinity,
                 margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
                 decoration: BoxDecoration(
                   color: const Color(0xFFE8F5E9),
                   borderRadius: BorderRadius.circular(10),
@@ -1532,83 +1596,216 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           Expanded(
-            child: _pages.isNotEmpty
-                ? _pages[_currentIndex]
-                : const Center(child: CircularProgressIndicator()),
+            child: _pages.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : _pages[_currentIndex],
           ),
         ],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: Colors.blueGrey,
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.black,
-        onTap: _onTabTapped,
-        currentIndex: _currentIndex,
+      bottomNavigationBar: BNetFloatingTabBar(
+        onSelected: _onTabTapped,
+        selectedIndex: _currentIndex,
         items: [
-          BottomNavigationBarItem(
-            icon: Icon(
-              (widget.userPosition.contains('監督') ||
-                      widget.userPosition.contains('マネージャー'))
-                  ? Icons.note
-                  : Icons.bar_chart,
-            ),
+          BNetTabItem(
+            icon: (widget.userPosition.contains('監督') ||
+                    widget.userPosition.contains('マネージャー'))
+                ? Icons.note_outlined
+                : Icons.bar_chart_outlined,
+            selectedIcon: (widget.userPosition.contains('監督') ||
+                    widget.userPosition.contains('マネージャー'))
+                ? Icons.note
+                : Icons.bar_chart_rounded,
             label: (widget.userPosition.contains('監督') ||
                     widget.userPosition.contains('マネージャー'))
                 ? 'メモ'
                 : '成績',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.mode),
+          BNetTabItem(
+            icon: Icons.edit_outlined,
+            selectedIcon: Icons.edit_rounded,
             label: widget.userPosition.contains('監督') ? 'オーダー' : '記録する',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.list),
+          const BNetTabItem(
+            icon: Icons.view_list_outlined,
+            selectedIcon: Icons.view_list_rounded,
             label: '投稿一覧',
           ),
-          BottomNavigationBarItem(
-            icon: FaIcon(FontAwesomeIcons.rankingStar),
+          const BNetTabItem(
+            icon: FontAwesomeIcons.rankingStar,
             label: 'ランキング',
           ),
-          BottomNavigationBarItem(
-            icon: FaIcon(FontAwesomeIcons.baseballBatBall),
+          const BNetTabItem(
+            icon: FontAwesomeIcons.baseballBatBall,
             label: '全国',
           ),
-          BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none, // 🔹 バッジがアイコンの枠外にも配置できるようにする
-              children: [
-                const Icon(Icons.chat), // チャットアイコンのサイズはそのまま
-                if (unreadChatCount > 0) // 🔴 未読数があるときのみバッジを表示
-                  Positioned(
-                    right: -2, // 🔹 右上に寄せる
-                    top: -2, // 🔹 上に寄せる
-                    child: Container(
-                      padding: const EdgeInsets.all(2), // 🔹 バッジの余白を小さく
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(7), // 🔹 丸みを小さく調整
-                      ),
-                      constraints: const BoxConstraints(
-                        minWidth: 12, // 🔹 バッジの幅を小さく
-                        minHeight: 12, // 🔹 バッジの高さを小さく
-                      ),
-                      child: Text(
-                        '$unreadChatCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8, // 🔹 数字を小さく
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+          BNetTabItem(
+            icon: Icons.chat_bubble_outline_rounded,
+            selectedIcon: Icons.chat_bubble_rounded,
             label: 'チャット',
+            badgeCount: unreadChatCount,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TeamValuePreviewCard extends StatelessWidget {
+  final bool isManager;
+  final VoidCallback onFindTeam;
+  final VoidCallback onCreateTeam;
+
+  const _TeamValuePreviewCard({
+    required this.isManager,
+    required this.onFindTeam,
+    required this.onCreateTeam,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const blue = Color(0xFF155EEF);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFF2F7FF), Color(0xFFE7F0FF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFC7DAFF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x140F4CBE),
+            blurRadius: 16,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: blue,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.groups_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isManager ? 'チーム管理を、もっとラクに' : 'チームとつながると、記録がもっと楽しく',
+                      style: const TextStyle(
+                        color: Color(0xFF102A56),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      '登録後はこんなことができます',
+                      style: TextStyle(
+                        color: Color(0xFF526581),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          const _TeamBenefitRow(
+            icon: Icons.auto_graph_rounded,
+            text: '個人の記録がチーム成績に自動反映',
+          ),
+          const SizedBox(height: 8),
+          const _TeamBenefitRow(
+            icon: Icons.emoji_events_rounded,
+            text: 'チーム内ランキング・月間MVPを楽しめる',
+          ),
+          const SizedBox(height: 8),
+          _TeamBenefitRow(
+            icon: isManager
+                ? Icons.person_add_alt_1_rounded
+                : Icons.calendar_month_rounded,
+            text: isManager ? 'アプリ未登録の選手もまとめて管理' : '予定やチームの連絡をまとめて確認',
+          ),
+          const SizedBox(height: 15),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onFindTeam,
+                  icon: const Icon(Icons.search_rounded, size: 19),
+                  label: const Text('チームを探す'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: blue,
+                    side: const BorderSide(color: Color(0xFF9ABAF7)),
+                    backgroundColor: Colors.white.withValues(alpha: 0.72),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onCreateTeam,
+                  icon: const Icon(Icons.add_rounded, size: 19),
+                  label: const Text('作成する'),
+                  style: FilledButton.styleFrom(backgroundColor: blue),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TeamBenefitRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _TeamBenefitRow({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(icon, size: 17, color: const Color(0xFF155EEF)),
+        ),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Color(0xFF233F68),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

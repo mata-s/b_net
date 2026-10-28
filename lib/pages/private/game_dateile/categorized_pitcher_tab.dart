@@ -59,6 +59,28 @@ class _CategorizedPitcherTabState extends State<CategorizedPitcherTab> {
 
     bool isPitcher = widget.userPositions.contains("投手");
     bool isCatcher = widget.userPositions.contains("捕手");
+    final totalGames = (stats?['totalGames'] as num?)?.toInt() ?? 0;
+    final pitchingAppearances =
+        (stats?['pitchingRecordedAppearances'] as num?)?.toInt() ?? 0;
+    final pitchingAdvancedAppearances =
+        (stats?['pitchingAdvancedRecordedAppearances'] as num?)?.toInt();
+    final pitchingAdvancedComplete = pitchingAdvancedAppearances == null ||
+        (pitchingAppearances > 0 &&
+            pitchingAdvancedAppearances == pitchingAppearances);
+    final fieldingRecordedGames =
+        (stats?['fieldingRecordedGames'] as num?)?.toInt();
+    final fieldingComplete =
+        fieldingRecordedGames == null || fieldingRecordedGames == totalGames;
+    final catchingRecordedGames =
+        (stats?['catchingRecordedGames'] as num?)?.toInt();
+    final catchingComplete =
+        catchingRecordedGames == null || catchingRecordedGames == totalGames;
+    String pitchingAdvancedValue(String key) =>
+        pitchingAdvancedComplete ? (stats?[key]?.toString() ?? '0') : '—';
+    String fieldingValue(String key) =>
+        fieldingComplete ? (stats?[key]?.toString() ?? '0') : '—';
+    String catchingValue(String key) =>
+        catchingComplete ? (stats?[key]?.toString() ?? '0') : '—';
 
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 240, 251, 252),
@@ -226,21 +248,22 @@ class _CategorizedPitcherTabState extends State<CategorizedPitcherTab> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          buildStatColumn('被安打',
+                              pitchingAdvancedValue('totalHitsAllowed'), 60),
                           buildStatColumn(
-                              '被安打', '${stats?['totalHitsAllowed']}', 60),
-                          buildStatColumn('与四球', '${stats?['totalWalks']}', 60),
-                          buildStatColumn(
-                              '与死球', '${stats?['totalHitByPitch']}', 60),
-                          buildStatColumn(
-                              '失点', '${stats?['totalRunsAllowed']}', 60),
+                              '与四球', pitchingAdvancedValue('totalWalks'), 60),
+                          buildStatColumn('与死球',
+                              pitchingAdvancedValue('totalHitByPitch'), 60),
+                          buildStatColumn('失点',
+                              pitchingAdvancedValue('totalRunsAllowed'), 60),
                         ],
                       ),
                       const SizedBox(height: 20),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          buildStatColumn(
-                              '打者', '${stats?['totalBattersFaced']}', 60),
+                          buildStatColumn('打者',
+                              pitchingAdvancedValue('totalBattersFaced'), 60),
                           buildStatColumn('先発', '${stats?['totalStarts']}', 60),
                           buildStatColumn(
                               '中継ぎ', '${stats?['totalReliefs']}', 60),
@@ -252,10 +275,10 @@ class _CategorizedPitcherTabState extends State<CategorizedPitcherTab> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          buildStatColumn('完投',
+                              pitchingAdvancedValue('totalCompleteGames'), 60),
                           buildStatColumn(
-                              '完投', '${stats?['totalCompleteGames']}', 60),
-                          buildStatColumn(
-                              '完封', '${stats?['totalShutouts']}', 60),
+                              '完封', pitchingAdvancedValue('totalShutouts'), 60),
                           buildStatColumn(
                               'ホールド', '${stats?['totalHolds']}', 60),
                           buildStatColumn('セーブ', '${stats?['totalSaves']}', 60),
@@ -305,7 +328,9 @@ class _CategorizedPitcherTabState extends State<CategorizedPitcherTab> {
                           TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
                     ),
                     Text(
-                      '${formatPercentage(stats?['fieldingPercentage'])}',
+                      fieldingComplete
+                          ? formatPercentage(stats?['fieldingPercentage'])
+                          : '—',
                       style: const TextStyle(
                           fontSize: 24, fontWeight: FontWeight.bold),
                     ),
@@ -313,9 +338,11 @@ class _CategorizedPitcherTabState extends State<CategorizedPitcherTab> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        buildStatColumn('刺殺', '${stats?['totalPutouts']}', 60),
-                        buildStatColumn('捕殺', '${stats?['totalAssists']}', 60),
-                        buildStatColumn('失策', '${stats?['totalErrors']}', 60),
+                        buildStatColumn(
+                            '刺殺', fieldingValue('totalPutouts'), 60),
+                        buildStatColumn(
+                            '捕殺', fieldingValue('totalAssists'), 60),
+                        buildStatColumn('失策', fieldingValue('totalErrors'), 60),
                       ],
                     ),
                     if (isCatcher) ...[
@@ -324,12 +351,15 @@ class _CategorizedPitcherTabState extends State<CategorizedPitcherTab> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           buildStatColumn('盗塁企図',
-                              '${stats?['totalStolenBaseAttempts']}', 60),
+                              catchingValue('totalStolenBaseAttempts'), 60),
                           buildStatColumn(
-                              '盗塁刺', '${stats?['totalCaughtStealing']}', 60),
+                              '盗塁刺', catchingValue('totalCaughtStealing'), 60),
                           buildStatColumn(
                               '阻止率',
-                              '${formatPercentage(stats?['catcherStealingRate'])}',
+                              catchingComplete
+                                  ? formatPercentage(
+                                      stats?['catcherStealingRate'])
+                                  : '—',
                               60),
                         ],
                       ),

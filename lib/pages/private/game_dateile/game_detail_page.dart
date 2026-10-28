@@ -10,11 +10,20 @@ class GameDetailPage extends StatelessWidget {
     required this.gameData,
     required this.isPitcher,
     this.isCatcher = false,
-
   });
 
   @override
   Widget build(BuildContext context) {
+    final recordedSections = gameData['recordedSections'];
+    final isLegacy = recordedSections is! Map;
+    final pitchingAdvancedRecorded =
+        isLegacy || (recordedSections['pitchingAdvanced'] == true);
+    final battingAdvancedRecorded =
+        isLegacy || (recordedSections['battingAdvanced'] == true);
+    final fieldingRecorded = isLegacy || (recordedSections['fielding'] == true);
+    final catchingRecorded = isLegacy || (recordedSections['catching'] == true);
+    String advancedPitchingValue(String key) =>
+        pitchingAdvancedRecorded ? (gameData[key]?.toString() ?? '0') : '—';
     return Scaffold(
       appBar: AppBar(
         title: const Text('試合詳細'),
@@ -65,18 +74,23 @@ class GameDetailPage extends StatelessWidget {
                 children: [
                   Text('登板: ${gameData['appearanceType'] ?? ''}'),
                   const SizedBox(width: 45),
-                  Text('対戦打者: ${gameData['battersFaced'] ?? 0}人'),
+                  Text('対戦打者: ${advancedPitchingValue('battersFaced')}人'),
                   const SizedBox(width: 45),
-                  Text('球数: ${gameData['pitchCount'] ?? 0}球'),
+                  Text('球数: ${advancedPitchingValue('pitchCount')}球'),
                 ],
               ),
               const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(child: Text('与四球: ${gameData['walks'] ?? 0}')),
-                  Expanded(child: Text('与死球: ${gameData['hitByPitch'] ?? 0}')),
-                  Expanded(child: Text('失点: ${gameData['runsAllowed'] ?? 0}')),
+                  Expanded(
+                      child: Text('与四球: ${advancedPitchingValue('walks')}')),
+                  Expanded(
+                      child:
+                          Text('与死球: ${advancedPitchingValue('hitByPitch')}')),
+                  Expanded(
+                      child:
+                          Text('失点: ${advancedPitchingValue('runsAllowed')}')),
                 ],
               ),
               const SizedBox(height: 10),
@@ -84,7 +98,9 @@ class GameDetailPage extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(child: Text('自責点: ${gameData['earnedRuns'] ?? 0}')),
-                  Expanded(child: Text('被安打: ${gameData['hitsAllowed'] ?? 0}')),
+                  Expanded(
+                      child:
+                          Text('被安打: ${advancedPitchingValue('hitsAllowed')}')),
                   Expanded(child: Text('奪三振: ${gameData['strikeouts'] ?? 0}')),
                 ],
               ),
@@ -102,10 +118,10 @@ class GameDetailPage extends StatelessWidget {
                 final batterPitchCount = atBat['batterPitchCount'];
 
                 String extraInfo = '';
-                if (swingCount != null) {
+                if (battingAdvancedRecorded && swingCount != null) {
                   extraInfo += 'スイング数: $swingCount';
                 }
-                if (batterPitchCount != null) {
+                if (battingAdvancedRecorded && batterPitchCount != null) {
                   if (extraInfo.isNotEmpty) extraInfo += ' / ';
                   extraInfo += '球数: $batterPitchCount';
                 }
@@ -139,16 +155,19 @@ class GameDetailPage extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('刺殺: ${gameData['putouts'] ?? 0}'),
-                Text('捕殺: ${gameData['assists'] ?? 0}'),
-                Text('失策: ${gameData['errors'] ?? 0}'),
+                Text(
+                    '刺殺: ${fieldingRecorded ? gameData['putouts'] ?? 0 : '—'}'),
+                Text(
+                    '捕殺: ${fieldingRecorded ? gameData['assists'] ?? 0 : '—'}'),
+                Text('失策: ${fieldingRecorded ? gameData['errors'] ?? 0 : '—'}'),
               ],
             ),
             if (isCatcher) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Text('盗塁刺し: ${gameData['caughtStealing'] ?? 0}'),
+                  Text(
+                      '盗塁刺し: ${catchingRecorded ? gameData['caughtStealing'] ?? 0 : '—'}'),
                 ],
               ),
             ],

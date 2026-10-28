@@ -7,12 +7,16 @@ class PlayerPage extends StatefulWidget {
   final String userUid;
   final List<String> userPosition;
   final bool hasActiveSubscription;
+  final bool hasTeam;
+  final VoidCallback? onTeamValueTap;
 
   const PlayerPage({
     super.key,
     required this.userUid,
     required this.userPosition,
     required this.hasActiveSubscription,
+    this.hasTeam = false,
+    this.onTeamValueTap,
   });
 
   @override
@@ -40,6 +44,7 @@ class _PlayerPageState extends State<PlayerPage>
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             const SizedBox(height: 8),
@@ -68,6 +73,8 @@ class _PlayerPageState extends State<PlayerPage>
                   PlayerDashboardPage(
                     userUid: widget.userUid,
                     userPosition: widget.userPosition,
+                    hasTeam: widget.hasTeam,
+                    onTeamValueTap: widget.onTeamValueTap,
                   ),
                   IndividualHome(
                     userUid: widget.userUid,

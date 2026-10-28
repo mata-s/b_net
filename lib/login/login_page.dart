@@ -6,6 +6,8 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import '../home_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../pages/team/member_parts/team_invite_link_landing_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -34,10 +36,7 @@ class _LoginPageState extends State<LoginPage> {
 
       final token = await messaging.getToken();
       if (token != null && token.isNotEmpty) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .update({
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
           'fcmTokens': FieldValue.arrayUnion([token]),
         });
         print('✅ FCM token saved for user $uid: $token');
@@ -103,14 +102,29 @@ class _LoginPageState extends State<LoginPage> {
                 final teams = List<String>.from(data['teams'] ?? []);
                 final prefecture = data['prefecture'] ?? '未設定';
 
-                return HomePage(
-                  userUid: user.uid,
-                  isTeamAccount: false,
-                  accountId: user.uid,
-                  accountName: user.displayName ?? '匿名',
-                  userPrefecture: prefecture,
-                  userPosition: positions,
-                  userTeamId: teams.isNotEmpty ? teams.first : null,
+                return FutureBuilder<SharedPreferences>(
+                  future: SharedPreferences.getInstance(),
+                  builder: (context, preferencesSnapshot) {
+                    if (!preferencesSnapshot.hasData) {
+                      return const Scaffold(
+                        body: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    final pendingToken = preferencesSnapshot.data!
+                        .getString(pendingTeamInviteTokenKey);
+                    if (pendingToken != null && pendingToken.isNotEmpty) {
+                      return TeamInviteLinkLandingPage(token: pendingToken);
+                    }
+                    return HomePage(
+                      userUid: user.uid,
+                      isTeamAccount: false,
+                      accountId: user.uid,
+                      accountName: user.displayName ?? '匿名',
+                      userPrefecture: prefecture,
+                      userPosition: positions,
+                      userTeamId: teams.isNotEmpty ? teams.first : null,
+                    );
+                  },
                 );
               },
             ),
@@ -161,7 +175,8 @@ class _LoginPageState extends State<LoginPage> {
       await _auth.sendPasswordResetEmail(email: email);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('パスワード再設定用のメールを送信しました。迷惑メールフォルダもご確認ください。')),
+        const SnackBar(
+            content: Text('パスワード再設定用のメールを送信しました。迷惑メールフォルダもご確認ください。')),
       );
     } on FirebaseAuthException catch (e) {
       String message = 'パスワード再設定メールの送信に失敗しました';
@@ -187,9 +202,8 @@ class _LoginPageState extends State<LoginPage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isTablet = screenWidth >= 600;
 
-    final double formWidth = isTablet
-        ? (screenWidth * 0.55).clamp(360.0, 460.0)
-        : 300;
+    final double formWidth =
+        isTablet ? (screenWidth * 0.55).clamp(360.0, 460.0) : 300;
 
     return Scaffold(
       body: SafeArea(
@@ -200,83 +214,83 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-              SizedBox(
-                width: formWidth,
-                child: TextField(
-                  controller: _emailController,
-                  decoration: const InputDecoration(
-                    labelText: 'メールアドレス',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: formWidth,
-                child: TextField(
-                  controller: _passwordController,
-                  obscureText: _obscureText,
-                  decoration: InputDecoration(
-                    labelText: 'パスワード',
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureText
-                            ? Icons.visibility_off
-                            : Icons.visibility, // 修正箇所
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _obscureText = !_obscureText; // 表示非表示の切り替え
-                        });
-                      },
+                SizedBox(
+                  width: formWidth,
+                  child: TextField(
+                    controller: _emailController,
+                    decoration: const InputDecoration(
+                      labelText: 'メールアドレス',
+                      border: OutlineInputBorder(),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _login,
-                child: const Text('ログイン'),
-              ),
-              const SizedBox(height: 15),
-              RichText(
-                text: TextSpan(
-                  style: const TextStyle(color: Colors.black),
-                  children: [
-                    const TextSpan(text: 'アカウントを作成していない方は'),
-                    TextSpan(
-                      text: 'こちら',
-                      style: const TextStyle(color: Colors.blue),
-                      recognizer: TapGestureRecognizer()
-                        ..onTap = () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => SignUpPage(),
-                            ),
-                          );
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: formWidth,
+                  child: TextField(
+                    controller: _passwordController,
+                    obscureText: _obscureText,
+                    decoration: InputDecoration(
+                      labelText: 'パスワード',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureText
+                              ? Icons.visibility_off
+                              : Icons.visibility, // 修正箇所
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _obscureText = !_obscureText; // 表示非表示の切り替え
+                          });
                         },
-                    )
-                  ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              GestureDetector(
-                onTap: _resetPassword,
-                child: RichText(
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _login,
+                  child: const Text('ログイン'),
+                ),
+                const SizedBox(height: 15),
+                RichText(
                   text: TextSpan(
                     style: const TextStyle(color: Colors.black),
                     children: [
-                      const TextSpan(text: 'パスワードをお忘れの方は'),
+                      const TextSpan(text: 'アカウントを作成していない方は'),
                       TextSpan(
                         text: 'こちら',
                         style: const TextStyle(color: Colors.blue),
-                      ),
+                        recognizer: TapGestureRecognizer()
+                          ..onTap = () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => SignUpPage(),
+                              ),
+                            );
+                          },
+                      )
                     ],
                   ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: _resetPassword,
+                  child: RichText(
+                    text: TextSpan(
+                      style: const TextStyle(color: Colors.black),
+                      children: [
+                        const TextSpan(text: 'パスワードをお忘れの方は'),
+                        TextSpan(
+                          text: 'こちら',
+                          style: const TextStyle(color: Colors.blue),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

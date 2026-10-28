@@ -7,13 +7,17 @@ import 'package:b_net/pages/team/team_performance_home.dart';
 import 'package:b_net/pages/team/team_profile.dart';
 import 'package:b_net/pages/team/team_register_member.dart';
 import 'package:b_net/pages/team/team_schedule_calendar.dart';
+import 'package:b_net/pages/team/event_detail_page.dart';
 import 'package:b_net/pages/team/team_mission_page.dart';
 import 'package:b_net/pages/team/team_mvp_vote_page.dart';
 import 'package:b_net/pages/team/team_annual_results.dart';
 import 'package:b_net/services/team_subscription_screen.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'member_parts/invite_member_page.dart'; // チームに招待するページ
+import 'member_parts/team_join_requests_page.dart';
+import 'member_parts/team_invite_link_page.dart';
 import 'team_account.dart'; // チームアカウント切り替えページ
 import 'member_parts/team_members_page.dart'; // チームメンバー一覧ページ
 import '../../home_page.dart'; // 個人ページ
@@ -62,6 +66,7 @@ class _TeamHomePageState extends State<TeamHomePage> {
   bool _hasActiveTeamSubscription = false;
   TeamPlanTier _teamPlanTier = TeamPlanTier.none;
   bool _hasOngoingTeamGoal = false;
+  bool _isTeamAdmin = false;
 
   // @override
   // void initState() {
@@ -71,27 +76,27 @@ class _TeamHomePageState extends State<TeamHomePage> {
   // }
 
   @override
-void initState() {
-  super.initState();
-  _init();
-}
-
-Future<void> _init() async {
-  try {
-    // このページを開いたタイミングを記録（最近動きがあるチーム判定用）
-    await _updateTeamLastLoginAt();
-
-    await _fetchTeamData(); // チーム情報（都道府県など）
-    await _checkTeamSubscriptionStatus(); // サブスク情報（gold / platina）
-    await _checkOngoingTeamGoals();
-    _initializePages(); // ← ここで初めてページを組み立てる
-  } finally {
-    if (!mounted) return;
-    setState(() {
-      isLoading = false;
-    });
+  void initState() {
+    super.initState();
+    _init();
   }
-}
+
+  Future<void> _init() async {
+    try {
+      // このページを開いたタイミングを記録（最近動きがあるチーム判定用）
+      await _updateTeamLastLoginAt();
+
+      await _fetchTeamData(); // チーム情報（都道府県など）
+      await _checkTeamSubscriptionStatus(); // サブスク情報（gold / platina）
+      await _checkOngoingTeamGoals();
+      _initializePages(); // ← ここで初めてページを組み立てる
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
 
   Future<void> _updateTeamLastLoginAt() async {
     final teamId = widget.team['teamId'] as String?;
@@ -120,6 +125,7 @@ Future<void> _init() async {
           final data = teamDoc.data() as Map<String, dynamic>;
           teamPrefecture = data['prefecture'] ?? "未設定";
           maxWinStreak = data['maxWinStreak'];
+          _isTeamAdmin = data['createdBy'] == widget.userUid;
         });
       } else {
         print('❌ チームデータが見つかりません');
@@ -158,15 +164,11 @@ Future<void> _init() async {
         final data = snapshot.docs.first.data();
         final productId = (data['productId'] ?? '') as String;
 
-        if (
-          productId.contains('teamPlatina') ||
-          productId.contains('platina')
-        ) {
+        if (productId.contains('teamPlatina') ||
+            productId.contains('platina')) {
           tier = TeamPlanTier.platina;
-        } else if (
-          productId.contains('teamGold') ||
-          productId.contains('gold')
-        ) {
+        } else if (productId.contains('teamGold') ||
+            productId.contains('gold')) {
           tier = TeamPlanTier.gold;
         }
       }
@@ -183,6 +185,15 @@ Future<void> _init() async {
         _teamPlanTier = TeamPlanTier.none;
       });
     }
+  }
+
+  Future<void> _refreshTeamSubscriptionAfterReturn() async {
+    await _checkTeamSubscriptionStatus();
+    if (!mounted) return;
+
+    setState(() {
+      _initializePages();
+    });
   }
 
   Future<void> _checkOngoingTeamGoals() async {
@@ -252,7 +263,7 @@ Future<void> _init() async {
         startDate: DateTime(2000, 1, 1), // 開始日
         endDate: DateTime.now(), // 終了日
         hasActiveTeamSubscription: _hasActiveTeamSubscription,
-      ), 
+      ),
       TeamCalenderTab(teamId: widget.team['teamId']),
       PrefectureTeamRanking(
         teamId: widget.team['teamId'],
@@ -266,7 +277,11 @@ Future<void> _init() async {
         hasActiveTeamSubscription: _hasActiveTeamSubscription,
         teamPlanTier: _teamPlanTier,
       ),
-      TeamMvpVotePage(teamId: widget.team['teamId'], hasActiveTeamSubscription: _hasActiveTeamSubscription, teamPlanTier: _teamPlanTier,),
+      TeamMvpVotePage(
+        teamId: widget.team['teamId'],
+        hasActiveTeamSubscription: _hasActiveTeamSubscription,
+        teamPlanTier: _teamPlanTier,
+      ),
       TeamScheduleCalendar(teamId: widget.team['teamId']),
     ];
   }
@@ -284,6 +299,190 @@ Future<void> _init() async {
     }
   }
 
+  Stream<QuerySnapshot<Map<String, dynamic>>> _nextScheduleStream() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return FirebaseFirestore.instance
+        .collection('teams')
+        .doc(widget.team['teamId'].toString())
+        .collection('schedule')
+        .where(
+          'game_date',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(today),
+        )
+        .orderBy('game_date')
+        .limit(1)
+        .snapshots();
+  }
+
+  String _nextScheduleDateLabel(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final difference = target.difference(today).inDays;
+    final weekday = const ['月', '火', '水', '木', '金', '土', '日'][date.weekday - 1];
+    if (difference == 0) return '今日';
+    if (difference == 1) return '明日';
+    return '${date.month}/${date.day}（$weekday）';
+  }
+
+  Event _eventFromScheduleDocument(
+    QueryDocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data();
+    return Event(
+      document.id,
+      (data['title'] ?? '予定').toString(),
+      (data['opponent'] ?? '').toString(),
+      (data['location'] ?? '').toString(),
+      (data['details'] ?? '').toString(),
+      data['time']?.toString(),
+      (data['createdBy'] ?? '').toString(),
+      (data['createdName'] ?? '').toString(),
+      data['stamps'] is List
+          ? List<Map<String, dynamic>>.from(data['stamps'] as List)
+          : <Map<String, dynamic>>[],
+      data['comments'] is List
+          ? List<Map<String, dynamic>>.from(data['comments'] as List)
+          : <Map<String, dynamic>>[],
+      date: (data['game_date'] as Timestamp?)?.toDate(),
+      eventType: (data['eventType'] ?? '').toString().trim().isNotEmpty
+          ? data['eventType'].toString()
+          : ((data['opponent'] ?? '').toString().trim().isNotEmpty
+              ? '試合'
+              : 'その他'),
+    );
+  }
+
+  Widget _buildNextScheduleCard() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _nextScheduleStream(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError ||
+            !snapshot.hasData ||
+            snapshot.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final document = snapshot.data!.docs.first;
+        final data = document.data();
+        final dateValue = data['game_date'];
+        if (dateValue is! Timestamp) return const SizedBox.shrink();
+
+        final date = dateValue.toDate();
+        final event = _eventFromScheduleDocument(document);
+        final time = (data['time'] ?? '').toString().trim();
+        final opponent = (data['opponent'] ?? '').toString().trim();
+        final location = (data['location'] ?? '').toString().trim();
+        final detailParts = <String>[
+          if (opponent.isNotEmpty && opponent != '不明') 'vs $opponent',
+          if (location.isNotEmpty && location != '不明') location,
+        ];
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          child: Card(
+            margin: EdgeInsets.zero,
+            elevation: 0,
+            color: const Color(0xFFEFF6FF),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Color(0xFFBFDBFE)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => EventDetailPage(
+                      event: event,
+                      teamId: widget.team['teamId'].toString(),
+                      onUpdate: (_) {},
+                    ),
+                  ),
+                );
+              },
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.event_available_rounded,
+                        color: Color(0xFF1565C0),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                _nextScheduleDateLabel(date),
+                                style: const TextStyle(
+                                  color: Color(0xFF1565C0),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              if (time.isNotEmpty && time != '未設定') ...[
+                                const SizedBox(width: 8),
+                                Text(
+                                  time,
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            event.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (detailParts.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              detailParts.join(' ・ '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.black54,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: Color(0xFF1565C0)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // Drawerメニューの生成（リッチ版）
   Widget _buildDrawer(BuildContext context) {
     // プラン表示用
@@ -294,8 +493,7 @@ Future<void> _init() async {
         : 'ベーシック';
 
     // チーム画像URL: profileImageのみ
-    final String teamImageUrl =
-        (widget.team['profileImage'] ?? '').toString();
+    final String teamImageUrl = (widget.team['profileImage'] ?? '').toString();
 
     Widget buildAvatar() {
       if (teamImageUrl.isNotEmpty) {
@@ -380,7 +578,8 @@ Future<void> _init() async {
             if (badgeText != null)
               Container(
                 margin: const EdgeInsets.only(left: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.blue.withOpacity(0.10),
                   borderRadius: BorderRadius.circular(999),
@@ -423,278 +622,316 @@ Future<void> _init() async {
         bottom: false,
         child: Column(
           children: [
-          // リッチなヘッダー
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 46, 16, 16),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.blue.shade700,
-                  Colors.blue.shade500,
-                  Colors.blue.shade300,
+            // リッチなヘッダー
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 46, 16, 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.blue.shade700,
+                    Colors.blue.shade500,
+                    Colors.blue.shade300,
+                  ],
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  buildAvatar(),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          (widget.team['teamName'] ?? 'チーム').toString(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: buildPlanChip(),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on,
+                                size: 14, color: Colors.white),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                teamPrefecture.isNotEmpty
+                                    ? teamPrefecture
+                                    : '未設定',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                buildAvatar(),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        (widget.team['teamName'] ?? 'チーム').toString(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: buildPlanChip(),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on, size: 14, color: Colors.white),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              teamPrefecture.isNotEmpty ? teamPrefecture : '未設定',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.9),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: <Widget>[
+                  sectionTitle('チーム'),
+                  menuTile(
+                    icon: Icons.flag,
+                    title: 'チーム目標',
+                    iconColor:
+                        _hasOngoingTeamGoal ? Colors.orange : Colors.blue,
+                    badgeText: _hasOngoingTeamGoal ? '進行中' : null,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamMissionPage(
+                            teamId: widget.team['teamId'],
+                            hasActiveTeamSubscription:
+                                _hasActiveTeamSubscription,
                           ),
-                        ],
-                      ),
-                    ],
+                        ),
+                      );
+                    },
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: <Widget>[
-                sectionTitle('チーム'),
-                menuTile(
-                  icon: Icons.flag,
-                  title: 'チーム目標',
-                  iconColor: _hasOngoingTeamGoal ? Colors.orange : Colors.blue,
-                  badgeText: _hasOngoingTeamGoal ? '進行中' : null,
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamMissionPage(
-                          teamId: widget.team['teamId'],
-                          hasActiveTeamSubscription: _hasActiveTeamSubscription,
+                  menuTile(
+                    icon: Icons.group,
+                    title: 'チームプロフィール',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamProfilePage(
+                            teamId: widget.team['teamId'],
+                            userUid: widget.userUid,
+                            accountName: widget.accountName,
+                            userPrefecture: widget.userPrefecture,
+                            userPosition: widget.userPosition,
+                            userTeamId: widget.userTeamId,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                menuTile(
-                  icon: Icons.group,
-                  title: 'チームプロフィール',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamProfilePage(
-                          teamId: widget.team['teamId'],
-                          userUid: widget.userUid,
-                          accountName: widget.accountName,
-                          userPrefecture: widget.userPrefecture,
-                          userPosition: widget.userPosition,
-                          userTeamId: widget.userTeamId,
+                      );
+                    },
+                  ),
+                  menuTile(
+                    icon: Icons.emoji_people_outlined,
+                    title: 'チームメンバー一覧',
+                    onTap: () {
+                      // 先にドロワーを閉じてから遷移（遷移時の見た目を安定させる）
+                      Navigator.of(context).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              TeamMembersPage(teamId: widget.team['teamId']),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                menuTile(
-                  icon: Icons.emoji_people_outlined,
-                  title: 'チームメンバー一覧',
-                  onTap: () {
-                    // 先にドロワーを閉じてから遷移（遷移時の見た目を安定させる）
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamMembersPage(teamId: widget.team['teamId']),
-                      ),
-                    );
-                  },
-                ),
-                menuTile(
-                  icon: Icons.person_add_alt_1,
-                  title: '選手を登録する',
-                  onTap: () {
-                    // 先にドロワーを閉じてから遷移（遷移時の見た目を安定させる）
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamRegisterMemberPage(
-                          teamId: (widget.team['teamId'] ?? '').toString(),
-                          teamPrefecture: teamPrefecture,
+                      );
+                    },
+                  ),
+                  menuTile(
+                    icon: Icons.person_add_alt_1,
+                    title: '選手を登録する',
+                    onTap: () {
+                      // 先にドロワーを閉じてから遷移（遷移時の見た目を安定させる）
+                      Navigator.of(context).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamRegisterMemberPage(
+                            teamId: (widget.team['teamId'] ?? '').toString(),
+                            teamPrefecture: teamPrefecture,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                menuTile(
-                  icon: Icons.group_add,
-                  title: 'チームに招待する',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => InviteMemberPage(team: widget.team),
-                      ),
-                    );
-                  },
-                ),
-
-                const Divider(height: 28),
-                sectionTitle('データ'),
-                menuTile(
-                  icon: Icons.bar_chart,
-                  title: '成績',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamAnnualResultsPage(
-                          teamId: widget.team['teamId'],
+                      );
+                    },
+                  ),
+                  menuTile(
+                    icon: Icons.group_add,
+                    title: 'チームに招待する',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              InviteMemberPage(team: widget.team),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                menuTile(
-                  icon: Icons.analytics,
-                  title: '分析',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamAnalysisPage(
-                          teamId: widget.team['teamId'],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                                menuTile(
-                  icon: Icons.query_stats,
-                  title: '選手成績一覧',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamMemberStatsPage(
-          teamId: widget.team['teamId'],
-        ),
-        ),
-        );
-        },
-        ),
-
-                if (maxWinStreak != null && maxWinStreak! >= 2)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.red.withOpacity(0.18)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.local_fire_department, color: Colors.red),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              '最多連勝記録: $maxWinStreak連勝  (${widget.team['maxWinStreakYear'] ?? '不明'}年)',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
+                      );
+                    },
+                  ),
+                  if (_isTeamAdmin)
+                    menuTile(
+                      icon: Icons.qr_code_2_rounded,
+                      title: '招待URL・QRコード',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => TeamInviteLinkPage(
+                              teamId: widget.team['teamId'].toString(),
+                              teamName:
+                                  (widget.team['teamName'] ?? 'チーム').toString(),
                             ),
                           ),
-                        ],
+                        );
+                      },
+                    ),
+                  if (_isTeamAdmin)
+                    menuTile(
+                      icon: Icons.how_to_reg_rounded,
+                      title: '参加申請を確認',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => TeamJoinRequestsPage(
+                              teamId: widget.team['teamId'],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  const Divider(height: 28),
+                  sectionTitle('データ'),
+                  menuTile(
+                    icon: Icons.bar_chart,
+                    title: '成績',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamAnnualResultsPage(
+                            teamId: widget.team['teamId'],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  menuTile(
+                    icon: Icons.analytics,
+                    title: '分析',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamAnalysisPage(
+                            teamId: widget.team['teamId'],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  menuTile(
+                    icon: Icons.query_stats,
+                    title: '選手成績一覧',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamMemberStatsPage(
+                            teamId: widget.team['teamId'],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  if (maxWinStreak != null && maxWinStreak! >= 2)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(14),
+                          border:
+                              Border.all(color: Colors.red.withOpacity(0.18)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.local_fire_department,
+                                color: Colors.red),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '最多連勝記録: $maxWinStreak連勝  (${widget.team['maxWinStreakYear'] ?? '不明'}年)',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
+                  const Divider(height: 28),
+                  sectionTitle('アカウント'),
+                  menuTile(
+                    icon: Icons.swap_horiz,
+                    title: 'チーム切り替え',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamAccountSwitchPage(
+                            userUid: widget.userUid,
+                            accountName: widget.accountName,
+                            userPrefecture: widget.userPrefecture,
+                            userPosition: widget.userPosition,
+                            userTeamId: widget.userTeamId,
+                          ),
+                        ),
+                      );
+                    },
                   ),
-
-                const Divider(height: 28),
-                sectionTitle('アカウント'),
-                menuTile(
-                  icon: Icons.swap_horiz,
-                  title: 'チーム切り替え',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => TeamAccountSwitchPage(
-                          userUid: widget.userUid,
-                          accountName: widget.accountName,
-                          userPrefecture: widget.userPrefecture,
-                          userPosition: widget.userPosition,
-                          userTeamId: widget.userTeamId,
+                  menuTile(
+                    icon: Icons.workspace_premium,
+                    title: 'チームプラン',
+                    iconColor: _hasActiveTeamSubscription ? Colors.amber : null,
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => TeamSubscriptionScreen(
+                              teamId: widget.team['teamId']),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                menuTile(
-                  icon: Icons.workspace_premium,
-                  title: 'チームプラン',
-                  iconColor: _hasActiveTeamSubscription ? Colors.amber : null,
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            TeamSubscriptionScreen(teamId: widget.team['teamId']),
-                      ),
-                    );
-                  },
-                ),
-                menuTile(
-                  icon: Icons.person,
-                  title: '個人ページに戻る',
-                  iconColor: Colors.teal,
-                  onTap: () {
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (context) => HomePage(
-                          userUid: widget.userUid,
-                          isTeamAccount: false,
-                          accountId: widget.userUid,
-                          accountName: widget.accountName,
-                          userPrefecture: widget.userPrefecture,
-                          userPosition: widget.userPosition,
-                          userTeamId: widget.userTeamId,
+                      );
+                      await _refreshTeamSubscriptionAfterReturn();
+                    },
+                  ),
+                  menuTile(
+                    icon: Icons.person,
+                    title: '個人ページに戻る',
+                    iconColor: Colors.teal,
+                    onTap: () {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                          builder: (context) => HomePage(
+                            userUid: widget.userUid,
+                            isTeamAccount: false,
+                            accountId: widget.userUid,
+                            accountName: widget.accountName,
+                            userPrefecture: widget.userPrefecture,
+                            userPosition: widget.userPosition,
+                            userTeamId: widget.userTeamId,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 20),
-              ],
+                        (route) => false,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
@@ -702,59 +939,73 @@ Future<void> _init() async {
 
   @override
   Widget build(BuildContext context) {
-      return WillPopScope(
-    // iOSの横スワイプやAndroidの戻るボタンで前のページに戻れないようにする
-    onWillPop: () async {
-      // false を返すと「戻る」操作をキャンセルする
-      return false;
-    },
-    child: Scaffold(
-      appBar: AppBar(
-        title: Text('${widget.team['teamName']}'),
+    return WillPopScope(
+      // iOSの横スワイプやAndroidの戻るボタンで前のページに戻れないようにする
+      onWillPop: () async {
+        // false を返すと「戻る」操作をキャンセルする
+        return false;
+      },
+      child: Scaffold(
+        extendBody: true,
+        appBar: AppBar(
+          title: Text('${widget.team['teamName']}'),
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        ),
+        drawer: _buildDrawer(context), // ハンバーガーメニューを追加
+        body: isLoading
+            ? const Center(
+                child:
+                    CircularProgressIndicator()) // 🔥 Firestore のデータ取得中はローディング
+            : MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                removeBottom: true,
+                child: _selectedIndex == 0
+                    ? Column(
+                        children: [
+                          _buildNextScheduleCard(),
+                          Expanded(child: _pages[_selectedIndex]),
+                        ],
+                      )
+                    : _pages[_selectedIndex],
+              ),
+        bottomNavigationBar: BNetFloatingTabBar(
+          onSelected: _onItemTapped,
+          selectedIndex: _selectedIndex,
+          items: const [
+            BNetTabItem(
+              icon: Icons.bar_chart_outlined,
+              selectedIcon: Icons.bar_chart_rounded,
+              label: '成績',
+            ),
+            BNetTabItem(
+              icon: Icons.edit_outlined,
+              selectedIcon: Icons.edit_rounded,
+              label: '記録する',
+            ),
+            BNetTabItem(
+              icon: FontAwesomeIcons.rankingStar,
+              label: 'ランキング',
+            ),
+            BNetTabItem(
+              icon: FontAwesomeIcons.baseballBatBall,
+              label: '全国',
+            ),
+            BNetTabItem(
+              icon: Icons.emoji_events_outlined,
+              selectedIcon: Icons.emoji_events_rounded,
+              label: 'MVP',
+            ),
+            BNetTabItem(
+              icon: Icons.event_note_outlined,
+              selectedIcon: Icons.event_note_rounded,
+              label: '予定',
+            ),
+          ],
+        ),
       ),
-      drawer: _buildDrawer(context), // ハンバーガーメニューを追加
-      body: isLoading
-          ? const Center(
-              child: CircularProgressIndicator()) // 🔥 Firestore のデータ取得中はローディング
-          : _pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: Colors.blueGrey, // タブ全体の背景色
-        selectedItemColor: Colors.blue, // 選択されているアイテムの色
-        unselectedItemColor: Colors.black,
-        onTap: _onItemTapped,
-        currentIndex: _selectedIndex,
-        // ラベルの色やスタイルを指定
-        selectedLabelStyle:
-            const TextStyle(color: Colors.red), // 選択されているラベルの色を赤に
-        unselectedLabelStyle: const TextStyle(color: Colors.grey),
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-            icon: Icon(Icons.bar_chart),
-            label: '成績',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.edit),
-            label: '記録する',
-          ),
-          BottomNavigationBarItem(
-            icon: FaIcon(FontAwesomeIcons.rankingStar),
-            label: 'ランキング',
-          ),
-          BottomNavigationBarItem(
-            icon: FaIcon(FontAwesomeIcons.baseballBatBall),
-            label: '全国',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.emoji_events),
-            label: 'MVP',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.event_note),
-            label: '予定',
-          ),
-        ],
-      ),
-    ),
     );
   }
 }

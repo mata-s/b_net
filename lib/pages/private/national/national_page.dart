@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:b_net/pages/private/national/national_batting.dart';
 import 'package:b_net/pages/private/national/national_pitching.dart';
 import 'package:b_net/pages/private/national/national_hit.dart';
+import 'package:b_net/widgets/ranking_next_update_label.dart';
 
 class NationalPage extends StatefulWidget {
   final String uid;
@@ -31,44 +32,6 @@ class _NationalPageState extends State<NationalPage> {
     return Scaffold(
       body: Column(
         children: [
-          GestureDetector(
-            onTap: () {
-              _showCupertinoPicker(context); // ピッカーを表示
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: Colors.grey.shade300,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    selectTypes[_currentIndex],
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(
-                    Icons.arrow_drop_down,
-                    color: Colors.black,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          // IndexedStackでページを切り替え
           Expanded(
             child: IndexedStack(
               index: _currentIndex,
@@ -76,20 +39,59 @@ class _NationalPageState extends State<NationalPage> {
                 NationalHit(
                   uid: widget.uid,
                   prefecture: widget.prefecture,
+                  header: _buildNationalHeader(context),
                 ),
                 NationalBatting(
                   uid: widget.uid,
                   prefecture: widget.prefecture,
+                  header: _buildNationalHeader(context),
                 ),
                 NationalPitching(
                   uid: widget.uid,
                   prefecture: widget.prefecture,
+                  header: _buildNationalHeader(context),
                 ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildNationalHeader(BuildContext context) {
+    return Column(
+      children: [
+        const SizedBox(height: 8),
+        const RankingNextUpdateLabel(isSeasonMode: true),
+        const SizedBox(height: 10),
+        GestureDetector(
+          onTap: () => _showCupertinoPicker(context),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  selectTypes[_currentIndex],
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
     );
   }
 

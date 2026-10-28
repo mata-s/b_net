@@ -1,5 +1,6 @@
 import 'package:b_net/common/profile_dialog.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,9 +8,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 class NationalBatting extends StatefulWidget {
   final String uid;
   final String prefecture;
+  final Widget header;
 
-  const NationalBatting({Key? key, required this.uid, required this.prefecture})
-      : super(key: key);
+  const NationalBatting({
+    Key? key,
+    required this.uid,
+    required this.prefecture,
+    required this.header,
+  }) : super(key: key);
 
   @override
   _NationalBattingState createState() => _NationalBattingState();
@@ -150,9 +156,12 @@ class _NationalBattingState extends State<NationalBatting> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
         child: Column(
           children: [
-            const SizedBox(height: 8),
+            widget.header,
             const Text(
               '全国トップ打者',
               style: TextStyle(
@@ -498,6 +507,7 @@ class _NationalBattingState extends State<NationalBatting> {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -611,6 +621,7 @@ class _NationalBattingState extends State<NationalBatting> {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -714,6 +725,7 @@ class _NationalBattingState extends State<NationalBatting> {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },
@@ -852,6 +864,7 @@ class _NationalBattingState extends State<NationalBatting> {
                   false,
                   currentUserUid: user?.uid,
                   currentUserName: user?.displayName,
+                  applyRankingTeamPrivacy: true,
                 );
               }
             },

@@ -7,6 +7,7 @@ class TeamInviteIdentifyMemberPage extends StatefulWidget {
   final String teamId;
   final String inviteDocId;
   final String teamName;
+  final String inviteSource;
 
   const TeamInviteIdentifyMemberPage({
     super.key,
@@ -14,6 +15,7 @@ class TeamInviteIdentifyMemberPage extends StatefulWidget {
     required this.teamId,
     required this.inviteDocId,
     required this.teamName,
+    this.inviteSource = '',
   });
 
   @override
@@ -45,7 +47,11 @@ class _TeamInviteIdentifyMemberPageState
       final teamData = teamSnap.data() ?? {};
       final rawMembers = teamData['members'];
       final List<String> memberUids = (rawMembers is List)
-          ? rawMembers.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
+          ? rawMembers
+              .whereType<String>()
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toList()
           : <String>[];
 
       // 自分自身は候補から外す（既に自分のUIDでデータを持っているため）
@@ -57,7 +63,8 @@ class _TeamInviteIdentifyMemberPageState
       final Map<String, Map<String, dynamic>> userDataMap = {};
 
       for (final uid in memberUids) {
-        final u = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        final u =
+            await FirebaseFirestore.instance.collection('users').doc(uid).get();
         if (!u.exists) {
           // users が無い（削除ユーザー等）は候補に出さない
           continue;
@@ -100,7 +107,8 @@ class _TeamInviteIdentifyMemberPageState
   }
 
   Future<String?> _showConfirmDialog({required String? selectedUid}) async {
-    final titleTeamName = widget.teamName.trim().isNotEmpty ? widget.teamName.trim() : 'チーム';
+    final titleTeamName =
+        widget.teamName.trim().isNotEmpty ? widget.teamName.trim() : 'チーム';
 
     // 選択が null の場合は「自分はいない」で新規参加
     if (selectedUid == null) {
@@ -144,7 +152,7 @@ class _TeamInviteIdentifyMemberPageState
               const SizedBox(height: 10),
               const Text(
                 'この選手があなた本人なら、これまでこの選手に記録されている成績をあなたのアカウントにまとめます。\n'
-                '今の記録をそのまま残したい場合は、そのまま参加してください。',
+                '別の選手なら、その選手の記録は残して新規メンバーとして参加します。',
               ),
               const SizedBox(height: 18),
               SizedBox(
@@ -158,8 +166,9 @@ class _TeamInviteIdentifyMemberPageState
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop('skip_delete'),
-                  child: const Text('記録はそのままで参加する'),
+                  onPressed: () =>
+                      Navigator.of(context).pop('join_without_merge'),
+                  child: const Text('この選手は自分ではない'),
                 ),
               ),
               const SizedBox(height: 8),
@@ -199,143 +208,15 @@ class _TeamInviteIdentifyMemberPageState
         return;
       }
 
-      // ⑤ 統合（または新規参加）
-      // 方針：
-      // - selectedUid == null → そのまま currentUserUid を members に追加
-      // - selectedUid != null → teams.members の selectedUid を currentUserUid に置換
-      //   さらに selectedUid 側の users ドキュメントに "mergedToUid" 等のフラグを残して追跡できるようにする
-      //
-      // ⚠️ 成績のサブコレクション移行など、より深い統合が必要な場合はここに追加してください。
-
-      final firestore = FirebaseFirestore.instance;
-      final teamRef = firestore.collection('teams').doc(widget.teamId);
-
-      // ✅ チーム側にも invites がある場合はここも更新（teams/{teamId}/invites/{inviteeUid}）
-      final teamInviteRef = teamRef.collection('invites').doc(widget.currentUserUid);
-
-      // ✅ 招待は users/{inviteeUid}/teamInvites/{inviteDocId} に保存されている（コンソール確認）
-      final inviteRef = firestore
-          .collection('users')
-          .doc(widget.currentUserUid)
-          .collection('teamInvites')
-          .doc(widget.inviteDocId);
-
-      final currentUserRef = firestore.collection('users').doc(widget.currentUserUid);
-
       final bool shouldMerge = action == 'merge';
-final bool shouldDeleteTentativeAndJoin = action == 'skip_delete';
-
-if (selectedUid != null && shouldMerge) {
-  final callable = FirebaseFunctions.instance.httpsCallable(
-    'mergeTentativeUserDataToRealUser',
-  );
-  await callable.call({
-    'tentativeUid': selectedUid,
-    'realUid': widget.currentUserUid,
-  });
-}
-
-if (selectedUid != null && shouldDeleteTentativeAndJoin) {
-  final callable = FirebaseFunctions.instance.httpsCallable(
-    'removeTentativeUserFromTeam',
-  );
-  await callable.call({
-    'tentativeUid': selectedUid,
-    'teamId': widget.teamId,
-  });
-}
-
-      await firestore.runTransaction((tx) async {
-        final teamSnap = await tx.get(teamRef);
-        final teamData = teamSnap.data() ?? {};
-        final rawMembers = teamData['members'];
-        final List<String> members = (rawMembers is List)
-            ? rawMembers.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
-            : <String>[];
-
-        if (selectedUid == null) {
-          // 新規参加
-          if (!members.contains(widget.currentUserUid)) {
-            members.add(widget.currentUserUid);
-          }
-          tx.update(teamRef, {
-            'members': members,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-        } else {
-          if (shouldMerge) {
-            // 統合：ダミーUIDを自分のUIDに置換
-            final idx = members.indexOf(selectedUid);
-            if (idx >= 0) {
-              members[idx] = widget.currentUserUid;
-            } else {
-              if (!members.contains(widget.currentUserUid)) {
-                members.add(widget.currentUserUid);
-              }
-            }
-
-            // 重複除去
-            final uniq = <String>{};
-            final mergedMembers = <String>[];
-            for (final m in members) {
-              if (uniq.add(m)) mergedMembers.add(m);
-            }
-
-            tx.update(teamRef, {
-              'members': mergedMembers,
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-          } else {
-            // 引き継がず参加：仮ユーザーは Functions 側で削除済みなので、自分を追加するだけ
-            if (!members.contains(widget.currentUserUid)) {
-              members.add(widget.currentUserUid);
-            }
-            tx.update(teamRef, {
-              'members': members,
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-          }
-        }
-
-        // currentUser に teamId を紐づける（teams 配列がある前提。無くても merge で追加するだけ）
-        tx.set(
-          currentUserRef,
-          {
-            'teams': FieldValue.arrayUnion([widget.teamId]),
-            'updatedAt': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
-
-        // 招待ドキュメントの更新（存在しなくても set(merge) で安全）
-        tx.set(
-          inviteRef,
-          {
-            'status': 'accepted',
-            'respondedAt': FieldValue.serverTimestamp(),
-            'acceptedByUid': widget.currentUserUid,
-            'acceptedAt': FieldValue.serverTimestamp(),
-            'identifiedMemberUid': selectedUid,
-            // 念のため teamId も保持（既に入っていても merge なので安全）
-            'teamId': widget.teamId,
-          },
-          SetOptions(merge: true),
-        );
-
-        // チーム側 invites も accepted に更新（UI/管理画面が参照している可能性があるため）
-        tx.set(
-          teamInviteRef,
-          {
-            'status': 'accepted',
-            'respondedAt': FieldValue.serverTimestamp(),
-            'acceptedByUid': widget.currentUserUid,
-            'acceptedAt': FieldValue.serverTimestamp(),
-            'identifiedMemberUid': selectedUid,
-            'inviteeUid': widget.currentUserUid,
-            'teamId': widget.teamId,
-          },
-          SetOptions(merge: true),
-        );
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'completeTeamJoin',
+      );
+      await callable.call<void>({
+        'teamId': widget.teamId,
+        'inviteId': widget.inviteDocId,
+        'tentativeUid': selectedUid,
+        'mergeTentative': shouldMerge,
       });
 
       if (!mounted) return;
@@ -344,7 +225,7 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
           ? 'チームに参加しました'
           : shouldMerge
               ? '成績を統合してチームに参加しました'
-              : '仮ユーザーを削除してチームに参加しました';
+              : '新規メンバーとしてチームに参加しました';
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -366,7 +247,11 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
         final teamData = teamSnap.data() ?? {};
         final rawMembers = teamData['members'];
         final List<String> members = (rawMembers is List)
-            ? rawMembers.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
+            ? rawMembers
+                .whereType<String>()
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList()
             : <String>[];
 
         final alreadyJoined = members.contains(widget.currentUserUid);
@@ -398,11 +283,21 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
 
   @override
   Widget build(BuildContext context) {
-    final titleTeamName = widget.teamName.trim().isNotEmpty ? widget.teamName.trim() : 'チーム';
+    final titleTeamName =
+        widget.teamName.trim().isNotEmpty ? widget.teamName.trim() : 'チーム';
+    final isApprovedRequest = widget.inviteSource == 'join_request';
+    final isInviteLink = widget.inviteSource == 'invite_link';
+    final pageTitle =
+        isApprovedRequest || isInviteLink ? '選手情報を確認' : 'あなたはいますか？';
+    final guidance = isApprovedRequest
+        ? '$titleTeamName への参加を完了する前に、登録済みの選手情報を確認してください。\nあなた本人の選手がいれば選択してください。'
+        : isInviteLink
+            ? '$titleTeamName への参加前に、登録済みの選手情報を確認してください。\nあなた本人の選手がいれば選択してください。'
+            : '$titleTeamName のメンバーの中に、あなたの名前はありますか？\n一致する選手を選択してください。';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('あなたはいますか？'),
+        title: Text(pageTitle),
         actions: [
           IconButton(
             tooltip: '閉じる',
@@ -419,11 +314,11 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '$titleTeamName のメンバーの中に、あなたの名前はありますか？\n一致する選手を選択してください。',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                    guidance,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 12),
-
                   Expanded(
                     child: _memberUids.isEmpty
                         ? const Center(
@@ -431,19 +326,25 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
                           )
                         : ListView.separated(
                             itemCount: _memberUids.length + 1,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, index) {
                               // 最後に「自分はいない」オプション
                               if (index == _memberUids.length) {
                                 final selected = _selectedUid == null;
                                 return ListTile(
                                   leading: Icon(
-                                    selected ? Icons.radio_button_checked : Icons.radio_button_off,
-                                    color: selected ? const Color(0xFF1565C0) : Colors.grey,
+                                    selected
+                                        ? Icons.radio_button_checked
+                                        : Icons.radio_button_off,
+                                    color: selected
+                                        ? const Color(0xFF1565C0)
+                                        : Colors.grey,
                                   ),
                                   title: const Text(
                                     '見つからない / 自分はいない',
-                                    style: TextStyle(fontWeight: FontWeight.w700),
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.w700),
                                   ),
                                   subtitle: const Text('新規メンバーとして登録する場合はこちら'),
                                   onTap: _submitting
@@ -461,12 +362,17 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
                               final selected = _selectedUid == uid;
                               return ListTile(
                                 leading: Icon(
-                                  selected ? Icons.radio_button_checked : Icons.radio_button_off,
-                                  color: selected ? const Color(0xFF1565C0) : Colors.grey,
+                                  selected
+                                      ? Icons.radio_button_checked
+                                      : Icons.radio_button_off,
+                                  color: selected
+                                      ? const Color(0xFF1565C0)
+                                      : Colors.grey,
                                 ),
                                 title: Text(
                                   name,
-                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700),
                                 ),
                                 onTap: _submitting
                                     ? null
@@ -479,7 +385,6 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
                             },
                           ),
                   ),
-
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
@@ -491,7 +396,9 @@ if (selectedUid != null && shouldDeleteTentativeAndJoin) {
                               width: 18,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('確定'),
+                          : Text(isApprovedRequest || isInviteLink
+                              ? '確認して参加を完了'
+                              : '確定'),
                     ),
                   ),
                 ],

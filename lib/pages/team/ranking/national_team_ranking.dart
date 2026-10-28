@@ -2,6 +2,8 @@ import 'package:b_net/pages/team/team_home.dart';
 import 'package:b_net/common/profile_dialog.dart';
 import 'package:b_net/pages/team/team_subscription_guard.dart';
 import 'package:flutter/material.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
+import 'package:b_net/widgets/ranking_next_update_label.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 
@@ -148,6 +150,9 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
     }
     return Scaffold(
       body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          bottom: BNetFloatingTabBar.bodyClearance(context),
+        ),
         child: Column(
           children: [
             Container(
@@ -163,7 +168,12 @@ class _NationalTeamRankingState extends State<NationalTeamRanking> {
               '$_year年',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: 4),
+            const RankingNextUpdateLabel(
+              isSeasonMode: true,
+              cycle: RankingUpdateCycle.monthlyFirstDay,
+            ),
+            const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.center,

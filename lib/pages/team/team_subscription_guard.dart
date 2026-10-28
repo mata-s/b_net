@@ -1,4 +1,5 @@
 import 'package:b_net/services/team_subscription_screen.dart';
+import 'package:b_net/widgets/b_net_floating_tab_bar.dart';
 import 'package:flutter/material.dart';
 
 class TeamSubscriptionGuard extends StatefulWidget {
@@ -34,8 +35,8 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
     _FeaturePage(
       title: 'チーム全員でランキングに参加できる',
       description: 'チームの成績がランキングに反映され、\n'
-        '全員の活躍が数字で見えるようになります。\n'
-        'みんなで上位を目指そう！',
+          '全員の活躍が数字で見えるようになります。\n'
+          'みんなで上位を目指そう！',
       icon: Icons.leaderboard,
     ),
     _FeaturePage(
@@ -64,7 +65,7 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
     ),
     _FeaturePage(
       title: 'チーム内ランキングで盛り上がれる',
-      description:'楽しみながら競い合うことで、自然とモチベーションが高まります。',
+      description: '楽しみながら競い合うことで、自然とモチベーションが高まります。',
       icon: Icons.emoji_events,
     ),
     _FeaturePage(
@@ -132,7 +133,7 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
           end: Alignment.bottomCenter,
           colors: [
             Color(0xFFE3F2FD), // 薄い青
-            Colors.white,      // 下は白
+            Colors.white, // 下は白
           ],
         ),
       ),
@@ -140,6 +141,9 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              bottom: BNetFloatingTabBar.bodyClearance(context),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -158,17 +162,17 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
 
                 FittedBox(
                   fit: BoxFit.scaleDown,
-                child: Text(
-                  'チーム全員で、強くなる楽しさを。',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
+                  child: Text(
+                    'チーム全員で、強くなる楽しさを。',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.clip,
                   ),
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.clip,
-                ),
                 ),
                 const SizedBox(height: 8),
 
@@ -186,8 +190,9 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
                         children: [
                           Text(
                             '有料プランでできること',
-                             style: TextStyle(fontSize: 14, color: Colors.black54),
-                             textAlign: TextAlign.center,
+                            style:
+                                TextStyle(fontSize: 14, color: Colors.black54),
+                            textAlign: TextAlign.center,
                           ),
                           // カード
                           SizedBox(
@@ -216,7 +221,8 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
                                   final isActive = index == _currentPage;
                                   return AnimatedContainer(
                                     duration: const Duration(milliseconds: 200),
-                                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                                    margin: const EdgeInsets.symmetric(
+                                        horizontal: 4),
                                     width: isActive ? 10 : 6,
                                     height: isActive ? 10 : 6,
                                     decoration: BoxDecoration(
@@ -286,7 +292,10 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
                     onPressed: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => TeamSubscriptionScreen(teamId: widget.teamId),),
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              TeamSubscriptionScreen(teamId: widget.teamId),
+                        ),
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -298,7 +307,8 @@ class _TeamSubscriptionGuardState extends State<TeamSubscriptionGuard>
                     ),
                     child: const Text(
                       '有料プランをチェックする',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -404,8 +414,7 @@ class _TeamPricingSection extends StatelessWidget {
                 title: 'ゴールド',
                 price: '¥1,000 / 月',
                 badgeText: 'スタンダード',
-                description:
-                    'チーム内ランキング・目標設定・\nチーム全体の詳細・チーム別/球場別成績が使えます。',
+                description: 'チーム内ランキング・目標設定・\nチーム全体の詳細・チーム別/球場別成績が使えます。',
               ),
             ),
             SizedBox(width: 12),
@@ -446,9 +455,7 @@ class _PlanCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: title == 'プラチナ'
-              ? Colors.amber.shade400
-              : Colors.grey.shade300,
+          color: title == 'プラチナ' ? Colors.amber.shade400 : Colors.grey.shade300,
           width: title == 'プラチナ' ? 1.6 : 1.0,
         ),
         boxShadow: [

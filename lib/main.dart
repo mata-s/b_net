@@ -1,10 +1,11 @@
 import 'package:b_net/common/chat_screen.dart';
 import 'package:b_net/home_page.dart';
-import 'package:b_net/login/registration_page.dart';
 import 'package:b_net/pages/splash_page.dart';
 import 'package:b_net/pages/team/event_detail_page.dart';
+import 'package:b_net/pages/team/member_parts/team_invite_link_landing_page.dart';
+import 'package:app_links/app_links.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'pages/team/team_schedule_calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -12,19 +13,42 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'dart:io' show Platform;
 import 'package:purchases_flutter/purchases_flutter.dart'; // ← RevenueCat をインポート！
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login/login_page.dart';
+import 'login/welcome_page.dart';
 import 'common/chat_room_list_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 RemoteMessage? initialPushMessage;
+String? initialTeamInviteToken;
+
+String? _teamInviteTokenFromUri(Uri? uri) {
+  if (uri == null) {
+    return null;
+  }
+  final isAppLink = uri.scheme == 'bnet' && uri.host == 'team-invite';
+  final isHttpsLink = uri.scheme == 'https' &&
+      uri.host == 'b-net-9bdc2.web.app' &&
+      uri.path == '/team-invite';
+  if (!isAppLink && !isHttpsLink) {
+    return null;
+  }
+  final token = uri.queryParameters['token']?.trim();
+  return token == null || token.isEmpty ? null : token;
+}
 
 /// FCMのバックグラウンドメッセージを受け取るハンドラー（トップレベル関数必須）
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // バックグラウンド用に Firebase 初期化
   await Firebase.initializeApp();
+
+  final appLinks = AppLinks();
+  initialTeamInviteToken = _teamInviteTokenFromUri(
+    await appLinks.getInitialLink(),
+  );
   print('🔔 [BG] 背景でメッセージ受信: ${message.messageId}');
 }
 
@@ -48,7 +72,8 @@ void main() async {
     print('🔔 [FG] フォアグラウンドでメッセージ受信: ${message.messageId}');
     print('🔔 [FG] data: ${message.data}');
     if (message.notification != null) {
-      print('🔔 [FG] notification: ${message.notification!.title} - ${message.notification!.body}');
+      print(
+          '🔔 [FG] notification: ${message.notification!.title} - ${message.notification!.body}');
     }
   });
 
@@ -60,18 +85,19 @@ void main() async {
   });
 
   final currentUser = FirebaseAuth.instance.currentUser;
-  final initialRcAppUserId = currentUser != null ? 'user:${currentUser.uid}' : null;
+  final initialRcAppUserId =
+      currentUser != null ? 'user:${currentUser.uid}' : null;
 
   const rcIosApiKey = 'appl_fbWgJWNLbAYxpijcSkSdVjVGHtT';
   const rcAndroidApiKey = 'goog_blusfYbDUamqpKTBHVkzbKCfcNH';
-  
+
   PurchasesConfiguration? configuration;
 
   if (Platform.isIOS) {
-  configuration = PurchasesConfiguration(rcIosApiKey);
-} else if (Platform.isAndroid) {
-  configuration = PurchasesConfiguration(rcAndroidApiKey);
-}
+    configuration = PurchasesConfiguration(rcIosApiKey);
+  } else if (Platform.isAndroid) {
+    configuration = PurchasesConfiguration(rcAndroidApiKey);
+  }
 
   if (configuration != null) {
     if (initialRcAppUserId != null) {
@@ -82,7 +108,8 @@ void main() async {
     // await Purchases.setLogLevel(LogLevel.debug);
 
     await Purchases.configure(configuration);
-    print('✅ RevenueCat configured. initial appUserID=${initialRcAppUserId ?? "(anonymous)"}');
+    print(
+        '✅ RevenueCat configured. initial appUserID=${initialRcAppUserId ?? "(anonymous)"}');
   } else {
     print('⚠️ RevenueCat SDKキーが未設定です（Android など）。後で設定してください。');
   }
@@ -92,7 +119,6 @@ void main() async {
 
   runApp(const MyApp());
 }
-
 
 void enableFirestoreCache() {
   FirebaseFirestore.instance.settings = const Settings(
@@ -108,9 +134,22 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  StreamSubscription<Uri>? _linkSubscription;
+
   @override
   void initState() {
     super.initState();
+
+    _linkSubscription = AppLinks().uriLinkStream.listen((uri) {
+      final token = _teamInviteTokenFromUri(uri);
+      final navigator = navigatorKey.currentState;
+      if (token == null || navigator == null) return;
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => TeamInviteLinkLandingPage(token: token),
+        ),
+      );
+    });
 
     // アプリ起動直後（getInitialMessage で取得した通知）があれば、最初のフレーム描画後に遷移
     if (initialPushMessage != null) {
@@ -122,6 +161,12 @@ class _MyAppState extends State<MyApp> {
   }
 
   @override
+  void dispose() {
+    _linkSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
@@ -129,7 +174,7 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: SplashPage (
+      home: SplashPage(
         resolveNextPage: () async => const _InitialPageGate(),
         duration: const Duration(milliseconds: 3000),
       ),
@@ -221,8 +266,9 @@ Future<void> _handleMessageNavigation(RemoteMessage message) async {
 
       // 通知に含まれる teamId を優先して userTeamId にセット
       final pushedTeamId = data['teamId']?.toString();
-      final userTeamId =
-          pushedTeamId?.isNotEmpty == true ? pushedTeamId : (teams.isNotEmpty ? teams.first : null);
+      final userTeamId = pushedTeamId?.isNotEmpty == true
+          ? pushedTeamId
+          : (teams.isNotEmpty ? teams.first : null);
 
       nav.pushAndRemoveUntil(
         MaterialPageRoute(
@@ -334,7 +380,9 @@ Future<void> _handleMessageNavigation(RemoteMessage message) async {
   }
 
   // 🔔 チーム招待通知・重要なお知らせの通知は HomePage へ遷移
-  if (type == 'team_invite' || type == 'announcement') {
+  if (type == 'team_invite' ||
+      type == 'team_join_request' ||
+      type == 'announcement') {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       nav.pushAndRemoveUntil(
@@ -495,6 +543,10 @@ class _ScheduleNotificationPageState extends State<ScheduleNotificationPage> {
         createdName,
         stamps,
         comments,
+        date: (data['game_date'] as Timestamp?)?.toDate(),
+        eventType: (data['eventType'] ?? '').toString().trim().isNotEmpty
+            ? data['eventType'].toString()
+            : (opponent.trim().isNotEmpty && opponent != '不明' ? '試合' : 'その他'),
       );
 
       if (!mounted) return;
@@ -553,7 +605,8 @@ Future<void> _setupMessagingForUser(String uid) async {
 
     if (apnsToken == null) {
       // iOSシミュレーター等ではAPNSが取れず getToken() が例外になることがある
-      print('⚠️ APNS token not available yet. Skip FCM token setup on this device.');
+      print(
+          '⚠️ APNS token not available yet. Skip FCM token setup on this device.');
       return;
     }
   }
@@ -569,11 +622,10 @@ Future<void> _setupMessagingForUser(String uid) async {
   print('🔑 FCM token for $uid: $token');
 
   if (token != null) {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .set(
-      {'fcmTokens': FieldValue.arrayUnion([token])},
+    await FirebaseFirestore.instance.collection('users').doc(uid).set(
+      {
+        'fcmTokens': FieldValue.arrayUnion([token])
+      },
       SetOptions(merge: true),
     );
   }
@@ -581,36 +633,37 @@ Future<void> _setupMessagingForUser(String uid) async {
   // トークン更新
   messaging.onTokenRefresh.listen((newToken) {
     FirebaseFirestore.instance.collection('users').doc(uid).set(
-      {'fcmTokens': FieldValue.arrayUnion([newToken])},
+      {
+        'fcmTokens': FieldValue.arrayUnion([newToken])
+      },
       SetOptions(merge: true),
     );
   });
 }
 
 Future<Widget> _getInitialPage() async {
-  final prefs = await SharedPreferences.getInstance();
-  final isFirstLaunch = prefs.getBool('isFirstLaunch') ?? true;
-
-  if (isFirstLaunch) {
-    await prefs.setBool('isFirstLaunch', false);
-    return const SignUpPage();
+  final inviteToken = initialTeamInviteToken;
+  if (inviteToken != null) {
+    initialTeamInviteToken = null;
+    return TeamInviteLinkLandingPage(token: inviteToken);
   }
-
   final user = FirebaseAuth.instance.currentUser;
   if (user != null) {
+    final preferences = await SharedPreferences.getInstance();
+    final pendingInviteToken = preferences.getString(pendingTeamInviteTokenKey);
+    if (pendingInviteToken != null && pendingInviteToken.isNotEmpty) {
+      return TeamInviteLinkLandingPage(token: pendingInviteToken);
+    }
+
     await _setupMessagingForUser(user.uid);
 
-  // Update only the user's lastLoginAt field in Firestore
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set(
+    // Update only the user's lastLoginAt field in Firestore
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
       {
         'lastLoginAt': FieldValue.serverTimestamp(),
       },
       SetOptions(merge: true),
     );
-
 
     try {
       final userDoc = await FirebaseFirestore.instance
@@ -647,6 +700,6 @@ Future<Widget> _getInitialPage() async {
       userTeamId: null,
     );
   } else {
-    return const LoginPage();
+    return const WelcomePage();
   }
 }
